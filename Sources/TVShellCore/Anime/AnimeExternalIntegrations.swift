@@ -87,6 +87,37 @@ public enum DandanplaySignature {
 public enum DandanplayAPI {
     public static let baseURL = URL(string: "https://api.dandanplay.net")!
 
+    public static func searchEpisodesRequest(
+        anime: String,
+        episode: Int,
+        appID: String,
+        appSecret: String,
+        timestamp: Int
+    ) -> AnimeHTTPRequest {
+        let path = "/api/v2/search/episodes"
+        let signature = DandanplaySignature.signature(
+            appID: appID,
+            timestamp: timestamp,
+            path: path,
+            appSecret: appSecret
+        )
+        var components = URLComponents(url: baseURL.appending(path: path), resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "anime", value: anime),
+            URLQueryItem(name: "episode", value: "\(episode)")
+        ]
+        return AnimeHTTPRequest(
+            method: "GET",
+            url: components.url!,
+            headers: [
+                "Accept": "application/json",
+                "X-AppId": appID,
+                "X-Timestamp": "\(timestamp)",
+                "X-Signature": signature
+            ]
+        )
+    }
+
     public static func commentRequest(
         episodeID: String,
         appID: String,
@@ -119,6 +150,71 @@ public enum DandanplayAPI {
             .comments
             .compactMap(\.danmakuComment)
             .sorted { $0.time < $1.time }
+    }
+
+    public static func decodeEpisodeSearch(_ data: Data, preferredEpisode: Int) throws -> String? {
+        let response = try JSONDecoder().decode(DandanplayEpisodeSearchResponse.self, from: data)
+        let candidates = response.allEpisodes
+        if let exact = candidates.first(where: { $0.matches(episode: preferredEpisode) }) {
+            return exact.episodeIDString
+        }
+        return candidates.first?.episodeIDString
+    }
+}
+
+private struct DandanplayEpisodeSearchResponse: Decodable {
+    var animes: [DandanplaySearchAnime]?
+    var episodes: [DandanplaySearchEpisode]?
+
+    var allEpisodes: [DandanplaySearchEpisode] {
+        if let episodes, episodes.isEmpty == false {
+            return episodes
+        }
+        return animes?.flatMap(\.episodes) ?? []
+    }
+}
+
+private struct DandanplaySearchAnime: Decodable {
+    var episodes: [DandanplaySearchEpisode]
+}
+
+private struct DandanplaySearchEpisode: Decodable {
+    var episodeID: Int?
+    var episodeIDStringValue: String?
+    var episodeTitle: String?
+    var episodeNumber: String?
+
+    enum CodingKeys: String, CodingKey {
+        case episodeID = "episodeId"
+        case episodeTitle
+        case episodeNumber
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        episodeID = try? container.decode(Int.self, forKey: .episodeID)
+        episodeIDStringValue = try? container.decode(String.self, forKey: .episodeID)
+        episodeTitle = try? container.decode(String.self, forKey: .episodeTitle)
+        episodeNumber = try? container.decode(String.self, forKey: .episodeNumber)
+    }
+
+    var episodeIDString: String? {
+        if let episodeID {
+            return "\(episodeID)"
+        }
+        return episodeIDStringValue
+    }
+
+    func matches(episode: Int) -> Bool {
+        if let episodeNumber,
+           Int(episodeNumber.filter(\.isNumber)) == episode {
+            return true
+        }
+        if let episodeTitle,
+           Int(episodeTitle.filter(\.isNumber)) == episode {
+            return true
+        }
+        return false
     }
 }
 

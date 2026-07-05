@@ -24,6 +24,7 @@ struct TVShellChecks {
         try checkAnimeRuntimeStateNavigation()
         try checkExternalAnimeIntegrations()
         try await checkDandanplayConfiguredProvider()
+        try await checkDandanplaySearchEpisodesFallback()
         try checkYouTubeNativeRuntimeAndAPI()
         try await checkBangumiYouTubeAnimeSourceFindsPlayableCandidates()
         try checkAnimekoStyleSourceCatalog()
@@ -401,6 +402,66 @@ struct TVShellChecks {
 
         try expect(comments.first?.text == "遠端彈幕", "configured provider fetches dandanplay comments")
         try expect(transport.requests.first?.headers["X-AppId"] == "app123", "configured provider sends dandanplay app id")
+    }
+
+    static func checkDandanplaySearchEpisodesFallback() async throws {
+        let credentials = DandanplayCredentials(appID: "app123", appSecret: "secret456")
+        let searchRequest = DandanplayAPI.searchEpisodesRequest(
+            anime: "葬送的芙莉蓮",
+            episode: 1,
+            appID: credentials.appID,
+            appSecret: credentials.appSecret,
+            timestamp: 1_735_660_800
+        )
+        try expect(searchRequest.url.absoluteString.contains("https://api.dandanplay.net/api/v2/search/episodes"), "dandanplay searches episode ids")
+        try expect(searchRequest.url.absoluteString.contains("anime="), "dandanplay search includes anime query")
+        try expect(searchRequest.url.absoluteString.contains("episode=1"), "dandanplay search includes episode number")
+        try expect(searchRequest.headers["X-AppId"] == "app123", "dandanplay search sends app id")
+
+        let searchJSON = """
+        {
+          "animes": [
+            {
+              "animeId": 12345,
+              "animeTitle": "葬送的芙莉蓮",
+              "episodes": [
+                { "episodeId": 123450001, "episodeTitle": "第 1 話", "episodeNumber": "1" }
+              ]
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let matchedID = try DandanplayAPI.decodeEpisodeSearch(searchJSON, preferredEpisode: 1)
+        try expect(matchedID == "123450001", "dandanplay search decoder extracts episode id")
+
+        let commentsJSON = """
+        {
+          "comments": [
+            { "p": "2.000,1,25,16777215,0", "m": "Dandanplay 彈幕" }
+          ]
+        }
+        """.data(using: .utf8)!
+        let commentRequest = DandanplayAPI.commentRequest(
+            episodeID: "123450001",
+            appID: credentials.appID,
+            appSecret: credentials.appSecret,
+            timestamp: 1_735_660_800
+        )
+        let transport = StaticAnimeHTTPTransport(routes: [
+            searchRequest.url.absoluteString: searchJSON,
+            commentRequest.url.absoluteString: commentsJSON
+        ])
+        let provider = DandanplayDanmakuProvider(
+            credentials: credentials,
+            timestamp: 1_735_660_800,
+            transport: transport
+        )
+        let comments = try await provider.comments(for: AnimeEpisodeIdentity(
+            providerID: "bangumi-youtube",
+            subjectID: "葬送的芙莉蓮",
+            episodeID: "1"
+        ))
+        try expect(comments.first?.text == "Dandanplay 彈幕", "dandanplay provider searches episode id before loading comments")
     }
 
     @MainActor

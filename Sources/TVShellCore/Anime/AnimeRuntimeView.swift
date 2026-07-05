@@ -44,7 +44,8 @@ public struct AnimeRuntimeView: View {
                 sourceProvider: AnimeSourceProviderFactory.provider(
                     catalog: appState.animeSourceCatalog,
                     youtubeCredentials: appState.youtubeCredentials
-                )
+                ),
+                danmakuProvider: DandanplayDanmakuProvider(credentials: appState.dandanplayCredentials)
             )
         }
         .onDisappear {
@@ -158,7 +159,7 @@ final class AnimeRuntimeController: ObservableObject {
     @Published private(set) var searchKeywordIndex = 0
 
     private var sourceProvider: (any AnimeSourceProvider)?
-    private let danmakuProvider: any DanmakuProvider
+    private var danmakuProvider: any DanmakuProvider
     let searchKeywords = AnimeSearchKeywordCatalog.defaultKeywords
     private var comments: [DanmakuComment] = []
     private nonisolated(unsafe) var observer: NSObjectProtocol?
@@ -203,9 +204,15 @@ final class AnimeRuntimeController: ObservableObject {
         return "\(currentTitle?.title ?? "動畫") · \(episodes[state.focusedEpisodeIndex].title)"
     }
 
-    func load(sourceProvider provider: (any AnimeSourceProvider)? = nil) async {
+    func load(
+        sourceProvider provider: (any AnimeSourceProvider)? = nil,
+        danmakuProvider: (any DanmakuProvider)? = nil
+    ) async {
         if let provider {
             sourceProvider = provider
+        }
+        if let danmakuProvider {
+            self.danmakuProvider = danmakuProvider
         }
 
         guard let sourceProvider else {
@@ -303,9 +310,8 @@ final class AnimeRuntimeController: ObservableObject {
                 return
             }
 
-            comments = DanmakuAggregator.merge([try await danmakuProvider.comments(for: episode.identity)])
             loadPlayer(stream)
-            statusText = "播放源：\(stream.quality) · 彈幕 \(comments.count) 條"
+            await loadDanmaku(for: episode, stream: stream)
         } catch {
             if error as? YouTubeAPIError == .missingAPIKey {
                 statusText = "需要設定 TVSHELL_YOUTUBE_API_KEY 才能搜尋並播放 YouTube 動漫來源。"
@@ -318,6 +324,19 @@ final class AnimeRuntimeController: ObservableObject {
                 phase: .browsing,
                 isDanmakuVisible: state.isDanmakuVisible
             )
+        }
+    }
+
+    private func loadDanmaku(for episode: AnimeEpisode, stream: AnimeStreamCandidate) async {
+        do {
+            comments = DanmakuAggregator.merge([try await danmakuProvider.comments(for: episode.identity)])
+            statusText = "播放源：\(stream.quality) · Dandanplay 彈幕 \(comments.count) 條"
+        } catch AnimeHTTPError.missingCredentials {
+            comments = []
+            statusText = "播放源：\(stream.quality) · 尚未配置 Dandanplay AppID/AppSecret"
+        } catch {
+            comments = []
+            statusText = "播放源：\(stream.quality) · 彈幕載入失敗：\(error.localizedDescription)"
         }
     }
 

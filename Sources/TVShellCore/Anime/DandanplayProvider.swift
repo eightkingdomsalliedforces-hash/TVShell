@@ -89,13 +89,35 @@ public struct DandanplayDanmakuProvider: DanmakuProvider {
             throw AnimeHTTPError.missingCredentials
         }
 
+        let episodeID = try await resolvedEpisodeID(for: episode)
         let request = DandanplayAPI.commentRequest(
-            episodeID: episode.episodeID,
+            episodeID: episodeID,
             appID: credentials.appID,
             appSecret: credentials.appSecret,
             timestamp: timestamp
         )
         let data = try await transport.data(for: request)
         return try DandanplayAPI.decodeComments(data)
+    }
+
+    private func resolvedEpisodeID(for episode: AnimeEpisodeIdentity) async throws -> String {
+        if episode.episodeID.count >= 6,
+           episode.episodeID.allSatisfy(\.isNumber) {
+            return episode.episodeID
+        }
+
+        let preferredEpisode = Int(episode.episodeID.filter(\.isNumber)) ?? 1
+        let request = DandanplayAPI.searchEpisodesRequest(
+            anime: episode.subjectID,
+            episode: preferredEpisode,
+            appID: credentials.appID,
+            appSecret: credentials.appSecret,
+            timestamp: timestamp
+        )
+        let data = try await transport.data(for: request)
+        guard let matchedID = try DandanplayAPI.decodeEpisodeSearch(data, preferredEpisode: preferredEpisode) else {
+            throw AnimeHTTPError.missingRoute("dandanplay episode id: \(episode.subjectID) #\(preferredEpisode)")
+        }
+        return matchedID
     }
 }

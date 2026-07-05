@@ -75,7 +75,7 @@ public struct BangumiYouTubeAnimeSourceProvider: AnimeMediaSourceAdapter {
                 number: number,
                 identity: AnimeEpisodeIdentity(
                     providerID: id,
-                    subjectID: "\(subject.id)",
+                    subjectID: subject.title,
                     episodeID: "\(number)"
                 )
             )
