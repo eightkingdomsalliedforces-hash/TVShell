@@ -169,6 +169,7 @@ Visual focus requirements:
 - Focused items scale up, lift, gain shadow, and show a clear focus ring or glow.
 - Focus movement must animate smoothly.
 - Focus feedback must remain visible on 1080p, 2K, 4K, and larger displays.
+- Later visual polish should use a tvOS-like Liquid Glass direction: translucent layered materials, soft refraction-like highlights, edge glow, background blur, and focus-driven depth.
 
 ## Command Dispatch by Runtime
 

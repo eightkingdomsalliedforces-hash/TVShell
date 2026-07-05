@@ -8,6 +8,7 @@ struct TVShellChecks {
         try checkKeyCodeMapper()
         try checkRemoteMappingStore()
         try checkFocusEngine()
+        try checkNativeLaunchRequest()
         print("TVShellChecks passed")
     }
 
@@ -67,6 +68,22 @@ struct TVShellChecks {
             FocusNode(id: "b", rect: CGRect(x: 140, y: 0, width: 100, height: 100), group: "home", priority: 1, acceptsSelect: true)
         ])
         try expect(engine.recoverFocus(in: "home") == "b", "recover chooses highest-priority visible node")
+    }
+
+    static func checkNativeLaunchRequest() throws {
+        let nativeProfile = TVAppProfile(
+            name: "Safari",
+            target: .nativeApp(bundleIdentifier: "com.apple.Safari"),
+            controlMode: .hybridNative
+        )
+        try expect(NativeLaunchRequest(profile: nativeProfile)?.bundleIdentifier == "com.apple.Safari", "native launch request uses bundle identifier")
+
+        let webProfile = TVAppProfile(
+            name: "Apple",
+            target: .web(URL(string: "https://www.apple.com")!),
+            controlMode: .web
+        )
+        try expect(NativeLaunchRequest(profile: webProfile) == nil, "web profile does not create native launch request")
     }
 }
 

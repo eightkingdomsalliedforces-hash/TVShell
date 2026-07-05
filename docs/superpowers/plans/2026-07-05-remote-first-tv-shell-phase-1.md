@@ -31,7 +31,7 @@ Deferred to later phases:
 
 - CoreHID per-device remote discovery.
 - Full media runtime with AVPlayer.
-- Advanced animation polish.
+- Advanced animation polish and tvOS-like Liquid Glass styling.
 - App icon extraction quality pass.
 - Sandboxed distribution strategy.
 - Installer, notarization, and `.app` bundle packaging.
