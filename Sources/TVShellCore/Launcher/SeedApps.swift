@@ -4,7 +4,7 @@ public enum SeedApps {
     public static let defaultApps: [TVAppProfile] = [
         TVAppProfile(
             name: "YouTube",
-            target: .web(URL(string: "https://www.youtube.com/tv")!),
+            target: .youtube,
             controlMode: .web
         ),
         TVAppProfile(

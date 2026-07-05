@@ -24,6 +24,7 @@ struct TVShellChecks {
         try checkAnimeRuntimeStateNavigation()
         try checkExternalAnimeIntegrations()
         try await checkDandanplayConfiguredProvider()
+        try checkYouTubeNativeRuntimeAndAPI()
         print("TVShellChecks passed")
     }
 
@@ -395,6 +396,68 @@ struct TVShellChecks {
 
         try expect(comments.first?.text == "遠端彈幕", "configured provider fetches dandanplay comments")
         try expect(transport.requests.first?.headers["X-AppId"] == "app123", "configured provider sends dandanplay app id")
+    }
+
+    @MainActor
+    static func checkYouTubeNativeRuntimeAndAPI() throws {
+        let youtubeApp = SeedApps.defaultApps.first(where: { app in
+            if case .youtube = app.target { return true }
+            return false
+        })
+        guard let youtubeApp else {
+            throw CheckFailure("missing native youtube app")
+        }
+        try expect(youtubeApp.name == "YouTube", "youtube app keeps branded name")
+
+        let state = AppState(apps: SeedApps.defaultApps)
+        state.focusedAppID = youtubeApp.id
+        state.handle(.select)
+        try expect(state.activeRuntime == .youtube(youtubeApp), "select opens native youtube runtime")
+
+        let credentials = YouTubeCredentials.environment([
+            "TVSHELL_YOUTUBE_API_KEY": "abc123"
+        ])
+        try expect(credentials.apiKey == "abc123", "youtube api key loads from environment")
+        try expect(credentials.isConfigured, "youtube api key marks credentials configured")
+
+        let request = try YouTubeDataAPI.searchRequest(
+            query: "lofi",
+            credentials: credentials,
+            maxResults: 12
+        )
+        try expect(request.url.absoluteString.contains("https://www.googleapis.com/youtube/v3/search"), "youtube search uses official data api")
+        try expect(request.url.absoluteString.contains("type=video"), "youtube search filters videos")
+        try expect(request.url.absoluteString.contains("maxResults=12"), "youtube search includes max results")
+        try expect(request.url.absoluteString.contains("key=abc123"), "youtube search includes api key")
+
+        let response = """
+        {
+          "items": [
+            {
+              "id": { "videoId": "abcXYZ" },
+              "snippet": {
+                "title": "測試影片",
+                "channelTitle": "測試頻道",
+                "description": "描述",
+                "thumbnails": {
+                  "high": { "url": "https://example.com/thumb.jpg" }
+                }
+              }
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let videos = try YouTubeDataAPI.decodeSearchResponse(response)
+        try expect(videos.first?.id == "abcXYZ", "youtube decoder reads video id")
+        try expect(videos.first?.title == "測試影片", "youtube decoder reads title")
+
+        var youtubeState = YouTubeRuntimeState(itemCount: 2)
+        youtubeState.apply(.right)
+        try expect(youtubeState.focusedIndex == 1, "youtube right moves focus")
+        youtubeState.apply(.select)
+        try expect(youtubeState.phase == .playing, "youtube select starts playback")
+        youtubeState.apply(.back)
+        try expect(youtubeState.phase == .browsing, "youtube back returns to native list")
     }
 }
 

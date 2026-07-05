@@ -18,6 +18,7 @@ public final class AppState: ObservableObject {
     @Published public var webZoom: Double = 1.25
     @Published public var videoSourceLabel: String = "內建示範影片"
     @Published public var dandanplayCredentials: DandanplayCredentials = .environment()
+    @Published public var youtubeCredentials: YouTubeCredentials = .environment()
     @Published public var openingAppName: String?
 
     private let nativeRuntime = NativeAppRuntime()
@@ -54,7 +55,7 @@ public final class AppState: ObservableObject {
             handleSettings(command)
         case .appManagement:
             handleAppManagement(command)
-        case .web, .media, .anime, .native, .remoteLearning:
+        case .web, .media, .anime, .youtube, .native, .remoteLearning:
             handleRuntimeCommand(command)
         }
     }
@@ -77,7 +78,7 @@ public final class AppState: ObservableObject {
     }
 
     private func handleRuntimeCommand(_ command: RemoteCommand) {
-        if command == .home || (command == .back && activeRuntime.isAnime == false) {
+        if command == .home || (command == .back && activeRuntime.handlesBackInternally == false) {
             activeRuntime = .launcher
             NSApp.activate(ignoringOtherApps: true)
             return
@@ -215,6 +216,9 @@ public final class AppState: ObservableObject {
         case .anime:
             statusMessage = "正在開啟 \(app.name)"
             setRuntime(.anime(app))
+        case .youtube:
+            statusMessage = "正在開啟 \(app.name)"
+            setRuntime(.youtube(app))
         case .nativeApp:
             statusMessage = "正在開啟 \(app.name)"
             setRuntime(.native(app))
@@ -290,10 +294,12 @@ public final class AppState: ObservableObject {
 }
 
 private extension ActiveRuntime {
-    var isAnime: Bool {
-        if case .anime = self {
+    var handlesBackInternally: Bool {
+        switch self {
+        case .anime, .youtube:
             return true
+        default:
+            return false
         }
-        return false
     }
 }

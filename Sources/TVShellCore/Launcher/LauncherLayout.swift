@@ -26,7 +26,7 @@ public enum LauncherLayout {
         let visibleApps = apps.filter(\.isVisibleOnHome)
         let media = visibleApps.filter { app in
             switch app.target {
-            case .media, .anime:
+            case .media, .anime, .youtube:
                 return true
             default:
                 return false
@@ -38,7 +38,7 @@ public enum LauncherLayout {
                 return url.scheme != "tv-shell"
             case .nativeApp:
                 return true
-            case .media, .anime:
+            case .media, .anime, .youtube:
                 return false
             }
         }

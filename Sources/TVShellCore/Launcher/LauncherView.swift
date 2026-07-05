@@ -31,6 +31,9 @@ public struct LauncherView: View {
             case let .anime(app):
                 AnimeRuntimeView(app: app)
                     .transition(.opacity.combined(with: .scale(scale: 1.015)))
+            case let .youtube(app):
+                YouTubeRuntimeView(app: app)
+                    .transition(.opacity.combined(with: .scale(scale: 1.015)))
             case let .native(app):
                 NativeRuntimeInterimView(app: app)
                     .transition(.opacity.combined(with: .scale(scale: 1.015)))
@@ -116,6 +119,8 @@ public struct LauncherView: View {
         }
 
         switch app.target {
+        case .youtube:
+            return "原生大螢幕 YouTube，使用 Data API 解析影片列表"
         case .anime:
             return "自動解析動畫源、選集播放，並顯示 Bangumi 風格彈幕"
         case .media:

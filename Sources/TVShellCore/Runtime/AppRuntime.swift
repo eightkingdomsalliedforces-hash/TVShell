@@ -11,6 +11,7 @@ public enum LaunchTarget: Equatable, Codable, Sendable {
     case web(URL)
     case media(URL)
     case anime
+    case youtube
     case nativeApp(bundleIdentifier: String)
 }
 
@@ -48,6 +49,7 @@ public enum ActiveRuntime: Equatable, Sendable {
     case web(TVAppProfile)
     case media(TVAppProfile)
     case anime(TVAppProfile)
+    case youtube(TVAppProfile)
     case native(TVAppProfile)
     case remoteLearning
     case settings

@@ -40,6 +40,8 @@ public struct SettingsView: View {
 
             DanmakuServiceStatusView(isConfigured: appState.dandanplayCredentials.isConfigured)
 
+            YouTubeAPIStatusView(isConfigured: appState.youtubeCredentials.isConfigured)
+
             PermissionStatusView()
 
             Spacer()
@@ -57,6 +59,28 @@ public struct SettingsView: View {
         case .remoteImage:
             "壁紙提供商"
         }
+    }
+}
+
+private struct YouTubeAPIStatusView: View {
+    let isConfigured: Bool
+
+    var body: some View {
+        HStack(spacing: 22) {
+            Circle()
+                .fill(isConfigured ? .green : .orange)
+                .frame(width: 22, height: 22)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("YouTube API")
+                    .font(.system(size: 32, weight: .bold))
+                Text(isConfigured ? "已配置 YouTube Data API，YouTube App 會解析真實影片列表。" : "尚未配置 YouTube Data API。可用環境變數 TVSHELL_YOUTUBE_API_KEY。")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.66))
+            }
+        }
+        .padding(30)
+        .liquidGlassCard(isFocused: isConfigured == false, cornerRadius: 18)
     }
 }
 
