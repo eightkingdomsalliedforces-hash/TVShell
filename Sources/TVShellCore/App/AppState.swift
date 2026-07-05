@@ -114,28 +114,34 @@ public final class AppState: ObservableObject {
         switch app.target {
         case let .web(url) where url.scheme == "tv-shell" && url.host == "remote-learning":
             statusMessage = "Opening Remote Setup"
-            activeRuntime = .remoteLearning
+            setRuntime(.remoteLearning)
         case let .web(url) where url.scheme == "tv-shell" && url.host == "settings":
             statusMessage = "Opening Settings"
-            activeRuntime = .settings
+            setRuntime(.settings)
         case let .web(url) where url.scheme == "tv-shell" && url.host == "app-management":
             statusMessage = "Opening App Management"
             focusedManagementAppID = apps.first?.id
-            activeRuntime = .appManagement
+            setRuntime(.appManagement)
         case .web:
             statusMessage = "Opening \(app.name)"
-            activeRuntime = .web(app)
+            setRuntime(.web(app))
         case .media:
             statusMessage = "Opening \(app.name)"
-            activeRuntime = .media(app)
+            setRuntime(.media(app))
         case .nativeApp:
             statusMessage = "Opening \(app.name)"
-            activeRuntime = .native(app)
+            setRuntime(.native(app))
             nativeRuntime.launch(app) { [weak self] success, message in
                 Task { @MainActor in
                     self?.statusMessage = success ? message : "Failed: \(message)"
                 }
             }
+        }
+    }
+
+    private func setRuntime(_ runtime: ActiveRuntime) {
+        withAnimation(TVMotion.runtime) {
+            activeRuntime = runtime
         }
     }
 

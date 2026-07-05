@@ -13,6 +13,11 @@ public enum SeedApps {
             controlMode: .web
         ),
         TVAppProfile(
+            name: "Browser",
+            target: .web(URL(string: "https://duckduckgo.com")!),
+            controlMode: .web
+        ),
+        TVAppProfile(
             name: "Safari",
             target: .nativeApp(bundleIdentifier: "com.apple.Safari"),
             controlMode: .hybridNative

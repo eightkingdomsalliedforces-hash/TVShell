@@ -97,6 +97,33 @@ public struct WebAppRuntimeView: NSViewRepresentable {
       document.documentElement.appendChild(style);
 
       window.tvShellCommand = (command) => {
+        const keyForCommand = {
+          up: 'ArrowUp',
+          down: 'ArrowDown',
+          left: 'ArrowLeft',
+          right: 'ArrowRight',
+          select: 'Enter',
+          back: 'Escape',
+          playPause: ' '
+        }[command];
+
+        const dispatchKey = () => {
+          if (!keyForCommand) return false;
+          const eventInit = {
+            key: keyForCommand,
+            code: keyForCommand === ' ' ? 'Space' : keyForCommand,
+            bubbles: true,
+            cancelable: true,
+            composed: true
+          };
+          document.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+          if (document.activeElement) {
+            document.activeElement.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+          }
+          document.dispatchEvent(new KeyboardEvent('keyup', eventInit));
+          return true;
+        };
+
         const active = document.activeElement;
         const focusables = Array.from(document.querySelectorAll('a, button, input, select, textarea, video, [role="button"], [tabindex]:not([tabindex="-1"])'))
           .filter(el => !el.disabled && el.offsetParent !== null);
@@ -116,17 +143,21 @@ public struct WebAppRuntimeView: NSViewRepresentable {
 
         if (command === 'select') {
           if (active && active.click) active.click();
+          dispatchKey();
           return true;
         }
         if (command === 'back') {
+          dispatchKey();
           history.back();
           return true;
         }
         if (command === 'down' || command === 'right') {
+          dispatchKey();
           focusAt(currentIndex + 1);
           return true;
         }
         if (command === 'up' || command === 'left') {
+          dispatchKey();
           focusAt(currentIndex - 1);
           return true;
         }
@@ -136,6 +167,7 @@ public struct WebAppRuntimeView: NSViewRepresentable {
             if (video.paused) video.play(); else video.pause();
             return true;
           }
+          dispatchKey();
         }
         return false;
       };

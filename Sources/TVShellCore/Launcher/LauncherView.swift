@@ -21,20 +21,28 @@ public struct LauncherView: View {
             switch appState.activeRuntime {
             case .launcher:
                 launcher
+                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
             case let .web(app):
                 WebAppRuntimeView(app: app)
+                    .transition(.opacity.combined(with: .scale(scale: 1.015)))
             case let .media(app):
                 MediaRuntimeView(app: app)
+                    .transition(.opacity.combined(with: .scale(scale: 1.015)))
             case let .native(app):
                 NativeRuntimeInterimView(app: app)
+                    .transition(.opacity.combined(with: .scale(scale: 1.015)))
             case .remoteLearning:
                 RemoteLearningView()
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             case .settings:
                 SettingsView()
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             case .appManagement:
                 AppManagementView()
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
+        .animation(TVMotion.runtime, value: appState.activeRuntime)
     }
 
     private var launcher: some View {
@@ -56,6 +64,8 @@ public struct LauncherView: View {
                             .foregroundStyle(.white.opacity(0.68))
                     }
                     .padding(.top, 16 * metrics.scale)
+
+                    quickActionBar(metrics: metrics)
 
                     VStack(alignment: .leading, spacing: metrics.rowSpacing) {
                         ForEach(LauncherLayout.sections(for: appState.apps)) { section in
@@ -124,6 +134,24 @@ public struct LauncherView: View {
         .liquidGlassCard(isFocused: false, cornerRadius: 26)
     }
 
+    private func quickActionBar(metrics: TVMetrics) -> some View {
+        HStack(spacing: 16 * metrics.scale) {
+            ForEach(LauncherLayout.quickActions(for: appState.apps)) { app in
+                Button {
+                    appState.focusedAppID = app.id
+                    appState.handle(.select)
+                } label: {
+                    Text(app.name)
+                        .font(.system(size: 23 * metrics.scale, weight: .bold))
+                        .padding(.horizontal, 22 * metrics.scale)
+                        .padding(.vertical, 14 * metrics.scale)
+                        .liquidGlassCard(isFocused: app.id == appState.focusedAppID, cornerRadius: 22)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
     private var heroBackground: some View {
         ZStack {
             LinearGradient(
@@ -148,7 +176,8 @@ public struct LauncherView: View {
             )
             .ignoresSafeArea()
         }
-        .animation(.easeInOut(duration: 0.45), value: appState.focusedAppID)
+        .animation(TVMotion.hero, value: appState.focusedAppID)
+        .animation(TVMotion.hero, value: appState.wallpaperSource)
     }
 
     private var heroColors: [Color] {
@@ -188,6 +217,7 @@ private struct LauncherRowView: View {
                 }
             }
         }
+        .animation(TVMotion.focus, value: focusedAppID)
     }
 }
 

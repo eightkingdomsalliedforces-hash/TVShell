@@ -30,7 +30,9 @@ public struct AppCardView: View {
                 .frame(width: metrics.appTitleWidth)
         }
         .scaleEffect(isFocused ? 1.12 : 1.0)
-        .animation(.spring(response: 0.28, dampingFraction: 0.74), value: isFocused)
+        .rotation3DEffect(.degrees(isFocused ? 2.2 : 0), axis: (x: 1, y: -1, z: 0), perspective: 0.72)
+        .offset(y: isFocused ? -10 * metrics.scale : 0)
+        .animation(TVMotion.focus, value: isFocused)
         .accessibilityLabel(title)
     }
 

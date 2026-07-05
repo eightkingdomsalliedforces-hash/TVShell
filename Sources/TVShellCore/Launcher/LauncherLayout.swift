@@ -13,6 +13,15 @@ public struct LauncherSection: Identifiable, Equatable, Sendable {
 }
 
 public enum LauncherLayout {
+    public static func quickActions(for apps: [TVAppProfile]) -> [TVAppProfile] {
+        apps.filter { app in
+            if case let .web(url) = app.target {
+                return url.scheme == "tv-shell"
+            }
+            return false
+        }
+    }
+
     public static func sections(for apps: [TVAppProfile]) -> [LauncherSection] {
         let visibleApps = apps.filter(\.isVisibleOnHome)
         let media = visibleApps.filter { app in

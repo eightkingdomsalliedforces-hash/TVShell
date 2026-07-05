@@ -17,6 +17,7 @@ struct TVShellChecks {
         try checkTVMetricsScaleWithWindowSize()
         try checkAppCatalogVisibilityAndOrdering()
         try checkWallpaperPresetCyclingAndProvider()
+        try checkQuickActionsAndBrowserArePresent()
         print("TVShellChecks passed")
     }
 
@@ -197,6 +198,19 @@ struct TVShellChecks {
         let provider = StaticWallpaperProvider(presets: [.aurora, .ocean])
         try expect(provider.featured().preset == .aurora, "static provider returns first featured wallpaper")
         try expect(provider.next(after: .aurora).preset == .ocean, "static provider returns next wallpaper")
+    }
+
+    static func checkQuickActionsAndBrowserArePresent() throws {
+        let quickActions = LauncherLayout.quickActions(for: SeedApps.defaultApps)
+        let quickHosts = quickActions.compactMap { app -> String? in
+            if case let .web(url) = app.target { return url.host }
+            return nil
+        }
+        try expect(quickHosts.contains("settings"), "settings is always available as a quick action")
+        try expect(quickHosts.contains("remote-learning"), "remote setup is always available as a quick action")
+        try expect(quickHosts.contains("app-management"), "app management is always available as a quick action")
+
+        try expect(SeedApps.defaultApps.contains { $0.name == "Browser" }, "embedded browser app exists")
     }
 }
 
