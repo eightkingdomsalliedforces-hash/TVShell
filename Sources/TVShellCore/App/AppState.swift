@@ -9,6 +9,7 @@ public final class AppState: ObservableObject {
     @Published public var apps: [TVAppProfile]
     @Published public var displayScale: DisplayScale = .auto
     @Published public var statusMessage: String?
+    @Published public var focusedManagementAppID: UUID?
 
     private let nativeRuntime = NativeAppRuntime()
 
@@ -25,6 +26,8 @@ public final class AppState: ObservableObject {
             handleLauncher(command)
         case .settings:
             handleSettings(command)
+        case .appManagement:
+            handleAppManagement(command)
         case .web, .media, .native, .remoteLearning:
             handleRuntimeCommand(command)
         }
@@ -99,6 +102,10 @@ public final class AppState: ObservableObject {
         case let .web(url) where url.scheme == "tv-shell" && url.host == "settings":
             statusMessage = "Opening Settings"
             activeRuntime = .settings
+        case let .web(url) where url.scheme == "tv-shell" && url.host == "app-management":
+            statusMessage = "Opening App Management"
+            focusedManagementAppID = apps.first?.id
+            activeRuntime = .appManagement
         case .web:
             statusMessage = "Opening \(app.name)"
             activeRuntime = .web(app)
@@ -114,5 +121,50 @@ public final class AppState: ObservableObject {
                 }
             }
         }
+    }
+
+    private func handleAppManagement(_ command: RemoteCommand) {
+        switch command {
+        case .left:
+            moveManagedApp(.left)
+        case .right:
+            moveManagedApp(.right)
+        case .up:
+            moveManagedFocus(by: -1)
+        case .down:
+            moveManagedFocus(by: 1)
+        case .select:
+            if let focusedManagementAppID {
+                var catalog = AppCatalog(apps: apps)
+                catalog.toggleVisibility(for: focusedManagementAppID)
+                apps = catalog.apps
+            }
+        case .home, .back:
+            activeRuntime = .launcher
+            focusedAppID = LauncherLayout.sections(for: apps).flatMap(\.apps).first?.id
+        default:
+            break
+        }
+    }
+
+    private func moveManagedFocus(by offset: Int) {
+        guard let focusedManagementAppID,
+              let index = apps.firstIndex(where: { $0.id == focusedManagementAppID })
+        else {
+            self.focusedManagementAppID = apps.first?.id
+            return
+        }
+
+        let nextIndex = min(max(index + offset, 0), apps.count - 1)
+        self.focusedManagementAppID = apps[nextIndex].id
+    }
+
+    private func moveManagedApp(_ direction: CatalogMoveDirection) {
+        guard let focusedManagementAppID else {
+            return
+        }
+        var catalog = AppCatalog(apps: apps)
+        catalog.moveApp(id: focusedManagementAppID, direction: direction)
+        apps = catalog.apps
     }
 }

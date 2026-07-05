@@ -14,11 +14,12 @@ public struct LauncherSection: Identifiable, Equatable, Sendable {
 
 public enum LauncherLayout {
     public static func sections(for apps: [TVAppProfile]) -> [LauncherSection] {
-        let media = apps.filter { app in
+        let visibleApps = apps.filter(\.isVisibleOnHome)
+        let media = visibleApps.filter { app in
             if case .media = app.target { return true }
             return false
         }
-        let webAndNative = apps.filter { app in
+        let webAndNative = visibleApps.filter { app in
             switch app.target {
             case let .web(url):
                 return url.scheme != "tv-shell"
@@ -28,7 +29,7 @@ public enum LauncherLayout {
                 return false
             }
         }
-        let tools = apps.filter { app in
+        let tools = visibleApps.filter { app in
             if case let .web(url) = app.target {
                 return url.scheme == "tv-shell"
             }

@@ -15,6 +15,7 @@ struct TVShellChecks {
         try checkLauncherLayoutNavigation()
         try checkAppStateOpensFocusedApps()
         try checkTVMetricsScaleWithWindowSize()
+        try checkAppCatalogVisibilityAndOrdering()
         print("TVShellChecks passed")
     }
 
@@ -175,6 +176,17 @@ struct TVShellChecks {
         try expect(TVMetrics(size: CGSize(width: 1920, height: 1080)).scale == 1.0, "1080p uses base scale")
         try expect(TVMetrics(size: CGSize(width: 960, height: 540)).scale == 0.72, "small windows clamp to readable minimum")
         try expect(TVMetrics(size: CGSize(width: 3840, height: 2160)).scale == 1.65, "large windows clamp to practical maximum")
+    }
+
+    static func checkAppCatalogVisibilityAndOrdering() throws {
+        var catalog = AppCatalog(apps: SeedApps.defaultApps)
+        let first = catalog.apps[0]
+        catalog.toggleVisibility(for: first.id)
+        try expect(catalog.visibleApps.contains(where: { $0.id == first.id }) == false, "hidden app is removed from visible launcher apps")
+
+        let second = catalog.apps[1]
+        catalog.moveApp(id: second.id, direction: .left)
+        try expect(catalog.apps[0].id == second.id, "app can move left in catalog")
     }
 }
 

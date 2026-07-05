@@ -31,6 +31,8 @@ public struct LauncherView: View {
                 RemoteLearningView()
             case .settings:
                 SettingsView()
+            case .appManagement:
+                AppManagementView()
             }
         }
     }

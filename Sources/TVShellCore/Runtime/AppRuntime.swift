@@ -18,17 +18,20 @@ public struct TVAppProfile: Identifiable, Equatable, Codable, Sendable {
     public var name: String
     public var target: LaunchTarget
     public var controlMode: ControlMode
+    public var isVisibleOnHome: Bool
 
     public init(
         id: UUID = UUID(),
         name: String,
         target: LaunchTarget,
-        controlMode: ControlMode
+        controlMode: ControlMode,
+        isVisibleOnHome: Bool = true
     ) {
         self.id = id
         self.name = name
         self.target = target
         self.controlMode = controlMode
+        self.isVisibleOnHome = isVisibleOnHome
     }
 }
 
@@ -46,6 +49,7 @@ public enum ActiveRuntime: Equatable, Sendable {
     case native(TVAppProfile)
     case remoteLearning
     case settings
+    case appManagement
 }
 
 public extension Notification.Name {

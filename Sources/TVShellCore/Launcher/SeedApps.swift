@@ -31,6 +31,11 @@ public enum SeedApps {
             name: "Settings",
             target: .web(URL(string: "tv-shell://settings")!),
             controlMode: .web
+        ),
+        TVAppProfile(
+            name: "Manage",
+            target: .web(URL(string: "tv-shell://app-management")!),
+            controlMode: .web
         )
     ]
 }
