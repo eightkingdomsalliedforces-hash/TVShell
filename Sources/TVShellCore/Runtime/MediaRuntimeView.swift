@@ -12,7 +12,7 @@ public struct MediaRuntimeView: View {
 
     public var body: some View {
         ZStack(alignment: .bottomLeading) {
-            VideoPlayer(player: controller.player)
+            MediaPlayerSurface(player: controller.player)
                 .ignoresSafeArea()
                 .onAppear {
                     controller.load(app)
@@ -24,7 +24,7 @@ public struct MediaRuntimeView: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text(app.name)
                     .font(.system(size: 42, weight: .bold))
-                Text("Play/Pause toggles playback. Left/Right seek. Home returns.")
+                Text(controller.statusText)
                     .font(.system(size: 24, weight: .medium))
                     .foregroundStyle(.white.opacity(0.72))
             }
@@ -39,7 +39,9 @@ public struct MediaRuntimeView: View {
 @MainActor
 final class MediaRuntimeController: ObservableObject {
     let player = AVPlayer()
+    @Published private(set) var statusText = "Loading video..."
     private nonisolated(unsafe) var observer: NSObjectProtocol?
+    private nonisolated(unsafe) var itemObserver: NSKeyValueObservation?
     private var state = MediaControlState()
 
     init() {
@@ -61,13 +63,34 @@ final class MediaRuntimeController: ObservableObject {
         if let observer {
             NotificationCenter.default.removeObserver(observer)
         }
+        itemObserver?.invalidate()
     }
 
     func load(_ app: TVAppProfile) {
         guard case let .media(url) = app.target else {
+            statusText = "This app does not contain a playable video."
             return
         }
-        player.replaceCurrentItem(with: AVPlayerItem(url: url))
+
+        statusText = "Loading video..."
+        let item = AVPlayerItem(url: url)
+        itemObserver?.invalidate()
+        itemObserver = item.observe(\.status, options: [.new, .initial]) { [weak self] item, _ in
+            Task { @MainActor in
+                switch item.status {
+                case .readyToPlay:
+                    self?.statusText = "Play/Pause toggles playback. Left/Right seek. Home returns."
+                case .failed:
+                    self?.statusText = item.error?.localizedDescription ?? "Video failed to load."
+                case .unknown:
+                    self?.statusText = "Loading video..."
+                @unknown default:
+                    self?.statusText = "Video status changed."
+                }
+            }
+        }
+
+        player.replaceCurrentItem(with: item)
         player.play()
         state = MediaControlState(isPlaying: true)
     }
@@ -95,6 +118,25 @@ final class MediaRuntimeController: ObservableObject {
             player.play()
         } else {
             player.pause()
+        }
+    }
+}
+
+private struct MediaPlayerSurface: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.player = player
+        view.controlsStyle = .none
+        view.videoGravity = .resizeAspect
+        view.allowsPictureInPicturePlayback = false
+        return view
+    }
+
+    func updateNSView(_ view: AVPlayerView, context: Context) {
+        if view.player !== player {
+            view.player = player
         }
     }
 }
