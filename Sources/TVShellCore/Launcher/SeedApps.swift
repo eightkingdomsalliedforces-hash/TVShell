@@ -13,7 +13,7 @@ public enum SeedApps {
             controlMode: .web
         ),
         TVAppProfile(
-            name: "Browser",
+            name: "瀏覽器",
             target: .web(URL(string: "https://duckduckgo.com")!),
             controlMode: .web
         ),
@@ -23,22 +23,22 @@ public enum SeedApps {
             controlMode: .hybridNative
         ),
         TVAppProfile(
-            name: "Video",
+            name: "影片",
             target: .media(URL(string: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")!),
             controlMode: .web
         ),
         TVAppProfile(
-            name: "Remote",
+            name: "遙控器",
             target: .web(URL(string: "tv-shell://remote-learning")!),
             controlMode: .web
         ),
         TVAppProfile(
-            name: "Settings",
+            name: "設定",
             target: .web(URL(string: "tv-shell://settings")!),
             controlMode: .web
         ),
         TVAppProfile(
-            name: "Manage",
+            name: "管理",
             target: .web(URL(string: "tv-shell://app-management")!),
             controlMode: .web
         )

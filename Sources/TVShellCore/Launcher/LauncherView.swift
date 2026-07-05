@@ -23,7 +23,7 @@ public struct LauncherView: View {
                 launcher
                     .transition(.opacity.combined(with: .scale(scale: 0.985)))
             case let .web(app):
-                WebAppRuntimeView(app: app)
+                WebAppRuntimeView(app: app, webZoom: appState.webZoom)
                     .transition(.opacity.combined(with: .scale(scale: 1.015)))
             case let .media(app):
                 MediaRuntimeView(app: app)
@@ -41,8 +41,15 @@ public struct LauncherView: View {
                 AppManagementView()
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
+
+            if let openingAppName = appState.openingAppName {
+                OpeningAppOverlay(appName: openingAppName)
+                    .transition(.opacity.combined(with: .scale(scale: 1.08)))
+                    .zIndex(10)
+            }
         }
         .animation(TVMotion.runtime, value: appState.activeRuntime)
+        .animation(TVMotion.runtime, value: appState.openingAppName)
     }
 
     private var launcher: some View {
@@ -85,7 +92,7 @@ public struct LauncherView: View {
                         .liquidGlassCard(isFocused: true, cornerRadius: 20)
                 }
 
-                Text("Use D-pad to move. OK opens. Back or Home returns.")
+                Text("方向鍵移動，OK 開啟，返回或 Home 回主畫面。")
                         .font(.system(size: metrics.hintSize, weight: .medium))
                         .foregroundStyle(.white.opacity(0.62))
                         .padding(.bottom, 42 * metrics.scale)
@@ -102,18 +109,18 @@ public struct LauncherView: View {
 
     private var heroSubtitle: String {
         guard let app = focusedApp else {
-            return "Remote-first macOS launcher"
+            return "適合大螢幕與遙控器的 macOS 主畫面"
         }
 
         switch app.target {
         case .media:
-            return "Continue watching with cinematic controls"
+            return "用大螢幕控制列播放本機或串流影片"
         case .nativeApp:
-            return "Open and control a native macOS app"
+            return "開啟並用輔助使用控制原生 macOS App"
         case let .web(url) where url.scheme == "tv-shell":
-            return "Configure remotes, scale, and system controls"
+            return "設定遙控器、縮放、壁紙與系統控制"
         case .web:
-            return "Open a big-screen web experience"
+            return "以放大網頁與虛擬滑鼠模式瀏覽"
         }
     }
 
@@ -191,9 +198,38 @@ public struct LauncherView: View {
 
     private var commandLabel: String {
         if case .web = appState.activeRuntime {
-            return "Web: \(appState.webRemoteMode.title)"
+            return "網頁：\(appState.webRemoteMode.title)"
         }
-        return appState.lastCommand.map { "Last: \($0.description)" } ?? "Waiting for remote"
+        return appState.lastCommand.map { "最近：\($0.description)" } ?? "等待遙控器"
+    }
+}
+
+private struct OpeningAppOverlay: View {
+    let appName: String
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.34)
+                .ignoresSafeArea()
+
+            VStack(spacing: 22) {
+                Text(String(appName.prefix(1)))
+                    .font(.system(size: 78, weight: .bold, design: .rounded))
+                    .frame(width: 152, height: 152)
+                    .liquidGlassCard(isFocused: true, cornerRadius: 38)
+
+                Text(appName)
+                    .font(.system(size: 66, weight: .bold))
+
+                Text("正在開啟")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.68))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 72)
+            .padding(.vertical, 58)
+            .liquidGlassCard(isFocused: true, cornerRadius: 34)
+        }
     }
 }
 
@@ -234,7 +270,7 @@ private struct NativeRuntimeInterimView: View {
             Text("Native app launched. Press Home to return.")
                 .font(.system(size: 32, weight: .medium))
                 .foregroundStyle(.white.opacity(0.7))
-            Text("Hybrid Accessibility control foundation is enabled in this phase.")
+            Text("已啟用輔助使用控制基礎；按 Home 返回主畫面。")
                 .font(.system(size: 26, weight: .medium))
                 .foregroundStyle(.white.opacity(0.58))
         }

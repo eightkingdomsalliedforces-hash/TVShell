@@ -39,7 +39,7 @@ public struct MediaRuntimeView: View {
 @MainActor
 final class MediaRuntimeController: ObservableObject {
     let player = AVPlayer()
-    @Published private(set) var statusText = "Loading video..."
+    @Published private(set) var statusText = "正在載入影片..."
     private nonisolated(unsafe) var observer: NSObjectProtocol?
     private nonisolated(unsafe) var itemObserver: NSKeyValueObservation?
     private var state = MediaControlState()
@@ -68,24 +68,24 @@ final class MediaRuntimeController: ObservableObject {
 
     func load(_ app: TVAppProfile) {
         guard case let .media(url) = app.target else {
-            statusText = "This app does not contain a playable video."
+            statusText = "這個 App 沒有可播放的影片。"
             return
         }
 
-        statusText = "Loading video..."
+        statusText = "正在載入影片..."
         let item = AVPlayerItem(url: url)
         itemObserver?.invalidate()
         itemObserver = item.observe(\.status, options: [.new, .initial]) { [weak self] item, _ in
             Task { @MainActor in
                 switch item.status {
                 case .readyToPlay:
-                    self?.statusText = "Play/Pause toggles playback. Left/Right seek. Home returns."
+                    self?.statusText = "播放/暫停控制播放，左右快轉倒退，Home 返回。"
                 case .failed:
-                    self?.statusText = item.error?.localizedDescription ?? "Video failed to load."
+                    self?.statusText = item.error?.localizedDescription ?? "影片載入失敗。"
                 case .unknown:
-                    self?.statusText = "Loading video..."
+                    self?.statusText = "正在載入影片..."
                 @unknown default:
-                    self?.statusText = "Video status changed."
+                    self?.statusText = "影片狀態已變更。"
                 }
             }
         }

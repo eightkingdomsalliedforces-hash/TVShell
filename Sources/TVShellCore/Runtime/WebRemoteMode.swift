@@ -6,10 +6,10 @@ public enum WebRemoteMode: String, Codable, Equatable, Sendable {
 
     public var title: String {
         switch self {
-        case .keyboard: "Keyboard"
-        case .domFocus: "DOM Focus"
-        case .scroll: "Scroll"
-        case .mouse: "Mouse"
+        case .keyboard: "鍵盤"
+        case .domFocus: "焦點"
+        case .scroll: "捲動"
+        case .mouse: "滑鼠"
         }
     }
 

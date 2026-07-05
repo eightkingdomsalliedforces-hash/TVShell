@@ -3,9 +3,11 @@ import WebKit
 
 public struct WebAppRuntimeView: NSViewRepresentable {
     public let app: TVAppProfile
+    public let webZoom: Double
 
-    public init(app: TVAppProfile) {
+    public init(app: TVAppProfile, webZoom: Double) {
         self.app = app
+        self.webZoom = webZoom
     }
 
     public func makeCoordinator() -> Coordinator {
@@ -23,6 +25,7 @@ public struct WebAppRuntimeView: NSViewRepresentable {
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.allowsMagnification = true
+        webView.pageZoom = webZoom
         webView.setValue(false, forKey: "drawsBackground")
         context.coordinator.attach(to: webView)
 
@@ -33,7 +36,9 @@ public struct WebAppRuntimeView: NSViewRepresentable {
         return webView
     }
 
-    public func updateNSView(_ webView: WKWebView, context: Context) {}
+    public func updateNSView(_ webView: WKWebView, context: Context) {
+        webView.pageZoom = webZoom
+    }
 
     @MainActor
     public final class Coordinator {

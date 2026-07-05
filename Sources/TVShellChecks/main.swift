@@ -4,7 +4,7 @@ import TVShellCore
 
 @main
 struct TVShellChecks {
-    static func main() throws {
+    static func main() async throws {
         try checkKeyCodeMapper()
         try checkRemoteMappingStore()
         try checkFocusEngine()
@@ -19,6 +19,8 @@ struct TVShellChecks {
         try checkWallpaperPresetCyclingAndProvider()
         try checkQuickActionsAndBrowserArePresent()
         try checkWebRemoteModeCycles()
+        try checkSettingsFocusIncludesVideoAndWebZoom()
+        try await checkAnimeSourceAndDanmakuProviders()
         print("TVShellChecks passed")
     }
 
@@ -211,7 +213,10 @@ struct TVShellChecks {
         try expect(quickHosts.contains("remote-learning"), "remote setup is always available as a quick action")
         try expect(quickHosts.contains("app-management"), "app management is always available as a quick action")
 
-        try expect(SeedApps.defaultApps.contains { $0.name == "Browser" }, "embedded browser app exists")
+        try expect(SeedApps.defaultApps.contains { app in
+            if case let .web(url) = app.target { return url.host == "duckduckgo.com" }
+            return false
+        }, "embedded browser app exists")
     }
 
     static func checkWebRemoteModeCycles() throws {
@@ -219,6 +224,46 @@ struct TVShellChecks {
         try expect(WebRemoteMode.domFocus.next == .scroll, "web remote mode cycles from DOM focus to scroll")
         try expect(WebRemoteMode.scroll.next == .mouse, "web remote mode cycles from scroll to mouse")
         try expect(WebRemoteMode.mouse.next == .keyboard, "web remote mode cycles back to keyboard")
+    }
+
+    static func checkSettingsFocusIncludesVideoAndWebZoom() throws {
+        try expect(SettingsFocus.scale.next == .wallpaper, "settings moves from scale to wallpaper")
+        try expect(SettingsFocus.wallpaper.next == .webZoom, "settings moves from wallpaper to web zoom")
+        try expect(SettingsFocus.webZoom.next == .videoSource, "settings moves from web zoom to video source")
+        try expect(SettingsFocus.videoSource.next == .scale, "settings wraps to scale")
+    }
+
+    static func checkAnimeSourceAndDanmakuProviders() async throws {
+        let episode = AnimeEpisode(
+            id: "ep-1",
+            title: "第一話",
+            number: 1,
+            identity: AnimeEpisodeIdentity(providerID: "mock", subjectID: "bangumi-1", episodeID: "1")
+        )
+        let source = StaticAnimeSourceProvider(
+            id: "mock",
+            displayName: "示範動畫源",
+            results: [
+                AnimeSearchResult(id: "show-1", title: "測試動畫", subtitle: "TV", episodes: [episode])
+            ],
+            streams: [
+                episode.id: [
+                    AnimeStreamCandidate(url: URL(string: "https://example.com/video.m3u8")!, quality: "1080p", priority: 90)
+                ]
+            ]
+        )
+
+        let results = try await source.search(AnimeSearchQuery(keyword: "測試"))
+        try expect(results.first?.title == "測試動畫", "anime source searches title")
+
+        let streams = try await source.streams(for: episode)
+        try expect(streams.first?.quality == "1080p", "anime source resolves stream candidates")
+
+        let danmaku = StaticDanmakuProvider(comments: [
+            DanmakuComment(time: 1.2, text: "開場", colorHex: "#FFFFFF", mode: .scroll)
+        ])
+        let comments = try await danmaku.comments(for: episode.identity)
+        try expect(comments.first?.text == "開場", "danmaku provider returns timed comments")
     }
 }
 

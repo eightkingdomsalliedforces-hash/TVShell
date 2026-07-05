@@ -7,22 +7,34 @@ public struct SettingsView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 42) {
-            Text("Settings")
+            Text("設定")
                 .font(.system(size: 76, weight: .bold))
 
             SettingsOptionRow(
-                title: "UI Scale",
+                title: "介面縮放",
                 value: appState.displayScale.label,
                 isFocused: appState.settingsFocus == .scale
             )
 
             SettingsOptionRow(
-                title: "Wallpaper",
+                title: "壁紙",
                 value: wallpaperLabel,
                 isFocused: appState.settingsFocus == .wallpaper
             )
 
-            Text("Use Up/Down to choose a setting. Left/Right or OK changes it. Home or Back returns to the launcher.")
+            SettingsOptionRow(
+                title: "網頁放大",
+                value: "\(Int(appState.webZoom * 100))%",
+                isFocused: appState.settingsFocus == .webZoom
+            )
+
+            SettingsOptionRow(
+                title: "影片位置",
+                value: appState.videoSourceLabel,
+                isFocused: appState.settingsFocus == .videoSource
+            )
+
+            Text("上下選擇設定，左右調整；在影片位置按 OK 選擇本機影片。Home 或返回鍵回主畫面。")
                 .font(.system(size: 28, weight: .medium))
                 .foregroundStyle(.white.opacity(0.64))
 
@@ -39,9 +51,9 @@ public struct SettingsView: View {
         case let .builtIn(preset):
             preset.title
         case .localFile:
-            "Local Image"
+            "本機圖片"
         case .remoteImage:
-            "Provider Image"
+            "壁紙提供商"
         }
     }
 }

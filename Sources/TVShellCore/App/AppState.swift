@@ -1,5 +1,7 @@
+import AppKit
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 public final class AppState: ObservableObject {
@@ -13,6 +15,9 @@ public final class AppState: ObservableObject {
     @Published public var wallpaperSource: WallpaperSource = .builtIn(.aurora)
     @Published public var settingsFocus: SettingsFocus = .scale
     @Published public var webRemoteMode: WebRemoteMode = .keyboard
+    @Published public var webZoom: Double = 1.25
+    @Published public var videoSourceLabel: String = "內建示範影片"
+    @Published public var openingAppName: String?
 
     private let nativeRuntime = NativeAppRuntime()
 
@@ -62,7 +67,7 @@ public final class AppState: ObservableObject {
 
         if case .web = activeRuntime, command == .menu {
             webRemoteMode = webRemoteMode.next
-            statusMessage = "Web Mode: \(webRemoteMode.title)"
+            statusMessage = "網頁模式：\(webRemoteMode.title)"
             NotificationCenter.default.post(
                 name: .tvShellRuntimeCommand,
                 object: nil,
@@ -113,7 +118,48 @@ public final class AppState: ObservableObject {
         case .wallpaper:
             let currentPreset = wallpaperSource.preset ?? .aurora
             wallpaperSource = .builtIn(previous ? currentPreset.previous : currentPreset.next)
+        case .webZoom:
+            let delta = previous ? -0.1 : 0.1
+            webZoom = min(max((webZoom + delta) * 10, 8), 24) / 10
+        case .videoSource:
+            chooseVideoFile()
         }
+    }
+
+    private func chooseVideoFile() {
+        let panel = NSOpenPanel()
+        panel.title = "選擇影片"
+        panel.prompt = "選擇"
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [
+            .movie,
+            .mpeg4Movie,
+            .quickTimeMovie,
+            UTType(filenameExtension: "mkv") ?? .movie,
+            UTType(filenameExtension: "avi") ?? .movie
+        ]
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            statusMessage = "未選擇影片"
+            return
+        }
+
+        updateVideoApp(url: url, label: url.lastPathComponent)
+    }
+
+    private func updateVideoApp(url: URL, label: String) {
+        guard let index = apps.firstIndex(where: { $0.name == "Video" || $0.name == "影片" }) else {
+            statusMessage = "找不到影片 App"
+            return
+        }
+
+        apps[index].name = "影片"
+        apps[index].target = .media(url)
+        videoSourceLabel = label
+        statusMessage = "影片來源：\(label)"
+        focusedAppID = apps[index].id
     }
 
     private func moveFocusedApp(_ command: RemoteCommand) {
@@ -129,29 +175,31 @@ public final class AppState: ObservableObject {
             return
         }
 
+        showOpeningAnimation(for: app.name)
+
         switch app.target {
         case let .web(url) where url.scheme == "tv-shell" && url.host == "remote-learning":
-            statusMessage = "Opening Remote Setup"
+            statusMessage = "正在開啟遙控器設定"
             setRuntime(.remoteLearning)
         case let .web(url) where url.scheme == "tv-shell" && url.host == "settings":
-            statusMessage = "Opening Settings"
+            statusMessage = "正在開啟設定"
             setRuntime(.settings)
         case let .web(url) where url.scheme == "tv-shell" && url.host == "app-management":
-            statusMessage = "Opening App Management"
+            statusMessage = "正在開啟 App 管理"
             focusedManagementAppID = apps.first?.id
             setRuntime(.appManagement)
         case .web:
-            statusMessage = "Opening \(app.name)"
+            statusMessage = "正在開啟 \(app.name)"
             setRuntime(.web(app))
         case .media:
-            statusMessage = "Opening \(app.name)"
+            statusMessage = "正在開啟 \(app.name)"
             setRuntime(.media(app))
         case .nativeApp:
-            statusMessage = "Opening \(app.name)"
+            statusMessage = "正在開啟 \(app.name)"
             setRuntime(.native(app))
             nativeRuntime.launch(app) { [weak self] success, message in
                 Task { @MainActor in
-                    self?.statusMessage = success ? message : "Failed: \(message)"
+                    self?.statusMessage = success ? message : "失敗：\(message)"
                 }
             }
         }
@@ -160,6 +208,17 @@ public final class AppState: ObservableObject {
     private func setRuntime(_ runtime: ActiveRuntime) {
         withAnimation(TVMotion.runtime) {
             activeRuntime = runtime
+        }
+    }
+
+    private func showOpeningAnimation(for appName: String) {
+        openingAppName = appName
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.62) { [weak self] in
+            Task { @MainActor in
+                if self?.openingAppName == appName {
+                    self?.openingAppName = nil
+                }
+            }
         }
     }
 

@@ -7,10 +7,10 @@ public struct AppManagementView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 34) {
-            Text("Manage Apps")
+            Text("App 管理")
                 .font(.system(size: 72, weight: .bold))
 
-            Text("Up/Down selects. OK shows or hides. Left/Right reorders. Home returns.")
+            Text("上下選擇，OK 顯示或隱藏，左右排序，Home 返回。")
                 .font(.system(size: 28, weight: .medium))
                 .foregroundStyle(.white.opacity(0.66))
 
@@ -43,7 +43,7 @@ private struct AppManagementRow: View {
 
             Spacer()
 
-            Text(app.isVisibleOnHome ? "Visible" : "Hidden")
+            Text(app.isVisibleOnHome ? "顯示" : "隱藏")
                 .font(.system(size: 28, weight: .medium))
                 .foregroundStyle(app.isVisibleOnHome ? .green.opacity(0.9) : .white.opacity(0.46))
         }
