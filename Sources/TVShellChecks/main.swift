@@ -29,6 +29,7 @@ struct TVShellChecks {
         try checkAnimekoStyleSourceCatalog()
         try await checkAnimeSourceRegistryUsesCatalog()
         try await checkSelectorAnimeSourceProvider()
+        try checkAnimeSourcesExposePlayableStatusAndSearchChoices()
         print("TVShellChecks passed")
     }
 
@@ -544,8 +545,8 @@ struct TVShellChecks {
         catalog.selectLine(sourceID: hoibi.id, lineID: "hoibi-1")
         try expect(catalog.instance(id: hoibi.id)?.selectedLine?.title == "吼哔1線", "catalog can select a source line")
 
-        catalog.toggleEnabled(sourceID: hoibi.id)
-        try expect(catalog.instance(id: hoibi.id)?.isEnabled == false, "catalog can disable a source")
+        catalog.toggleEnabled(sourceID: "bangumi-youtube")
+        try expect(catalog.instance(id: "bangumi-youtube")?.isEnabled == false, "catalog can disable a playable source")
 
         let firstID = catalog.instances[0].id
         let secondID = catalog.instances[1].id
@@ -705,6 +706,27 @@ struct TVShellChecks {
         )
         let factoryResults = try await factoryProvider.search(AnimeSearchQuery(keyword: "芙莉蓮"))
         try expect(factoryResults.first?.title == "葬送的芙莉蓮", "factory registers enabled selector source configs")
+    }
+
+    @MainActor
+    static func checkAnimeSourcesExposePlayableStatusAndSearchChoices() throws {
+        let sources = AnimeSourceCatalog.defaultSources
+        try expect(sources.first(where: { $0.id == "bangumi-youtube" })?.health == .available, "bangumi youtube remains playable by default")
+        try expect(sources.first(where: { $0.id == "girigiri" })?.health == .needsAdapter, "unimplemented scraped source is marked as needing adapter")
+        try expect(sources.first(where: { $0.id == "hoibi" })?.defaultEnabled == false, "unimplemented scraped source is not enabled by default")
+        try expect(sources.first(where: { $0.id == "miaowu" })?.health == .needsCloudflare, "cloudflare sources still show verification status")
+
+        let keywords = AnimeSearchKeywordCatalog.defaultKeywords
+        try expect(keywords.count >= 12, "anime runtime offers more than one sample title")
+        try expect(keywords.contains("進擊的巨人"), "anime runtime includes mainstream search choices")
+        try expect(keywords.contains("葬送的芙莉蓮"), "anime runtime uses full title rather than only short demo keyword")
+
+        let state = AppState(apps: SeedApps.defaultApps)
+        state.activeRuntime = .animeSourceManagement
+        state.focusedAnimeSourceID = "girigiri"
+        state.handle(.select)
+        try expect(state.animeSourceCatalog.instance(id: "girigiri")?.isEnabled == false, "pending adapter source cannot be enabled from remote")
+        try expect(state.statusMessage?.contains("待接入") == true, "pending adapter source explains why it cannot play")
     }
 }
 

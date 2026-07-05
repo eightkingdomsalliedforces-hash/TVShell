@@ -93,7 +93,7 @@ private extension AnimeSourceHealth {
         switch self {
         case .available:
             true
-        case .loading, .failed, .needsCloudflare, .needsCaptcha, .disabled:
+        case .loading, .failed, .needsCloudflare, .needsCaptcha, .needsAdapter, .disabled:
             false
         }
     }

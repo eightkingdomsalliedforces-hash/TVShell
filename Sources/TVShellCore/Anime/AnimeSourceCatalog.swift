@@ -6,6 +6,7 @@ public enum AnimeSourceHealth: String, Codable, Equatable, Sendable {
     case failed
     case needsCloudflare
     case needsCaptcha
+    case needsAdapter
     case disabled
 }
 
@@ -184,31 +185,31 @@ public struct AnimeSourceCatalogState: Codable, Equatable, Sendable {
 public enum AnimeSourceCatalog {
     public static let defaultSources: [AnimeSourceDefinition] = [
         source("bangumi-youtube", "Bangumi + YouTube", "BY", ["官方 API"]),
-        source("girigiri", "girigiri 愛動漫", "G", ["在線"]),
-        source("omofun111", "omofun111", "O", ["在線"]),
-        source("e-acg", "E-ACG", "EA", ["E-ACG"]),
-        source("hoibi", "吼哔動漫", "吼", [
+        pendingSource("girigiri", "girigiri 愛動漫", "G", ["在線"]),
+        pendingSource("omofun111", "omofun111", "O", ["在線"]),
+        pendingSource("e-acg", "E-ACG", "EA", ["E-ACG"]),
+        pendingSource("hoibi", "吼哔動漫", "吼", [
             AnimeSourceLine(id: "hoibi-2", title: "吼哔2線"),
             AnimeSourceLine(id: "hoibi-1", title: "吼哔1線"),
             AnimeSourceLine(id: "hoibi-4", title: "吼哔4線")
         ]),
-        source("fengche", "風車影視", "風", ["動漫大全", "線路②", "線路①", "線路③", "備用②", "備用③"]),
-        source("qukanba", "去看吧", "去", ["EDD"]),
-        source("haixing", "海星動漫", "海", ["播放I", "播放II", "播放III", "播放IV", "播放V", "播放VI"]),
-        source("fanqie", "番茄動漫", "番", ["番茄2線", "番茄1線", "速播資源1"]),
-        source("hanime1-720p", "hanime1[720p]", "720", ["720p"], defaultEnabled: false, isAdult: true),
-        source("uzvod", "UZVOD", "UZ", ["在線"]),
-        source("ark", "次元方舟", "舟", ["在線"]),
-        source("2k", "2k動漫", "2K", ["極速資源-LZ", "極速資源-FF"]),
-        source("blue-ray", "高清藍光", "藍", ["高清藍光-OF", "高清藍光-LM", "高清藍光-LX"]),
-        source("dilidili", "嘀哩嘀哩", "嘀", ["在線"]),
-        source("fantuan", "飯團動漫", "飯", ["線路二", "線路四", "線路六", "線路三"]),
-        source("mx", "MX動漫", "MX", ["在線"], health: .loading),
+        pendingSource("fengche", "風車影視", "風", ["動漫大全", "線路②", "線路①", "線路③", "備用②", "備用③"]),
+        pendingSource("qukanba", "去看吧", "去", ["EDD"]),
+        pendingSource("haixing", "海星動漫", "海", ["播放I", "播放II", "播放III", "播放IV", "播放V", "播放VI"]),
+        pendingSource("fanqie", "番茄動漫", "番", ["番茄2線", "番茄1線", "速播資源1"]),
+        pendingSource("hanime1-720p", "hanime1[720p]", "720", ["720p"], isAdult: true),
+        pendingSource("uzvod", "UZVOD", "UZ", ["在線"]),
+        pendingSource("ark", "次元方舟", "舟", ["在線"]),
+        pendingSource("2k", "2k動漫", "2K", ["極速資源-LZ", "極速資源-FF"]),
+        pendingSource("blue-ray", "高清藍光", "藍", ["高清藍光-OF", "高清藍光-LM", "高清藍光-LX"]),
+        pendingSource("dilidili", "嘀哩嘀哩", "嘀", ["在線"]),
+        pendingSource("fantuan", "飯團動漫", "飯", ["線路二", "線路四", "線路六", "線路三"]),
+        pendingSource("mx", "MX動漫", "MX", ["在線"]),
         source("miaowu", "喵物次元", "喵", ["Cloudflare 驗證"], health: .needsCloudflare, defaultEnabled: false),
         source("new-youku", "新優酷", "NU", ["驗證碼"], health: .needsCaptcha, defaultEnabled: false),
-        source("dongmandan", "動漫蛋", "蛋", ["在線"], health: .loading),
-        source("mengdao", "萌道動漫", "萌", ["播放地址"]),
-        source("gugufan", "咕咕番", "咕", [
+        pendingSource("dongmandan", "動漫蛋", "蛋", ["在線"]),
+        pendingSource("mengdao", "萌道動漫", "萌", ["播放地址"]),
+        pendingSource("gugufan", "咕咕番", "咕", [
             AnimeSourceLine(id: "gugufan-a", title: "咕咕A線"),
             AnimeSourceLine(id: "gugufan-b", title: "咕咕B線(已弃用)", isDeprecated: true)
         ]),
@@ -254,6 +255,42 @@ public enum AnimeSourceCatalog {
             lines: lines,
             health: health,
             defaultEnabled: defaultEnabled,
+            isAdult: isAdult
+        )
+    }
+
+    private static func pendingSource(
+        _ id: String,
+        _ title: String,
+        _ iconLabel: String,
+        _ lineTitles: [String],
+        isAdult: Bool = false
+    ) -> AnimeSourceDefinition {
+        source(
+            id,
+            title,
+            iconLabel,
+            lineTitles,
+            health: .needsAdapter,
+            defaultEnabled: false,
+            isAdult: isAdult
+        )
+    }
+
+    private static func pendingSource(
+        _ id: String,
+        _ title: String,
+        _ iconLabel: String,
+        _ lines: [AnimeSourceLine],
+        isAdult: Bool = false
+    ) -> AnimeSourceDefinition {
+        source(
+            id,
+            title,
+            iconLabel,
+            lines,
+            health: .needsAdapter,
+            defaultEnabled: false,
             isAdult: isAdult
         )
     }

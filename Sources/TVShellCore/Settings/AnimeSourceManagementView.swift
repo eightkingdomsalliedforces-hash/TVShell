@@ -159,6 +159,7 @@ private struct AnimeSourceRow: View {
         case .available: .cyan
         case .loading: .purple
         case .needsCloudflare, .needsCaptcha: .orange
+        case .needsAdapter: .yellow
         case .failed: .red
         case .disabled: .gray
         }
@@ -178,6 +179,8 @@ private struct AnimeSourceRow: View {
             return "需要先在驗證視窗通過 Cloudflare"
         case .needsCaptcha:
             return "需要先處理驗證碼"
+        case .needsAdapter:
+            return "尚未接入合法 adapter；可改用官方 API、Selector JSON 或自有媒體服務"
         case .failed:
             return "目前不可用，可稍後重試"
         case .disabled:
@@ -212,6 +215,7 @@ private struct AnimeSourceHealthBadge: View {
         case .failed: return "失敗"
         case .needsCloudflare: return "Cloudflare"
         case .needsCaptcha: return "驗證碼"
+        case .needsAdapter: return "待接入"
         case .disabled: return "已停用"
         }
     }
@@ -226,6 +230,7 @@ private struct AnimeSourceHealthBadge: View {
         case .available: return .green
         case .failed: return .red
         case .needsCloudflare, .needsCaptcha: return .orange
+        case .needsAdapter: return .yellow
         case .disabled: return .white.opacity(0.48)
         }
     }

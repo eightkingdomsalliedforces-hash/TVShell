@@ -318,6 +318,10 @@ public final class AppState: ObservableObject {
             guard let focusedAnimeSourceID else {
                 return
             }
+            guard animeSourceCatalog.instance(id: focusedAnimeSourceID)?.definition.health.canToggleFromRemote == true else {
+                statusMessage = animeSourceUnavailableMessage(for: focusedAnimeSourceID)
+                return
+            }
             animeSourceCatalog.toggleEnabled(sourceID: focusedAnimeSourceID)
             statusMessage = animeSourceStatusMessage(for: focusedAnimeSourceID)
         case .menu:
@@ -357,6 +361,40 @@ public final class AppState: ObservableObject {
         let line = source.selectedLine?.title ?? "預設線路"
         let enabled = source.isEnabled ? "已啟用" : "已停用"
         return "\(source.definition.title)：\(enabled)，\(line)"
+    }
+
+    private func animeSourceUnavailableMessage(for sourceID: String) -> String {
+        guard let source = animeSourceCatalog.instance(id: sourceID) else {
+            return "動漫來源不可用"
+        }
+
+        switch source.definition.health {
+        case .needsAdapter:
+            return "\(source.definition.title)：待接入 adapter，目前不能播放"
+        case .needsCloudflare:
+            return "\(source.definition.title)：需要 Cloudflare 驗證流程"
+        case .needsCaptcha:
+            return "\(source.definition.title)：需要驗證碼流程"
+        case .failed:
+            return "\(source.definition.title)：目前連線失敗"
+        case .loading:
+            return "\(source.definition.title)：正在等待健康檢查"
+        case .disabled:
+            return "\(source.definition.title)：已停用"
+        case .available:
+            return animeSourceStatusMessage(for: sourceID)
+        }
+    }
+}
+
+private extension AnimeSourceHealth {
+    var canToggleFromRemote: Bool {
+        switch self {
+        case .available:
+            true
+        case .loading, .failed, .needsCloudflare, .needsCaptcha, .needsAdapter, .disabled:
+            false
+        }
     }
 }
 

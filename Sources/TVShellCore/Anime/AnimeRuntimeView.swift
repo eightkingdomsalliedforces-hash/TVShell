@@ -72,6 +72,8 @@ public struct AnimeRuntimeView: View {
                 }
             }
 
+            searchKeywordBar(metrics: metrics)
+
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 230 * metrics.scale), spacing: 22 * metrics.scale)],
                 alignment: .leading,
@@ -88,13 +90,30 @@ public struct AnimeRuntimeView: View {
 
             Spacer()
 
-            Text("方向鍵選集，OK 播放，Menu 換搜尋，Home 回主畫面。播放中 Menu 開關彈幕。")
+            Text("方向鍵選集，OK 播放，Menu 切換搜尋作品，Home 回主畫面。播放中 Menu 開關彈幕。")
                 .font(.system(size: 25 * metrics.scale, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.62))
         }
         .padding(.horizontal, metrics.horizontalPadding)
         .padding(.top, metrics.topPadding)
         .padding(.bottom, 54 * metrics.scale)
+    }
+
+    private func searchKeywordBar(metrics: TVMetrics) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 14 * metrics.scale) {
+                ForEach(Array(controller.searchKeywords.enumerated()), id: \.offset) { index, keyword in
+                    Text(keyword)
+                        .font(.system(size: 22 * metrics.scale, weight: .bold))
+                        .lineLimit(1)
+                        .padding(.horizontal, 20 * metrics.scale)
+                        .padding(.vertical, 12 * metrics.scale)
+                        .liquidGlassCard(isFocused: index == controller.searchKeywordIndex, cornerRadius: 18 * metrics.scale)
+                        .opacity(index == controller.searchKeywordIndex ? 1 : 0.58)
+                }
+            }
+            .padding(.vertical, 8 * metrics.scale)
+        }
     }
 
     private func player(metrics: TVMetrics) -> some View {
@@ -136,11 +155,11 @@ final class AnimeRuntimeController: ObservableObject {
     @Published private(set) var statusText = "正在載入動畫源..."
     @Published private(set) var visibleDanmaku: [DanmakuComment] = []
     @Published private(set) var currentYouTubeVideoID: String?
+    @Published private(set) var searchKeywordIndex = 0
 
     private var sourceProvider: (any AnimeSourceProvider)?
     private let danmakuProvider: any DanmakuProvider
-    private let searchKeywords = ["芙莉蓮", "藥師少女", "我推的孩子", "咒術迴戰", "孤獨搖滾"]
-    private var searchKeywordIndex = 0
+    let searchKeywords = AnimeSearchKeywordCatalog.defaultKeywords
     private var comments: [DanmakuComment] = []
     private nonisolated(unsafe) var observer: NSObjectProtocol?
     private nonisolated(unsafe) var timeObserver: Any?
