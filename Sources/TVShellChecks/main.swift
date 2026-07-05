@@ -25,6 +25,7 @@ struct TVShellChecks {
         try checkExternalAnimeIntegrations()
         try await checkDandanplayConfiguredProvider()
         try checkYouTubeNativeRuntimeAndAPI()
+        try await checkBangumiYouTubeAnimeSourceFindsPlayableCandidates()
         print("TVShellChecks passed")
     }
 
@@ -458,6 +459,64 @@ struct TVShellChecks {
         try expect(youtubeState.phase == .playing, "youtube select starts playback")
         youtubeState.apply(.back)
         try expect(youtubeState.phase == .browsing, "youtube back returns to native list")
+    }
+
+    static func checkBangumiYouTubeAnimeSourceFindsPlayableCandidates() async throws {
+        let bangumiResponse = """
+        {
+          "data": [
+            {
+              "id": 424883,
+              "name": "Sousou no Frieren",
+              "name_cn": "葬送的芙莉蓮",
+              "summary": "勇者一行打倒魔王之後。",
+              "eps": 2
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let youtubeResponse = """
+        {
+          "items": [
+            {
+              "id": { "videoId": "frieren01" },
+              "snippet": {
+                "title": "葬送的芙莉蓮 第 1 話",
+                "channelTitle": "動畫頻道",
+                "description": "合法上架片段",
+                "thumbnails": {
+                  "high": { "url": "https://example.com/frieren.jpg" }
+                }
+              }
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let bangumiRequest = try BangumiAPI.searchSubjectsRequest(keyword: "芙莉蓮")
+        let youtubeRequest = try YouTubeDataAPI.searchRequest(
+            query: "葬送的芙莉蓮 第 1 話",
+            credentials: YouTubeCredentials(apiKey: "yt-key"),
+            maxResults: 10
+        )
+        let transport = StaticAnimeHTTPTransport(routes: [
+            bangumiRequest.url.absoluteString: bangumiResponse,
+            youtubeRequest.url.absoluteString: youtubeResponse
+        ])
+        let provider = BangumiYouTubeAnimeSourceProvider(
+            youtubeCredentials: YouTubeCredentials(apiKey: "yt-key"),
+            transport: transport
+        )
+
+        let results = try await provider.search(AnimeSearchQuery(keyword: "芙莉蓮"))
+        try expect(results.first?.title == "葬送的芙莉蓮", "bangumi youtube provider uses bangumi title")
+        try expect(results.first?.episodes.count == 2, "bangumi youtube provider creates episode list")
+
+        guard let episode = results.first?.episodes.first else {
+            throw CheckFailure("missing bangumi youtube episode")
+        }
+        let streams = try await provider.streams(for: episode)
+        try expect(streams.first?.url.absoluteString == "youtube://frieren01", "bangumi youtube provider resolves youtube candidate")
+        try expect(streams.first?.quality == "YouTube", "bangumi youtube provider labels youtube source")
     }
 }
 

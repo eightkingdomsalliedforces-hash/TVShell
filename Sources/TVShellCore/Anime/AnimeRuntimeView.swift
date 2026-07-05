@@ -82,7 +82,7 @@ public struct AnimeRuntimeView: View {
 
             Spacer()
 
-            Text("方向鍵選集，OK 播放，Menu 開關彈幕，Home 回主畫面。")
+            Text("方向鍵選集，OK 播放，Menu 換搜尋，Home 回主畫面。播放中 Menu 開關彈幕。")
                 .font(.system(size: 25 * metrics.scale, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.62))
         }
@@ -93,12 +93,17 @@ public struct AnimeRuntimeView: View {
 
     private func player(metrics: TVMetrics) -> some View {
         ZStack(alignment: .bottomLeading) {
-            AnimePlayerSurface(player: controller.player)
-                .ignoresSafeArea()
-
             if controller.state.isDanmakuVisible {
                 DanmakuOverlay(comments: controller.visibleDanmaku, metrics: metrics)
                     .transition(.opacity)
+            }
+
+            if let youtubeVideoID = controller.currentYouTubeVideoID {
+                YouTubePlayerView(videoID: youtubeVideoID)
+                    .ignoresSafeArea()
+            } else {
+                AnimePlayerSurface(player: controller.player)
+                    .ignoresSafeArea()
             }
 
             VStack(alignment: .leading, spacing: 12 * metrics.scale) {
@@ -124,9 +129,12 @@ final class AnimeRuntimeController: ObservableObject {
     @Published private(set) var episodes: [AnimeEpisode] = []
     @Published private(set) var statusText = "正在載入動畫源..."
     @Published private(set) var visibleDanmaku: [DanmakuComment] = []
+    @Published private(set) var currentYouTubeVideoID: String?
 
     private let sourceProvider: any AnimeSourceProvider
     private let danmakuProvider: any DanmakuProvider
+    private let searchKeywords = ["芙莉蓮", "藥師少女", "我推的孩子", "咒術迴戰", "孤獨搖滾"]
+    private var searchKeywordIndex = 0
     private var comments: [DanmakuComment] = []
     private nonisolated(unsafe) var observer: NSObjectProtocol?
     private nonisolated(unsafe) var timeObserver: Any?
@@ -134,7 +142,7 @@ final class AnimeRuntimeController: ObservableObject {
     private var mediaState = MediaControlState()
 
     init(
-        sourceProvider: any AnimeSourceProvider = AnimeDemoCatalog.sourceProvider(),
+        sourceProvider: any AnimeSourceProvider = AnimeSourceProviderFactory.defaultProvider(),
         danmakuProvider: any DanmakuProvider = AnimeDemoCatalog.danmakuProvider()
     ) {
         self.sourceProvider = sourceProvider
@@ -172,7 +180,8 @@ final class AnimeRuntimeController: ObservableObject {
 
     func load() async {
         do {
-            let results = try await sourceProvider.search(AnimeSearchQuery(keyword: ""))
+            let keyword = searchKeywords[searchKeywordIndex]
+            let results = try await sourceProvider.search(AnimeSearchQuery(keyword: keyword))
             guard let first = results.first else {
                 statusText = "沒有找到動畫。"
                 return
@@ -181,7 +190,7 @@ final class AnimeRuntimeController: ObservableObject {
             currentTitle = first
             episodes = try await sourceProvider.episodes(for: first)
             state.updateEpisodeCount(episodes.count)
-            statusText = "來源：\(sourceProvider.displayName) · 已載入 \(episodes.count) 集"
+            statusText = "來源：\(sourceProvider.displayName) · 已載入 \(episodes.count) 集 · 搜尋：\(keyword)"
         } catch {
             statusText = "動畫源載入失敗：\(error.localizedDescription)"
         }
@@ -190,9 +199,20 @@ final class AnimeRuntimeController: ObservableObject {
     func stop() {
         player.pause()
         player.replaceCurrentItem(with: nil)
+        currentYouTubeVideoID = nil
     }
 
     private func handle(_ command: RemoteCommand) {
+        if state.phase == .browsing, command == .menu {
+            searchKeywordIndex = (searchKeywordIndex + 1) % searchKeywords.count
+            episodes = []
+            currentTitle = nil
+            state = AnimeRuntimeState(episodeCount: 0)
+            statusText = "正在搜尋：\(searchKeywords[searchKeywordIndex])..."
+            Task { await load() }
+            return
+        }
+
         let previousPhase = state.phase
         state.apply(command)
 
@@ -239,10 +259,14 @@ final class AnimeRuntimeController: ObservableObject {
             }
 
             comments = DanmakuAggregator.merge([try await danmakuProvider.comments(for: episode.identity)])
-            loadPlayer(url: stream.url)
+            loadPlayer(stream)
             statusText = "播放源：\(stream.quality) · 彈幕 \(comments.count) 條"
         } catch {
-            statusText = "解析失敗：\(error.localizedDescription)"
+            if error as? YouTubeAPIError == .missingAPIKey {
+                statusText = "需要設定 TVSHELL_YOUTUBE_API_KEY 才能搜尋並播放 YouTube 動漫來源。"
+            } else {
+                statusText = "解析失敗：\(error.localizedDescription)"
+            }
             state = AnimeRuntimeState(
                 episodeCount: episodes.count,
                 focusedEpisodeIndex: state.focusedEpisodeIndex,
@@ -252,8 +276,16 @@ final class AnimeRuntimeController: ObservableObject {
         }
     }
 
-    private func loadPlayer(url: URL) {
-        let item = AVPlayerItem(url: url)
+    private func loadPlayer(_ stream: AnimeStreamCandidate) {
+        if stream.url.scheme == "youtube" {
+            currentYouTubeVideoID = stream.url.host ?? stream.url.absoluteString.replacingOccurrences(of: "youtube://", with: "")
+            player.pause()
+            player.replaceCurrentItem(with: nil)
+            return
+        }
+
+        currentYouTubeVideoID = nil
+        let item = AVPlayerItem(url: stream.url)
         itemObserver?.invalidate()
         itemObserver = item.observe(\.status, options: [.new, .initial]) { [weak self] item, _ in
             Task { @MainActor in

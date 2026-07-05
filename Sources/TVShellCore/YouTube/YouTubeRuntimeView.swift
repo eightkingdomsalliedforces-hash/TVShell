@@ -206,7 +206,7 @@ private struct YouTubeVideoCard: View {
     }
 }
 
-private struct YouTubePlayerView: NSViewRepresentable {
+struct YouTubePlayerView: NSViewRepresentable {
     let videoID: String
 
     func makeCoordinator() -> Coordinator {
@@ -217,6 +217,7 @@ private struct YouTubePlayerView: NSViewRepresentable {
         let configuration = WKWebViewConfiguration()
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.setValue(false, forKey: "drawsBackground")
+        context.coordinator.videoID = videoID
         context.coordinator.attach(to: webView)
         webView.loadHTMLString(Self.html(videoID: videoID), baseURL: URL(string: "https://www.youtube.com"))
         return webView
