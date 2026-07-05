@@ -168,6 +168,17 @@ public struct AnimeSourceCatalogState: Codable, Equatable, Sendable {
         instances.insert(item, at: nextIndex)
         focusedID = sourceID
     }
+
+    public func includingDynamicDefinitions(_ definitions: [AnimeSourceDefinition]) -> AnimeSourceCatalogState {
+        var next = self
+        for definition in definitions where next.instances.contains(where: { $0.id == definition.id }) == false {
+            next.instances.append(AnimeSourceInstance(definition: definition))
+        }
+        if next.focusedID == nil {
+            next.focusedID = next.instances.first?.id
+        }
+        return next
+    }
 }
 
 public enum AnimeSourceCatalog {

@@ -104,14 +104,22 @@ public enum AnimeSourceProviderFactory {
     public static func provider(
         catalog: AnimeSourceCatalogState,
         youtubeCredentials: YouTubeCredentials = .environment(),
-        transport: any AnimeHTTPTransport = URLSessionAnimeHTTPTransport()
+        transport: any AnimeHTTPTransport = URLSessionAnimeHTTPTransport(),
+        selectorConfigs: [SelectorAnimeSourceConfig] = (try? SelectorAnimeSourceConfig.environment()) ?? []
     ) -> any AnimeSourceProvider {
-        let registry = AnimeSourceRegistry(adapters: [
+        let selectorAdapters = selectorConfigs.map { config in
+            SelectorAnimeSourceProvider(config: config, transport: transport) as any AnimeMediaSourceAdapter
+        }
+        let adapters: [any AnimeMediaSourceAdapter] = [
             BangumiYouTubeAnimeSourceProvider(
                 youtubeCredentials: youtubeCredentials,
                 transport: transport
             )
-        ])
-        return CatalogAnimeSourceProvider(catalog: catalog, registry: registry)
+        ] + selectorAdapters
+        let registry = AnimeSourceRegistry(adapters: adapters)
+        return CatalogAnimeSourceProvider(
+            catalog: catalog.includingDynamicDefinitions(selectorConfigs.map(\.catalogDefinition)),
+            registry: registry
+        )
     }
 }

@@ -28,6 +28,7 @@ struct TVShellChecks {
         try await checkBangumiYouTubeAnimeSourceFindsPlayableCandidates()
         try checkAnimekoStyleSourceCatalog()
         try await checkAnimeSourceRegistryUsesCatalog()
+        try await checkSelectorAnimeSourceProvider()
         print("TVShellChecks passed")
     }
 
@@ -628,6 +629,82 @@ struct TVShellChecks {
             youtubeCredentials: YouTubeCredentials(apiKey: "yt-key")
         )
         try expect(factoryProvider.id == "catalog", "factory creates catalog-backed anime provider")
+    }
+
+    static func checkSelectorAnimeSourceProvider() async throws {
+        let config = SelectorAnimeSourceConfig(
+            id: "selector-demo",
+            displayName: "Selector Demo",
+            searchURLTemplate: "https://source.example/search?q={keyword}",
+            resultPattern: SelectorMatchPattern(
+                pattern: #"<a class="anime" data-id="([^"]+)" href="([^"]+)">([^<]+)</a>"#,
+                idGroup: 1,
+                urlGroup: 2,
+                titleGroup: 3
+            ),
+            episodePattern: SelectorMatchPattern(
+                pattern: #"<a class="episode" data-number="([0-9]+)" href="([^"]+)">([^<]+)</a>"#,
+                idGroup: 1,
+                urlGroup: 2,
+                titleGroup: 3
+            ),
+            streamPattern: SelectorStreamPattern(
+                pattern: #"<source src="([^"]+)" data-quality="([^"]+)">"#,
+                urlGroup: 1,
+                qualityGroup: 2
+            )
+        )
+        let searchHTML = #"<a class="anime" data-id="frieren" href="/anime/frieren">葬送的芙莉蓮</a>"#.data(using: .utf8)!
+        let detailHTML = #"<a class="episode" data-number="1" href="/watch/frieren-1">第 1 話</a>"#.data(using: .utf8)!
+        let watchHTML = #"<video><source src="https://cdn.example/frieren-1.m3u8" data-quality="1080p"></video>"#.data(using: .utf8)!
+        let transport = StaticAnimeHTTPTransport(routes: [
+            "https://source.example/search?q=%E8%8A%99%E8%8E%89%E8%93%AE": searchHTML,
+            "https://source.example/anime/frieren": detailHTML,
+            "https://source.example/watch/frieren-1": watchHTML
+        ])
+        let provider = SelectorAnimeSourceProvider(config: config, transport: transport)
+
+        let results = try await provider.search(AnimeSearchQuery(keyword: "芙莉蓮"))
+        try expect(results.first?.title == "葬送的芙莉蓮", "selector source parses search result title")
+        try expect(results.first?.episodes.first?.title == "第 1 話", "selector source parses episode title from detail page")
+
+        guard let episode = results.first?.episodes.first else {
+            throw CheckFailure("missing selector episode")
+        }
+        let streams = try await provider.streams(for: episode)
+        try expect(streams.first?.url.absoluteString == "https://cdn.example/frieren-1.m3u8", "selector source parses stream url")
+        try expect(streams.first?.quality == "1080p", "selector source parses quality")
+
+        let encoded = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(SelectorAnimeSourceConfig.self, from: encoded)
+        try expect(decoded == config, "selector source config round trips through json")
+
+        let blockedTransport = StaticAnimeHTTPTransport(routes: [
+            "https://source.example/search?q=%E8%8A%99%E8%8E%89%E8%93%AE": "<title>Just a moment...</title><script>window._cf_chl_opt={}</script>".data(using: .utf8)!
+        ])
+        let blockedProvider = SelectorAnimeSourceProvider(config: config, transport: blockedTransport)
+        do {
+            _ = try await blockedProvider.search(AnimeSearchQuery(keyword: "芙莉蓮"))
+            throw CheckFailure("selector provider should report cloudflare captcha")
+        } catch let error as SelectorAnimeSourceError {
+            try expect(error == .captchaRequired(.cloudflare), "selector provider detects cloudflare challenge")
+        }
+
+        let envJSON = String(data: encoded, encoding: .utf8)!
+        let envConfigs = try SelectorAnimeSourceConfig.environment([
+            "TVSHELL_SELECTOR_SOURCES_JSON": "[\(envJSON)]"
+        ])
+        try expect(envConfigs.first == config, "selector configs load from environment json")
+
+        let catalog = AnimeSourceCatalogState(definitions: [config.catalogDefinition])
+        let factoryProvider = AnimeSourceProviderFactory.provider(
+            catalog: catalog,
+            youtubeCredentials: YouTubeCredentials(apiKey: ""),
+            transport: transport,
+            selectorConfigs: [config]
+        )
+        let factoryResults = try await factoryProvider.search(AnimeSearchQuery(keyword: "芙莉蓮"))
+        try expect(factoryResults.first?.title == "葬送的芙莉蓮", "factory registers enabled selector source configs")
     }
 }
 
