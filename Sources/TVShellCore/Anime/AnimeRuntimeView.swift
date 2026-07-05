@@ -227,7 +227,7 @@ final class AnimeRuntimeController: ObservableObject {
         do {
             statusText = "正在解析 \(episode.title)..."
             let candidates = try await sourceProvider.streams(for: episode)
-            guard let stream = candidates.first else {
+            guard let stream = AnimeStreamSelector.bestCandidate(from: candidates) else {
                 statusText = "沒有可用播放源。"
                 state = AnimeRuntimeState(
                     episodeCount: episodes.count,
@@ -238,7 +238,7 @@ final class AnimeRuntimeController: ObservableObject {
                 return
             }
 
-            comments = try await danmakuProvider.comments(for: episode.identity)
+            comments = DanmakuAggregator.merge([try await danmakuProvider.comments(for: episode.identity)])
             loadPlayer(url: stream.url)
             statusText = "播放源：\(stream.quality) · 彈幕 \(comments.count) 條"
         } catch {

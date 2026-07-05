@@ -22,6 +22,7 @@ struct TVShellChecks {
         try checkSettingsFocusIncludesVideoAndWebZoom()
         try await checkAnimeSourceAndDanmakuProviders()
         try checkAnimeRuntimeStateNavigation()
+        try checkExternalAnimeIntegrations()
         print("TVShellChecks passed")
     }
 
@@ -297,6 +298,64 @@ struct TVShellChecks {
         try expect(state.isDanmakuVisible == false, "anime menu toggles danmaku")
         state.apply(.back)
         try expect(state.phase == .browsing, "anime back returns to episode browser")
+    }
+
+    static func checkExternalAnimeIntegrations() throws {
+        let bangumiRequest = try BangumiAPI.searchSubjectsRequest(keyword: "芙莉蓮")
+        try expect(bangumiRequest.url.absoluteString == "https://api.bgm.tv/v0/search/subjects", "bangumi search endpoint uses v0 subjects search")
+        try expect(bangumiRequest.method == "POST", "bangumi search uses POST")
+        let bangumiBody = String(data: bangumiRequest.body ?? Data(), encoding: .utf8) ?? ""
+        try expect(bangumiBody.contains("\"keyword\":\"芙莉蓮\""), "bangumi search body contains keyword")
+        try expect(bangumiBody.contains("\"type\":[2]"), "bangumi search filters anime subjects")
+
+        let bangumiJSON = """
+        {
+          "data": [
+            {
+              "id": 424883,
+              "name": "Sousou no Frieren",
+              "name_cn": "葬送的芙莉蓮",
+              "summary": "勇者一行打倒魔王之後。",
+              "eps": 28
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let bangumiSubjects = try BangumiAPI.decodeSubjectSearch(bangumiJSON)
+        try expect(bangumiSubjects.first?.title == "葬送的芙莉蓮", "bangumi decoder prefers Chinese title")
+        try expect(bangumiSubjects.first?.episodeCount == 28, "bangumi decoder reads episode count")
+
+        let signature = DandanplaySignature.signature(
+            appID: "app123",
+            timestamp: 1_735_660_800,
+            path: "/api/v2/comment/123450001",
+            appSecret: "secret456"
+        )
+        try expect(signature == "oykjtAeMjRLO9sAerNa9hMyQZqFdBcWneI/ED4BerSQ=", "dandanplay signature matches documented algorithm")
+
+        let commentsJSON = """
+        {
+          "comments": [
+            { "p": "1.200,1,25,16777215,0", "m": "開場" },
+            { "p": "3.500,5,25,16711680,0", "m": "頂部彈幕" }
+          ]
+        }
+        """.data(using: .utf8)!
+        let parsedComments = try DandanplayAPI.decodeComments(commentsJSON)
+        try expect(parsedComments.first?.time == 1.2, "dandanplay parser reads timestamp")
+        try expect(parsedComments[1].mode == .top, "dandanplay parser maps top mode")
+
+        let combined = DanmakuAggregator.merge([
+            [DanmakuComment(time: 2.0, text: "B"), DanmakuComment(time: 1.0, text: "A")],
+            [DanmakuComment(time: 1.0, text: "A"), DanmakuComment(time: 3.0, text: "C")]
+        ])
+        try expect(combined.map(\.text) == ["A", "B", "C"], "danmaku aggregator sorts and deduplicates")
+
+        let selected = AnimeStreamSelector.bestCandidate(from: [
+            AnimeStreamCandidate(url: URL(string: "https://example.com/720.m3u8")!, quality: "720p", priority: 90),
+            AnimeStreamCandidate(url: URL(string: "https://example.com/1080.m3u8")!, quality: "1080p", priority: 80)
+        ])
+        try expect(selected?.quality == "1080p", "stream selector balances priority and quality")
     }
 }
 
