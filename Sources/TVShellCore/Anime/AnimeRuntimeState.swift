@@ -46,12 +46,12 @@ public struct AnimeRuntimeState: Equatable, Sendable {
         }
     }
 
-    public mutating func apply(_ command: RemoteCommand) {
+    public mutating func apply(_ command: RemoteCommand, episodeColumns: Int = 4) {
         switch phase {
         case .titles:
             handleTitles(command)
         case .episodes:
-            handleEpisodes(command)
+            handleEpisodes(command, columns: episodeColumns)
         case .playing:
             handlePlaying(command)
         }
@@ -59,9 +59,9 @@ public struct AnimeRuntimeState: Equatable, Sendable {
 
     private mutating func handleTitles(_ command: RemoteCommand) {
         switch command {
-        case .left, .up:
+        case .left:
             focusedTitleIndex = max(0, focusedTitleIndex - 1)
-        case .right, .down:
+        case .right:
             focusedTitleIndex = min(max(titleCount - 1, 0), focusedTitleIndex + 1)
         case .select:
             if titleCount > 0 {
@@ -72,12 +72,17 @@ public struct AnimeRuntimeState: Equatable, Sendable {
         }
     }
 
-    private mutating func handleEpisodes(_ command: RemoteCommand) {
+    private mutating func handleEpisodes(_ command: RemoteCommand, columns: Int) {
+        let columnStep = max(columns, 1)
         switch command {
-        case .left, .up:
+        case .left:
             focusedEpisodeIndex = max(0, focusedEpisodeIndex - 1)
-        case .right, .down:
+        case .right:
             focusedEpisodeIndex = min(max(episodeCount - 1, 0), focusedEpisodeIndex + 1)
+        case .up:
+            focusedEpisodeIndex = max(0, focusedEpisodeIndex - columnStep)
+        case .down:
+            focusedEpisodeIndex = min(max(episodeCount - 1, 0), focusedEpisodeIndex + columnStep)
         case .select:
             if episodeCount > 0 {
                 phase = .playing

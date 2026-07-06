@@ -36,10 +36,28 @@ public struct YouTubeRuntimeView: View {
             }
             .animation(TVMotion.runtime, value: controller.state.phase)
             .foregroundStyle(.white)
+            .onAppear {
+                controller.updateGridColumns(videoGridColumns(for: metrics, size: proxy.size))
+            }
+            .onChange(of: proxy.size) { _, newSize in
+                controller.updateGridColumns(videoGridColumns(for: TVMetrics(size: newSize), size: newSize))
+            }
         }
         .task {
             await controller.load()
         }
+    }
+
+    private func videoGridColumns(for metrics: TVMetrics, size: CGSize) -> Int {
+        Self.adaptiveColumns(
+            availableWidth: size.width - (metrics.horizontalPadding * 2),
+            minimumWidth: 330 * metrics.scale,
+            spacing: 24 * metrics.scale
+        )
+    }
+
+    private static func adaptiveColumns(availableWidth: Double, minimumWidth: Double, spacing: Double) -> Int {
+        max(1, Int((max(availableWidth, minimumWidth) + spacing) / (minimumWidth + spacing)))
     }
 
     private func browser(metrics: TVMetrics) -> some View {
@@ -105,6 +123,7 @@ final class YouTubeRuntimeController: ObservableObject {
     @Published private(set) var state = YouTubeRuntimeState(itemCount: 0)
     @Published private(set) var videos: [YouTubeVideo] = []
     @Published private(set) var statusText = "正在載入 YouTube..."
+    private var gridColumns = 3
 
     private let provider: any YouTubeVideoProvider
     private nonisolated(unsafe) var observer: NSObjectProtocol?
@@ -138,6 +157,10 @@ final class YouTubeRuntimeController: ObservableObject {
         return videos[state.focusedIndex]
     }
 
+    func updateGridColumns(_ columns: Int) {
+        gridColumns = max(1, columns)
+    }
+
     func load() async {
         do {
             videos = try await provider.search(query: "tv")
@@ -152,7 +175,7 @@ final class YouTubeRuntimeController: ObservableObject {
 
     private func handle(_ command: RemoteCommand) {
         let previousPhase = state.phase
-        state.apply(command)
+        state.apply(command, columns: gridColumns)
 
         if previousPhase == .browsing, command == .back {
             NotificationCenter.default.post(name: .tvShellRequestLauncher, object: nil)

@@ -41,6 +41,12 @@ public struct AnimeRuntimeView: View {
             }
             .animation(TVMotion.runtime, value: controller.state.phase)
             .foregroundStyle(.white)
+            .onAppear {
+                controller.updateEpisodeColumns(episodeGridColumns(for: metrics, size: proxy.size))
+            }
+            .onChange(of: proxy.size) { _, newSize in
+                controller.updateEpisodeColumns(episodeGridColumns(for: TVMetrics(size: newSize), size: newSize))
+            }
         }
         .task {
             await controller.load(
@@ -54,6 +60,18 @@ public struct AnimeRuntimeView: View {
         .onDisappear {
             controller.stop()
         }
+    }
+
+    private func episodeGridColumns(for metrics: TVMetrics, size: CGSize) -> Int {
+        Self.adaptiveColumns(
+            availableWidth: size.width - (metrics.horizontalPadding * 2),
+            minimumWidth: 230 * metrics.scale,
+            spacing: 22 * metrics.scale
+        )
+    }
+
+    private static func adaptiveColumns(availableWidth: Double, minimumWidth: Double, spacing: Double) -> Int {
+        max(1, Int((max(availableWidth, minimumWidth) + spacing) / (minimumWidth + spacing)))
     }
 
     private func titleBrowser(metrics: TVMetrics) -> some View {
@@ -195,6 +213,7 @@ final class AnimeRuntimeController: ObservableObject {
     private var danmakuProvider: any DanmakuProvider
     let searchKeywords = AnimeSearchKeywordCatalog.defaultKeywords
     private var comments: [DanmakuComment] = []
+    private var episodeColumns = 4
     private nonisolated(unsafe) var observer: NSObjectProtocol?
     private nonisolated(unsafe) var timeObserver: Any?
     private nonisolated(unsafe) var itemObserver: NSKeyValueObservation?
@@ -274,6 +293,10 @@ final class AnimeRuntimeController: ObservableObject {
         currentYouTubeVideoID = nil
     }
 
+    func updateEpisodeColumns(_ columns: Int) {
+        episodeColumns = max(1, columns)
+    }
+
     private func handle(_ command: RemoteCommand) {
         if state.phase == .titles, command == .menu {
             searchKeywordIndex = (searchKeywordIndex + 1) % searchKeywords.count
@@ -287,7 +310,7 @@ final class AnimeRuntimeController: ObservableObject {
         }
 
         let previousPhase = state.phase
-        state.apply(command)
+        state.apply(command, episodeColumns: episodeColumns)
 
         if previousPhase == .titles, command == .back {
             NotificationCenter.default.post(name: .tvShellRequestLauncher, object: nil)
@@ -574,7 +597,6 @@ private struct DanmakuOverlay: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(.top, 78 * metrics.scale)
         .padding(.leading, 78 * metrics.scale)
-        .animation(TVMotion.focus, value: comments)
     }
 }
 

@@ -13,23 +13,34 @@ public struct LiquidGlassCardModifier: ViewModifier {
         content
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(.ultraThinMaterial)
+                    .fill(.regularMaterial)
+                    .overlay(baseFill)
                     .overlay(baseTint)
             )
             .overlay(edgeHighlight)
             .overlay(specularHighlight)
             .shadow(
-                color: isFocused ? .cyan.opacity(0.26) : .black.opacity(0.24),
-                radius: isFocused ? 42 : 16,
+                color: isFocused ? .cyan.opacity(0.18) : .black.opacity(0.18),
+                radius: isFocused ? 24 : 8,
                 x: 0,
-                y: isFocused ? 26 : 10
+                y: isFocused ? 16 : 6
             )
-            .shadow(
-                color: isFocused ? .white.opacity(0.22) : .clear,
-                radius: isFocused ? 22 : 0,
-                x: 0,
-                y: 0
-            )
+    }
+
+    private var baseFill: LinearGradient {
+        LinearGradient(
+            colors: isFocused
+                ? [
+                    Color(red: 0.42, green: 0.48, blue: 0.58).opacity(0.24),
+                    Color(red: 0.12, green: 0.16, blue: 0.24).opacity(0.20)
+                ]
+                : [
+                    Color.white.opacity(0.10),
+                    Color(red: 0.08, green: 0.10, blue: 0.14).opacity(0.16)
+                ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 
     private var baseTint: some View {
@@ -37,8 +48,8 @@ public struct LiquidGlassCardModifier: ViewModifier {
             .fill(
                 LinearGradient(
                     colors: isFocused
-                        ? [.white.opacity(0.24), .cyan.opacity(0.16), .purple.opacity(0.2)]
-                        : [.white.opacity(0.11), .white.opacity(0.04)],
+                        ? [.white.opacity(0.22), .cyan.opacity(0.12), .purple.opacity(0.12)]
+                        : [.white.opacity(0.10), .white.opacity(0.03)],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -57,7 +68,7 @@ public struct LiquidGlassCardModifier: ViewModifier {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 ),
-                lineWidth: isFocused ? 4 : 1
+                lineWidth: isFocused ? 3 : 1
             )
     }
 

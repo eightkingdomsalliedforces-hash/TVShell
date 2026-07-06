@@ -33,6 +33,7 @@ struct TVShellChecks {
         try await checkSelectorAnimeSourceProvider()
         try checkAnimeSourcesExposePlayableStatusAndSearchChoices()
         try checkBigScreenViewsStayScrollableAndWindowIsResizable()
+        try checkRuntimeNavigationAndPerformanceBudget()
         print("TVShellChecks passed")
     }
 
@@ -297,13 +298,19 @@ struct TVShellChecks {
     }
 
     static func checkAnimeRuntimeStateNavigation() throws {
-        var state = AnimeRuntimeState(titleCount: 2, episodeCount: 3)
+        var state = AnimeRuntimeState(titleCount: 3, episodeCount: 8)
         state.apply(.right)
         try expect(state.focusedTitleIndex == 1, "anime right moves focused title on title grid")
+        state.apply(.down)
+        try expect(state.focusedTitleIndex == 1, "anime title row ignores vertical movement")
         state.apply(.select)
         try expect(state.phase == .episodes, "anime select opens episode list")
         state.apply(.right)
         try expect(state.focusedEpisodeIndex == 1, "anime right moves focused episode in episode list")
+        state.apply(.down)
+        try expect(state.focusedEpisodeIndex == 5, "anime down moves to the same column on the next episode row")
+        state.apply(.up)
+        try expect(state.focusedEpisodeIndex == 1, "anime up moves to the same column on the previous episode row")
         state.apply(.left)
         try expect(state.focusedEpisodeIndex == 0, "anime left moves focused episode")
         state.apply(.select)
@@ -529,9 +536,13 @@ struct TVShellChecks {
         try expect(videos.first?.id == "abcXYZ", "youtube decoder reads video id")
         try expect(videos.first?.title == "測試影片", "youtube decoder reads title")
 
-        var youtubeState = YouTubeRuntimeState(itemCount: 2)
+        var youtubeState = YouTubeRuntimeState(itemCount: 8)
         youtubeState.apply(.right)
         try expect(youtubeState.focusedIndex == 1, "youtube right moves focus")
+        youtubeState.apply(.down)
+        try expect(youtubeState.focusedIndex == 4, "youtube down moves focus to the next visual row")
+        youtubeState.apply(.up)
+        try expect(youtubeState.focusedIndex == 1, "youtube up moves focus to the previous visual row")
         youtubeState.apply(.select)
         try expect(youtubeState.phase == .playing, "youtube select starts playback")
         youtubeState.apply(.back)
@@ -835,10 +846,28 @@ struct TVShellChecks {
         let app = try String(contentsOf: root.appending(path: "Sources/TVShell/TVShellApp.swift"))
         try expect(app.contains("minWidth: 960"), "root window can shrink below 1280 for smaller displays")
         try expect(app.contains("minHeight: 540"), "root window can shrink below 720 for smaller displays")
+        try expect(app.contains(".windowStyle(.hiddenTitleBar)") == false, "root window keeps a visible macOS title bar for maximize")
 
         let windowManager = try String(contentsOf: root.appending(path: "Sources/TVShellCore/App/ShellWindowManager.swift"))
         try expect(windowManager.contains(".resizable"), "window explicitly keeps resizable behavior")
         try expect(windowManager.contains("standardWindowButton(.zoomButton)"), "window explicitly enables the green zoom/maximize button")
+        try expect(windowManager.contains("performZoom"), "window manager exposes a direct zoom/maximize command")
+    }
+
+    static func checkRuntimeNavigationAndPerformanceBudget() throws {
+        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+
+        let youtubeRuntime = try String(contentsOf: root.appending(path: "Sources/TVShellCore/YouTube/YouTubeRuntimeView.swift"))
+        try expect(youtubeRuntime.contains("updateGridColumns"), "youtube runtime updates remote navigation columns from current window size")
+
+        let animeRuntime = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Anime/AnimeRuntimeView.swift"))
+        try expect(animeRuntime.contains("updateEpisodeColumns"), "anime runtime updates episode navigation columns from current window size")
+        try expect(animeRuntime.contains(".animation(TVMotion.focus, value: comments)") == false, "danmaku overlay does not animate every comment refresh")
+
+        let liquidGlass = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Design/LiquidGlass.swift"))
+        try expect(liquidGlass.contains(".regularMaterial"), "liquid glass uses frosted glass material")
+        try expect(liquidGlass.contains(".ultraThinMaterial") == false, "liquid glass avoids the previous ultra-thin material on every card")
+        try expect(liquidGlass.contains("radius: isFocused ? 42") == false, "liquid glass avoids very large focus shadows")
     }
 }
 

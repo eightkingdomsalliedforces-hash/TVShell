@@ -4,6 +4,13 @@ import SwiftUI
 public struct ShellWindowConfigurator: NSViewRepresentable {
     public init() {}
 
+    public static func performZoomFocusedWindow() {
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow else {
+            return
+        }
+        window.performZoom(nil)
+    }
+
     public func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
@@ -23,10 +30,12 @@ public struct ShellWindowConfigurator: NSViewRepresentable {
             return
         }
 
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        window.styleMask.insert([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
-        window.collectionBehavior.insert(.fullScreenPrimary)
+        window.title = "MacTV"
+        window.titleVisibility = .visible
+        window.titlebarAppearsTransparent = false
+        window.styleMask.insert([.titled, .closable, .miniaturizable, .resizable])
+        window.styleMask.remove(.fullSizeContentView)
+        window.collectionBehavior.formUnion([.fullScreenPrimary, .managed])
         window.minSize = NSSize(width: 960, height: 540)
         window.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         window.isMovableByWindowBackground = true

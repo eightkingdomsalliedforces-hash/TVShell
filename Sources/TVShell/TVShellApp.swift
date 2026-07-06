@@ -16,6 +16,13 @@ struct TVShellApp: App {
             }
                 .frame(minWidth: 960, minHeight: 540)
         }
-        .windowStyle(.hiddenTitleBar)
+        .commands {
+            CommandMenu("MacTV") {
+                Button("最大化視窗") {
+                    ShellWindowConfigurator.performZoomFocusedWindow()
+                }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+            }
+        }
     }
 }

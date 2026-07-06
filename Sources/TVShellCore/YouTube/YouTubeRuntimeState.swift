@@ -19,14 +19,19 @@ public struct YouTubeRuntimeState: Equatable, Sendable {
         focusedIndex = min(focusedIndex, max(itemCount - 1, 0))
     }
 
-    public mutating func apply(_ command: RemoteCommand) {
+    public mutating func apply(_ command: RemoteCommand, columns: Int = 3) {
         switch phase {
         case .browsing:
+            let columnStep = max(columns, 1)
             switch command {
-            case .left, .up:
+            case .left:
                 focusedIndex = max(0, focusedIndex - 1)
-            case .right, .down:
+            case .right:
                 focusedIndex = min(max(itemCount - 1, 0), focusedIndex + 1)
+            case .up:
+                focusedIndex = max(0, focusedIndex - columnStep)
+            case .down:
+                focusedIndex = min(max(itemCount - 1, 0), focusedIndex + columnStep)
             case .select:
                 if itemCount > 0 {
                     phase = .playing
