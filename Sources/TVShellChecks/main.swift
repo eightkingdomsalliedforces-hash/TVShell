@@ -32,6 +32,7 @@ struct TVShellChecks {
         try await checkAnimeSourceRegistryUsesCatalog()
         try await checkSelectorAnimeSourceProvider()
         try checkAnimeSourcesExposePlayableStatusAndSearchChoices()
+        try checkBigScreenViewsStayScrollableAndWindowIsResizable()
         print("TVShellChecks passed")
     }
 
@@ -811,6 +812,33 @@ struct TVShellChecks {
         state.handle(.select)
         try expect(state.animeSourceCatalog.instance(id: "girigiri")?.isEnabled == false, "pending adapter source cannot be enabled from remote")
         try expect(state.statusMessage?.contains("待接入") == true, "pending adapter source explains why it cannot play")
+    }
+
+    static func checkBigScreenViewsStayScrollableAndWindowIsResizable() throws {
+        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+
+        let launcher = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Launcher/LauncherView.swift"))
+        try expect(launcher.contains("ScrollView(.horizontal"), "launcher rows use horizontal scrolling instead of overflowing")
+        try expect(launcher.contains(".scrollIndicators(.hidden)"), "launcher hides TV-unfriendly scroll indicators")
+
+        for path in [
+            "Sources/TVShellCore/Settings/SettingsView.swift",
+            "Sources/TVShellCore/Settings/AppManagementView.swift",
+            "Sources/TVShellCore/Settings/RemoteLearningView.swift"
+        ] {
+            let source = try String(contentsOf: root.appending(path: path))
+            try expect(source.contains("GeometryReader"), "\(path) adapts to window size")
+            try expect(source.contains("ScrollView"), "\(path) scrolls when the window is smaller than the content")
+            try expect(source.contains("TVMetrics"), "\(path) uses TVMetrics scaling")
+        }
+
+        let app = try String(contentsOf: root.appending(path: "Sources/TVShell/TVShellApp.swift"))
+        try expect(app.contains("minWidth: 960"), "root window can shrink below 1280 for smaller displays")
+        try expect(app.contains("minHeight: 540"), "root window can shrink below 720 for smaller displays")
+
+        let windowManager = try String(contentsOf: root.appending(path: "Sources/TVShellCore/App/ShellWindowManager.swift"))
+        try expect(windowManager.contains(".resizable"), "window explicitly keeps resizable behavior")
+        try expect(windowManager.contains("standardWindowButton(.zoomButton)"), "window explicitly enables the green zoom/maximize button")
     }
 }
 

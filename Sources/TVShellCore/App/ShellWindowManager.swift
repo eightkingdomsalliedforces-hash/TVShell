@@ -25,8 +25,12 @@ public struct ShellWindowConfigurator: NSViewRepresentable {
 
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-        window.styleMask.insert(.fullSizeContentView)
+        window.styleMask.insert([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
         window.collectionBehavior.insert(.fullScreenPrimary)
-        window.minSize = NSSize(width: 1280, height: 720)
+        window.minSize = NSSize(width: 960, height: 540)
+        window.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        window.isMovableByWindowBackground = true
+        window.standardWindowButton(.zoomButton)?.isHidden = false
+        window.standardWindowButton(.zoomButton)?.isEnabled = true
     }
 }

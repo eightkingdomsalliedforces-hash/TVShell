@@ -68,45 +68,55 @@ public struct LauncherView: View {
             ZStack(alignment: .topLeading) {
                 heroBackground
 
-                VStack(alignment: .leading, spacing: 42 * metrics.scale) {
-                    topBar(metrics: metrics)
-                        .padding(.top, metrics.topPadding)
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 42 * metrics.scale) {
+                        topBar(metrics: metrics)
+                            .padding(.top, metrics.topPadding)
 
-                    VStack(alignment: .leading, spacing: 14 * metrics.scale) {
-                        Text(focusedApp?.name ?? "TV Shell")
-                            .font(.system(size: metrics.heroTitleSize, weight: .bold))
-                        Text(heroSubtitle)
-                            .font(.system(size: metrics.heroSubtitleSize, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.68))
-                    }
-                    .padding(.top, 16 * metrics.scale)
-
-                    quickActionBar(metrics: metrics)
-
-                    VStack(alignment: .leading, spacing: metrics.rowSpacing) {
-                        ForEach(LauncherLayout.sections(for: appState.apps)) { section in
-                            LauncherRowView(section: section, focusedAppID: appState.focusedAppID, metrics: metrics)
+                        VStack(alignment: .leading, spacing: 14 * metrics.scale) {
+                            Text(focusedApp?.name ?? "TV Shell")
+                                .font(.system(size: metrics.heroTitleSize, weight: .bold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
+                            Text(heroSubtitle)
+                                .font(.system(size: metrics.heroSubtitleSize, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.68))
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.76)
                         }
+                        .padding(.top, 16 * metrics.scale)
+
+                        quickActionBar(metrics: metrics)
+
+                        VStack(alignment: .leading, spacing: metrics.rowSpacing) {
+                            ForEach(LauncherLayout.sections(for: appState.apps)) { section in
+                                LauncherRowView(section: section, focusedAppID: appState.focusedAppID, metrics: metrics)
+                            }
+                        }
+                        .scaleEffect(appState.displayScale.multiplier(), anchor: .topLeading)
+
+                        if let statusMessage = appState.statusMessage {
+                            Text(statusMessage)
+                                .font(.system(size: 24 * metrics.scale, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.82))
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.74)
+                                .padding(.horizontal, 24 * metrics.scale)
+                                .padding(.vertical, 16 * metrics.scale)
+                                .liquidGlassCard(isFocused: true, cornerRadius: 20)
+                        }
+
+                        Text("方向鍵移動，OK 開啟，返回或 Home 回主畫面。")
+                            .font(.system(size: metrics.hintSize, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.62))
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.72)
+                            .padding(.bottom, 42 * metrics.scale)
                     }
-                    .scaleEffect(appState.displayScale.multiplier(), anchor: .topLeading)
-
-                Spacer()
-
-                if let statusMessage = appState.statusMessage {
-                    Text(statusMessage)
-                        .font(.system(size: 24 * metrics.scale, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.82))
-                        .padding(.horizontal, 24 * metrics.scale)
-                        .padding(.vertical, 16 * metrics.scale)
-                        .liquidGlassCard(isFocused: true, cornerRadius: 20)
+                    .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .topLeading)
+                    .padding(.horizontal, metrics.horizontalPadding)
                 }
-
-                Text("方向鍵移動，OK 開啟，返回或 Home 回主畫面。")
-                        .font(.system(size: metrics.hintSize, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.62))
-                        .padding(.bottom, 42 * metrics.scale)
-                }
-                .padding(.horizontal, metrics.horizontalPadding)
+                .scrollIndicators(.hidden)
             }
         }
         .foregroundStyle(.white)
@@ -157,21 +167,27 @@ public struct LauncherView: View {
     }
 
     private func quickActionBar(metrics: TVMetrics) -> some View {
-        HStack(spacing: 16 * metrics.scale) {
-            ForEach(LauncherLayout.quickActions(for: appState.apps)) { app in
-                Button {
-                    appState.focusedAppID = app.id
-                    appState.handle(.select)
-                } label: {
-                    Text(app.name)
-                        .font(.system(size: 23 * metrics.scale, weight: .bold))
-                        .padding(.horizontal, 22 * metrics.scale)
-                        .padding(.vertical, 14 * metrics.scale)
-                        .liquidGlassCard(isFocused: app.id == appState.focusedAppID, cornerRadius: 22)
+        ScrollView(.horizontal) {
+            HStack(spacing: 16 * metrics.scale) {
+                ForEach(LauncherLayout.quickActions(for: appState.apps)) { app in
+                    Button {
+                        appState.focusedAppID = app.id
+                        appState.handle(.select)
+                    } label: {
+                        Text(app.name)
+                            .font(.system(size: 23 * metrics.scale, weight: .bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .padding(.horizontal, 22 * metrics.scale)
+                            .padding(.vertical, 14 * metrics.scale)
+                            .liquidGlassCard(isFocused: app.id == appState.focusedAppID, cornerRadius: 22)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
+            .padding(.vertical, 8 * metrics.scale)
         }
+        .scrollIndicators(.hidden)
     }
 
     private var heroBackground: some View {
@@ -265,11 +281,16 @@ private struct LauncherRowView: View {
                 .font(.system(size: metrics.rowTitleSize, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.78))
 
-            HStack(spacing: metrics.cardSpacing) {
-                ForEach(section.apps) { app in
-                    AppCardView(title: app.name, isFocused: app.id == focusedAppID, metrics: metrics)
+            ScrollView(.horizontal) {
+                HStack(spacing: metrics.cardSpacing) {
+                    ForEach(section.apps) { app in
+                        AppCardView(title: app.name, isFocused: app.id == focusedAppID, metrics: metrics)
+                    }
                 }
+                .padding(.horizontal, 22 * metrics.scale)
+                .padding(.vertical, 20 * metrics.scale)
             }
+            .scrollIndicators(.hidden)
         }
         .animation(TVMotion.focus, value: focusedAppID)
     }

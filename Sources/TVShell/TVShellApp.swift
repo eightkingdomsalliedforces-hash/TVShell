@@ -14,7 +14,7 @@ struct TVShellApp: App {
                     .environmentObject(appState)
                     .background(ShellWindowConfigurator())
             }
-                .frame(minWidth: 1280, minHeight: 720)
+                .frame(minWidth: 960, minHeight: 540)
         }
         .windowStyle(.hiddenTitleBar)
     }
