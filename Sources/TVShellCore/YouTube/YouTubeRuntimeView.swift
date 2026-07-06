@@ -33,6 +33,16 @@ public struct YouTubeRuntimeView: View {
                     player(metrics: metrics)
                         .transition(.opacity.combined(with: .scale(scale: 1.02)))
                 }
+
+                if controller.isKeyboardVisible {
+                    VirtualKeyboardView(
+                        title: "搜尋 YouTube",
+                        state: controller.keyboardState,
+                        metrics: metrics
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 1.02)))
+                    .zIndex(20)
+                }
             }
             .animation(TVMotion.runtime, value: controller.state.phase)
             .foregroundStyle(.white)
@@ -61,39 +71,42 @@ public struct YouTubeRuntimeView: View {
     }
 
     private func browser(metrics: TVMetrics) -> some View {
-        VStack(alignment: .leading, spacing: 32 * metrics.scale) {
-            VStack(alignment: .leading, spacing: 12 * metrics.scale) {
-                Text(app.name)
-                    .font(.system(size: 76 * metrics.scale, weight: .bold))
-                Text(controller.statusText)
-                    .font(.system(size: 28 * metrics.scale, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.7))
-            }
-
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 330 * metrics.scale), spacing: 24 * metrics.scale)],
-                alignment: .leading,
-                spacing: 24 * metrics.scale
-            ) {
-                ForEach(Array(controller.videos.enumerated()), id: \.element.id) { index, video in
-                    YouTubeVideoCard(
-                        video: video,
-                        isFocused: index == controller.state.focusedIndex,
-                        metrics: metrics
-                    )
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 32 * metrics.scale) {
+                VStack(alignment: .leading, spacing: 12 * metrics.scale) {
+                    Text(app.name)
+                        .font(.system(size: 76 * metrics.scale, weight: .bold))
+                    Text(controller.statusText)
+                        .font(.system(size: 28 * metrics.scale, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.7))
                 }
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 330 * metrics.scale), spacing: 24 * metrics.scale)],
+                    alignment: .leading,
+                    spacing: 24 * metrics.scale
+                ) {
+                    ForEach(Array(controller.videos.enumerated()), id: \.element.id) { index, video in
+                        YouTubeVideoCard(
+                            video: video,
+                            isFocused: index == controller.state.focusedIndex,
+                            metrics: metrics
+                        )
+                    }
+                }
+
+                Text("方向鍵選影片，OK 播放，Menu 搜尋，Back 或 Home 返回。設定 TVSHELL_YOUTUBE_API_KEY 後會使用 YouTube Data API。")
+                    .font(.system(size: 24 * metrics.scale, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.62))
             }
-
-            Spacer()
-
-            Text("方向鍵選影片，OK 播放，Back 或 Home 返回。設定 TVSHELL_YOUTUBE_API_KEY 後會使用 YouTube Data API。")
-                .font(.system(size: 24 * metrics.scale, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.horizontal, metrics.horizontalPadding)
+            .padding(.top, metrics.topPadding)
+            .padding(.bottom, 54 * metrics.scale)
         }
-        .padding(.horizontal, metrics.horizontalPadding)
-        .padding(.top, metrics.topPadding)
-        .padding(.bottom, 54 * metrics.scale)
+        .scrollIndicators(.hidden)
     }
+
 
     private func player(metrics: TVMetrics) -> some View {
         ZStack(alignment: .bottomLeading) {
@@ -123,7 +136,10 @@ final class YouTubeRuntimeController: ObservableObject {
     @Published private(set) var state = YouTubeRuntimeState(itemCount: 0)
     @Published private(set) var videos: [YouTubeVideo] = []
     @Published private(set) var statusText = "正在載入 YouTube..."
+    @Published private(set) var isKeyboardVisible = false
+    @Published private(set) var keyboardState = VirtualKeyboardState(text: "anime")
     private var gridColumns = 3
+    private var currentQuery = "anime"
 
     private let provider: any YouTubeVideoProvider
     private nonisolated(unsafe) var observer: NSObjectProtocol?
@@ -162,10 +178,16 @@ final class YouTubeRuntimeController: ObservableObject {
     }
 
     func load() async {
+        await load(query: currentQuery)
+    }
+
+    private func load(query: String) async {
         do {
-            videos = try await provider.search(query: "tv")
+            currentQuery = query
+            keyboardState = VirtualKeyboardState(text: query)
+            videos = try await provider.search(query: query)
             state.updateItemCount(videos.count)
-            statusText = "來源：\(provider.displayName) · 已載入 \(videos.count) 部影片"
+            statusText = "來源：\(provider.displayName) · 搜尋：\(query) · 已載入 \(videos.count) 部影片"
         } catch {
             videos = try! await YouTubeProviderFactory.demoProvider().search(query: "")
             state.updateItemCount(videos.count)
@@ -174,12 +196,53 @@ final class YouTubeRuntimeController: ObservableObject {
     }
 
     private func handle(_ command: RemoteCommand) {
+        if isKeyboardVisible {
+            handleKeyboard(command)
+            return
+        }
+
+        if state.phase == .browsing, command == .menu {
+            keyboardState = VirtualKeyboardState(text: currentQuery)
+            isKeyboardVisible = true
+            statusText = "YouTube 搜尋"
+            return
+        }
+
         let previousPhase = state.phase
         state.apply(command, columns: gridColumns)
+
+        if previousPhase == .browsing, state.phase == .playing, let focusedVideo {
+            NotificationCenter.default.post(
+                name: .tvShellRecordWatch,
+                object: nil,
+                userInfo: [
+                    WatchHistoryNotification.entryKey: WatchHistoryEntry(
+                        title: focusedVideo.title,
+                        subtitle: focusedVideo.channelTitle,
+                        kind: .youtube
+                    )
+                ]
+            )
+        }
 
         if previousPhase == .browsing, command == .back {
             NotificationCenter.default.post(name: .tvShellRequestLauncher, object: nil)
             return
+        }
+    }
+
+    private func handleKeyboard(_ command: RemoteCommand) {
+        let action = keyboardState.apply(command)
+        switch action {
+        case .none, .textChanged:
+            break
+        case let .submitted(query):
+            isKeyboardVisible = false
+            statusText = "正在搜尋：\(query)..."
+            Task { await load(query: query) }
+        case .cancelled:
+            isKeyboardVisible = false
+            statusText = "已關閉搜尋"
         }
     }
 }

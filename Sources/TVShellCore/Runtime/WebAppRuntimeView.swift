@@ -4,14 +4,16 @@ import WebKit
 public struct WebAppRuntimeView: NSViewRepresentable {
     public let app: TVAppProfile
     public let webZoom: Double
+    public let webRemoteMode: WebRemoteMode
 
-    public init(app: TVAppProfile, webZoom: Double) {
+    public init(app: TVAppProfile, webZoom: Double, webRemoteMode: WebRemoteMode = .mouse) {
         self.app = app
         self.webZoom = webZoom
+        self.webRemoteMode = webRemoteMode
     }
 
     public func makeCoordinator() -> Coordinator {
-        Coordinator()
+        Coordinator(initialMode: webRemoteMode)
     }
 
     public func makeNSView(context: Context) -> WKWebView {
@@ -27,7 +29,9 @@ public struct WebAppRuntimeView: NSViewRepresentable {
         webView.allowsMagnification = true
         webView.pageZoom = webZoom
         webView.setValue(false, forKey: "drawsBackground")
+        webView.navigationDelegate = context.coordinator
         context.coordinator.attach(to: webView)
+        context.coordinator.applyMode(webRemoteMode)
 
         if case let .web(url) = app.target {
             webView.load(URLRequest(url: url))
@@ -38,17 +42,27 @@ public struct WebAppRuntimeView: NSViewRepresentable {
 
     public func updateNSView(_ webView: WKWebView, context: Context) {
         webView.pageZoom = webZoom
+        context.coordinator.applyMode(webRemoteMode)
     }
 
     @MainActor
-    public final class Coordinator {
+    public final class Coordinator: NSObject, WKNavigationDelegate {
         private weak var webView: WKWebView?
         private nonisolated(unsafe) var observer: NSObjectProtocol?
+        private var currentMode: WebRemoteMode
+
+        init(initialMode: WebRemoteMode) {
+            currentMode = initialMode
+        }
 
         deinit {
             if let observer {
                 NotificationCenter.default.removeObserver(observer)
             }
+        }
+
+        public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            applyMode(currentMode)
         }
 
         func attach(to webView: WKWebView) {
@@ -74,6 +88,11 @@ public struct WebAppRuntimeView: NSViewRepresentable {
             guard let webView else {
                 return
             }
+            currentMode = mode
+            if command == .menu {
+                applyMode(mode)
+                return
+            }
 
             let jsCommand = command.javascriptName
             guard jsCommand.isEmpty == false else {
@@ -81,6 +100,14 @@ public struct WebAppRuntimeView: NSViewRepresentable {
             }
 
             webView.evaluateJavaScript("window.tvShellCommand && window.tvShellCommand('\(jsCommand)', '\(mode.rawValue)')") { _, _ in }
+        }
+
+        func applyMode(_ mode: WebRemoteMode) {
+            currentMode = mode
+            guard let webView else {
+                return
+            }
+            webView.evaluateJavaScript("window.tvShellSetMode && window.tvShellSetMode('\(mode.rawValue)')") { _, _ in }
         }
     }
 
@@ -115,6 +142,80 @@ public struct WebAppRuntimeView: NSViewRepresentable {
         #tv-shell-cursor.tv-shell-click {
           transform: translate(-50%, -50%) scale(.72) !important;
         }
+        #tv-shell-cursor-label {
+          position: fixed !important;
+          z-index: 2147483647 !important;
+          left: 50% !important;
+          bottom: 36px !important;
+          transform: translateX(-50%) !important;
+          padding: 14px 22px !important;
+          border-radius: 999px !important;
+          color: white !important;
+          font: 700 22px -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif !important;
+          letter-spacing: 0 !important;
+          background: rgba(20, 24, 34, .74) !important;
+          border: 1px solid rgba(255,255,255,.32) !important;
+          box-shadow: 0 12px 34px rgba(0,0,0,.35) !important;
+          backdrop-filter: blur(18px) saturate(150%) !important;
+          pointer-events: none !important;
+          transition: opacity .18s ease-out !important;
+        }
+        .tv-shell-cursor-hidden {
+          opacity: 0 !important;
+        }
+        #tv-shell-keyboard {
+          position: fixed !important;
+          z-index: 2147483647 !important;
+          left: 50% !important;
+          bottom: 28px !important;
+          transform: translateX(-50%) !important;
+          width: min(980px, calc(100vw - 72px)) !important;
+          padding: 22px !important;
+          border-radius: 28px !important;
+          color: white !important;
+          background: rgba(18, 22, 32, .82) !important;
+          border: 1px solid rgba(255,255,255,.28) !important;
+          box-shadow: 0 20px 54px rgba(0,0,0,.46) !important;
+          backdrop-filter: blur(22px) saturate(160%) !important;
+          pointer-events: none !important;
+          font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif !important;
+        }
+        #tv-shell-keyboard.tv-shell-hidden {
+          display: none !important;
+        }
+        .tv-shell-keyboard-preview {
+          font-size: 28px !important;
+          font-weight: 800 !important;
+          min-height: 38px !important;
+          margin-bottom: 14px !important;
+          white-space: nowrap !important;
+          overflow: hidden !important;
+          text-overflow: ellipsis !important;
+        }
+        .tv-shell-keyboard-row {
+          display: flex !important;
+          justify-content: center !important;
+          gap: 10px !important;
+          margin-top: 10px !important;
+        }
+        .tv-shell-key {
+          min-width: 54px !important;
+          height: 50px !important;
+          padding: 0 14px !important;
+          border-radius: 16px !important;
+          display: grid !important;
+          place-items: center !important;
+          font-size: 22px !important;
+          font-weight: 800 !important;
+          background: rgba(255,255,255,.12) !important;
+          border: 1px solid rgba(255,255,255,.20) !important;
+        }
+        .tv-shell-key.tv-shell-focused {
+          background: rgba(120,210,255,.38) !important;
+          border-color: rgba(255,255,255,.82) !important;
+          box-shadow: 0 0 22px rgba(90,200,255,.52) !important;
+          transform: scale(1.08) !important;
+        }
       `;
       document.documentElement.appendChild(style);
 
@@ -122,6 +223,19 @@ public struct WebAppRuntimeView: NSViewRepresentable {
         x: Math.round(window.innerWidth / 2),
         y: Math.round(window.innerHeight / 2),
         visible: false
+      };
+      const keyboardRows = [
+        ['1','2','3','4','5','6','7','8','9','0'],
+        ['Q','W','E','R','T','Y','U','I','O','P'],
+        ['A','S','D','F','G','H','J','K','L'],
+        ['Z','X','C','V','B','N','M'],
+        ['SPACE','DELETE','DONE']
+      ];
+      const keyboardState = {
+        visible: false,
+        row: 0,
+        column: 0,
+        target: null
       };
 
       const ensureCursor = () => {
@@ -136,6 +250,158 @@ public struct WebAppRuntimeView: NSViewRepresentable {
         cursor.style.top = `${cursorState.y}px`;
         return cursor;
       };
+
+      const ensureCursorLabel = (text = '虛擬滑鼠') => {
+        let label = document.getElementById('tv-shell-cursor-label');
+        if (!label) {
+          label = document.createElement('div');
+          label.id = 'tv-shell-cursor-label';
+          document.documentElement.appendChild(label);
+        }
+        label.textContent = text;
+        label.classList.remove('tv-shell-cursor-hidden');
+        clearTimeout(label.__tvShellHideTimer);
+        label.__tvShellHideTimer = setTimeout(() => {
+          label.classList.add('tv-shell-cursor-hidden');
+        }, 1800);
+        return label;
+      };
+
+      const hideCursor = () => {
+        const cursor = document.getElementById('tv-shell-cursor');
+        if (cursor) cursor.classList.add('tv-shell-cursor-hidden');
+      };
+
+      window.tvShellSetMode = (mode = 'keyboard') => {
+        if (mode === 'mouse') {
+          const cursor = ensureCursor();
+          cursor.classList.remove('tv-shell-cursor-hidden');
+          ensureCursorLabel('虛擬滑鼠：方向鍵移動，OK 點擊');
+          return true;
+        }
+        hideCursor();
+        return true;
+      };
+
+      const activeInput = () => {
+        const active = document.activeElement;
+        if (!active) return null;
+        const tag = active.tagName ? active.tagName.toLowerCase() : '';
+        if (tag === 'input' || tag === 'textarea' || active.isContentEditable) return active;
+        return keyboardState.target;
+      };
+
+      const inputValue = (target) => {
+        if (!target) return '';
+        if (target.isContentEditable) return target.textContent || '';
+        return target.value || '';
+      };
+
+      const setInputValue = (target, value) => {
+        if (!target) return;
+        if (target.isContentEditable) {
+          target.textContent = value;
+        } else {
+          target.value = value;
+        }
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+
+      const ensureKeyboard = () => {
+        let keyboard = document.getElementById('tv-shell-keyboard');
+        if (!keyboard) {
+          keyboard = document.createElement('div');
+          keyboard.id = 'tv-shell-keyboard';
+          document.documentElement.appendChild(keyboard);
+        }
+        return keyboard;
+      };
+
+      const renderKeyboard = () => {
+        const keyboard = ensureKeyboard();
+        const target = activeInput();
+        const preview = inputValue(target);
+        keyboard.classList.toggle('tv-shell-hidden', !keyboardState.visible);
+        keyboard.innerHTML = `
+          <div class="tv-shell-keyboard-preview">${preview || '輸入文字'}</div>
+          ${keyboardRows.map((row, rowIndex) => `
+            <div class="tv-shell-keyboard-row">
+              ${row.map((key, columnIndex) => `
+                <div class="tv-shell-key ${rowIndex === keyboardState.row && columnIndex === keyboardState.column ? 'tv-shell-focused' : ''}">${key}</div>
+              `).join('')}
+            </div>
+          `).join('')}
+        `;
+      };
+
+      const showKeyboard = (target = activeInput()) => {
+        if (!target) return false;
+        keyboardState.target = target;
+        keyboardState.visible = true;
+        renderKeyboard();
+        return true;
+      };
+
+      const hideKeyboard = () => {
+        keyboardState.visible = false;
+        renderKeyboard();
+      };
+
+      const typeKeyboardKey = () => {
+        const target = activeInput();
+        if (!target) return false;
+        const key = keyboardRows[keyboardState.row][keyboardState.column];
+        let value = inputValue(target);
+        if (key === 'DONE') {
+          hideKeyboard();
+          target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+          return true;
+        }
+        if (key === 'DELETE') {
+          value = value.slice(0, -1);
+        } else if (key === 'SPACE') {
+          value += ' ';
+        } else {
+          value += key;
+        }
+        setInputValue(target, value);
+        renderKeyboard();
+        return true;
+      };
+
+      const handleKeyboardCommand = (command) => {
+        if (!keyboardState.visible) return false;
+        if (command === 'left') keyboardState.column = Math.max(0, keyboardState.column - 1);
+        if (command === 'right') keyboardState.column = Math.min(keyboardRows[keyboardState.row].length - 1, keyboardState.column + 1);
+        if (command === 'up') {
+          keyboardState.row = Math.max(0, keyboardState.row - 1);
+          keyboardState.column = Math.min(keyboardState.column, keyboardRows[keyboardState.row].length - 1);
+        }
+        if (command === 'down') {
+          keyboardState.row = Math.min(keyboardRows.length - 1, keyboardState.row + 1);
+          keyboardState.column = Math.min(keyboardState.column, keyboardRows[keyboardState.row].length - 1);
+        }
+        if (command === 'select') return typeKeyboardKey();
+        if (command === 'back') {
+          const target = activeInput();
+          if (target && inputValue(target).length > 0) {
+            setInputValue(target, inputValue(target).slice(0, -1));
+          } else {
+            hideKeyboard();
+          }
+        }
+        renderKeyboard();
+        return ['up', 'down', 'left', 'right', 'select', 'back'].includes(command);
+      };
+
+      document.addEventListener('focusin', (event) => {
+        const target = event.target;
+        const tag = target && target.tagName ? target.tagName.toLowerCase() : '';
+        if (tag === 'input' || tag === 'textarea' || target.isContentEditable) {
+          showKeyboard(target);
+        }
+      }, true);
 
       const moveCursor = (dx, dy) => {
         cursorState.x = Math.max(18, Math.min(window.innerWidth - 18, cursorState.x + dx));
@@ -172,6 +438,8 @@ public struct WebAppRuntimeView: NSViewRepresentable {
       };
 
       window.tvShellCommand = (command, mode = 'keyboard') => {
+        if (handleKeyboardCommand(command)) return true;
+
         const keyForCommand = {
           up: 'ArrowUp',
           down: 'ArrowDown',
@@ -244,12 +512,21 @@ public struct WebAppRuntimeView: NSViewRepresentable {
 
         if (mode === 'mouse') {
           ensureCursor();
+          ensureCursorLabel('虛擬滑鼠：方向鍵移動，OK 點擊');
           const step = Math.max(34, Math.round(Math.min(window.innerWidth, window.innerHeight) * 0.075));
           if (command === 'up') return moveCursor(0, -step);
           if (command === 'down') return moveCursor(0, step);
           if (command === 'left') return moveCursor(-step, 0);
           if (command === 'right') return moveCursor(step, 0);
-          if (command === 'select') return clickCursor();
+          if (command === 'select') {
+            const target = document.elementFromPoint(cursorState.x, cursorState.y);
+            const tag = target && target.tagName ? target.tagName.toLowerCase() : '';
+            if (target && (tag === 'input' || tag === 'textarea' || target.isContentEditable)) {
+              try { target.focus({ preventScroll: true }); } catch (_) {}
+              return showKeyboard(target);
+            }
+            return clickCursor();
+          }
           if (command === 'playPause') return dispatchKey();
           return false;
         }

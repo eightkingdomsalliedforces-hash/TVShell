@@ -4,11 +4,11 @@ import SwiftUI
 public struct ShellWindowConfigurator: NSViewRepresentable {
     public init() {}
 
-    public static func performZoomFocusedWindow() {
+    public static func toggleFocusedWindowFullScreen() {
         guard let window = NSApp.keyWindow ?? NSApp.mainWindow else {
             return
         }
-        window.performZoom(nil)
+        window.toggleFullScreen(nil)
     }
 
     public func makeNSView(context: Context) -> NSView {

@@ -6,6 +6,7 @@ import TVShellCore
 struct TVShellChecks {
     static func main() async throws {
         try checkKeyCodeMapper()
+        try checkVirtualKeyboardState()
         try checkRemoteMappingStore()
         try checkFocusEngine()
         try checkNativeLaunchRequest()
@@ -19,6 +20,7 @@ struct TVShellChecks {
         try checkWallpaperPresetCyclingAndProvider()
         try checkQuickActionsAndBrowserArePresent()
         try checkWebRemoteModeCycles()
+        try checkWebRuntimeShowsVirtualCursor()
         try checkSettingsFocusIncludesVideoAndWebZoom()
         try await checkAnimeSourceAndDanmakuProviders()
         try checkAnimeRuntimeStateNavigation()
@@ -59,6 +61,28 @@ struct TVShellChecks {
         try expect(KeyCodeMapper.default.command(for: .hid(usagePage: 0x0C, usage: 0x224)) == .back, "HID AC Back maps")
         try expect(KeyCodeMapper.default.command(for: .hid(usagePage: 0x0C, usage: 0x40)) == .menu, "HID menu maps")
         try expect(KeyCodeMapper.default.command(for: .hid(usagePage: 0x0C, usage: 0x41)) == .select, "HID select maps")
+    }
+
+    static func checkVirtualKeyboardState() throws {
+        var keyboard = VirtualKeyboardState()
+        try expect(keyboard.focusedKey.label == "1", "virtual keyboard starts at first key")
+        try expect(keyboard.apply(.right) == .none, "virtual keyboard right moves focus")
+        try expect(keyboard.focusedKey.label == "2", "virtual keyboard focuses next key")
+        try expect(keyboard.apply(.select) == .textChanged, "virtual keyboard select types focused key")
+        try expect(keyboard.text == "2", "virtual keyboard appends key text")
+        try expect(keyboard.apply(.back) == .textChanged, "virtual keyboard back deletes text")
+        try expect(keyboard.text.isEmpty, "virtual keyboard delete leaves empty text")
+        try expect(keyboard.apply(.back) == .cancelled, "virtual keyboard back cancels when empty")
+
+        var submitKeyboard = VirtualKeyboardState(text: "frieren")
+        _ = submitKeyboard.apply(.down)
+        _ = submitKeyboard.apply(.down)
+        _ = submitKeyboard.apply(.down)
+        _ = submitKeyboard.apply(.down)
+        _ = submitKeyboard.apply(.right)
+        _ = submitKeyboard.apply(.right)
+        try expect(submitKeyboard.focusedKey.label == "搜尋", "virtual keyboard can focus submit")
+        try expect(submitKeyboard.apply(.select) == .submitted("frieren"), "virtual keyboard submits current text")
     }
 
     static func checkRemoteMappingStore() throws {
@@ -257,6 +281,19 @@ struct TVShellChecks {
         try expect(WebRemoteMode.mouse.next == .keyboard, "web remote mode cycles back to keyboard")
     }
 
+    static func checkWebRuntimeShowsVirtualCursor() throws {
+        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        let appState = try String(contentsOf: root.appending(path: "Sources/TVShellCore/App/AppState.swift"))
+        try expect(appState.contains("webRemoteMode: WebRemoteMode = .mouse"), "browser defaults to virtual mouse mode")
+
+        let webRuntime = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Runtime/WebAppRuntimeView.swift"))
+        try expect(webRuntime.contains("tvShellSetMode"), "web runtime exposes a mode setter for showing the cursor immediately")
+        try expect(webRuntime.contains("didFinish"), "web runtime reapplies virtual cursor after page navigation")
+        try expect(webRuntime.contains("tv-shell-cursor-label"), "virtual cursor includes a visible TV label")
+        try expect(webRuntime.contains("tv-shell-keyboard"), "web runtime injects an in-browser virtual keyboard")
+        try expect(webRuntime.contains("mode === 'mouse'") && webRuntime.contains("ensureCursor()"), "mouse mode ensures the cursor exists")
+    }
+
     static func checkSettingsFocusIncludesVideoAndWebZoom() throws {
         try expect(SettingsFocus.scale.next == .wallpaper, "settings moves from scale to wallpaper")
         try expect(SettingsFocus.wallpaper.next == .webZoom, "settings moves from wallpaper to web zoom")
@@ -304,7 +341,9 @@ struct TVShellChecks {
         state.apply(.down)
         try expect(state.focusedTitleIndex == 1, "anime title row ignores vertical movement")
         state.apply(.select)
-        try expect(state.phase == .episodes, "anime select opens episode list")
+        try expect(state.phase == .details, "anime select opens title details")
+        state.apply(.select)
+        try expect(state.phase == .episodes, "anime detail select opens episode list")
         state.apply(.right)
         try expect(state.focusedEpisodeIndex == 1, "anime right moves focused episode in episode list")
         state.apply(.down)
@@ -320,7 +359,9 @@ struct TVShellChecks {
         state.apply(.back)
         try expect(state.phase == .episodes, "anime back returns to episode browser")
         state.apply(.back)
-        try expect(state.phase == .titles, "anime back returns to title grid")
+        try expect(state.phase == .details, "anime episode back returns to detail view")
+        state.apply(.back)
+        try expect(state.phase == .titles, "anime detail back returns to title grid")
     }
 
     static func checkExternalAnimeIntegrations() throws {
@@ -570,7 +611,10 @@ struct TVShellChecks {
               "name": "Sousou no Frieren",
               "name_cn": "葬送的芙莉蓮",
               "summary": "勇者一行打倒魔王之後。",
-              "eps": 2
+              "eps": 2,
+              "date": "2023-09-29",
+              "rank": 1,
+              "rating": { "score": 8.8, "total": 10000 }
             }
           ]
         }
@@ -594,7 +638,7 @@ struct TVShellChecks {
         """.data(using: .utf8)!
         let bangumiRequest = try BangumiAPI.searchSubjectsRequest(keyword: "芙莉蓮")
         let youtubeRequest = try YouTubeDataAPI.searchRequest(
-            query: "葬送的芙莉蓮 第 1 話",
+            query: "葬送的芙莉蓮 第 1 話 full episode anime",
             credentials: YouTubeCredentials(apiKey: "yt-key"),
             maxResults: 10
         )
@@ -609,6 +653,9 @@ struct TVShellChecks {
 
         let results = try await provider.search(AnimeSearchQuery(keyword: "芙莉蓮"))
         try expect(results.first?.title == "葬送的芙莉蓮", "bangumi youtube provider uses bangumi title")
+        try expect(results.first?.airDate == "2023-09-29", "bangumi youtube provider carries air date")
+        try expect(results.first?.score == 8.8, "bangumi youtube provider carries score")
+        try expect(results.first?.rank == 1, "bangumi youtube provider carries rank")
         try expect(results.first?.episodes.count == 2, "bangumi youtube provider creates episode list")
 
         guard let episode = results.first?.episodes.first else {
@@ -851,7 +898,7 @@ struct TVShellChecks {
         let windowManager = try String(contentsOf: root.appending(path: "Sources/TVShellCore/App/ShellWindowManager.swift"))
         try expect(windowManager.contains(".resizable"), "window explicitly keeps resizable behavior")
         try expect(windowManager.contains("standardWindowButton(.zoomButton)"), "window explicitly enables the green zoom/maximize button")
-        try expect(windowManager.contains("performZoom"), "window manager exposes a direct zoom/maximize command")
+        try expect(windowManager.contains("toggleFullScreen"), "window manager maximizes by entering macOS full screen")
     }
 
     static func checkRuntimeNavigationAndPerformanceBudget() throws {

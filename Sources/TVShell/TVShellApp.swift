@@ -18,8 +18,8 @@ struct TVShellApp: App {
         }
         .commands {
             CommandMenu("MacTV") {
-                Button("最大化視窗") {
-                    ShellWindowConfigurator.performZoomFocusedWindow()
+                Button("切換全螢幕") {
+                    ShellWindowConfigurator.toggleFocusedWindowFullScreen()
                 }
                 .keyboardShortcut("m", modifiers: [.command, .shift])
             }

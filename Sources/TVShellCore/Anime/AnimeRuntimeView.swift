@@ -31,12 +31,25 @@ public struct AnimeRuntimeView: View {
                 case .titles:
                     titleBrowser(metrics: metrics)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
+                case .details:
+                    detailBrowser(metrics: metrics)
+                        .transition(.opacity.combined(with: .move(edge: .trailing)))
                 case .episodes:
                     episodeBrowser(metrics: metrics)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 case .playing:
                     player(metrics: metrics)
                         .transition(.opacity.combined(with: .scale(scale: 1.02)))
+                }
+
+                if controller.isKeyboardVisible {
+                    VirtualKeyboardView(
+                        title: "搜尋動漫",
+                        state: controller.keyboardState,
+                        metrics: metrics
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 1.02)))
+                    .zIndex(20)
                 }
             }
             .animation(TVMotion.runtime, value: controller.state.phase)
@@ -62,6 +75,57 @@ public struct AnimeRuntimeView: View {
         }
     }
 
+    private func detailBrowser(metrics: TVMetrics) -> some View {
+        let title = controller.focusedTitle
+
+        return ScrollView(.vertical) {
+            HStack(alignment: .top, spacing: 48 * metrics.scale) {
+                AnimeTitleCard(
+                    title: title ?? AnimeSearchResult(id: "empty", title: "動漫", subtitle: nil, coverURL: nil, episodes: []),
+                    isFocused: false,
+                    metrics: metrics
+                )
+                .scaleEffect(1.08)
+
+                VStack(alignment: .leading, spacing: 24 * metrics.scale) {
+                    animeHeader(
+                        metrics: metrics,
+                        title: title?.title ?? "動漫詳情",
+                        subtitle: title?.subtitle ?? controller.statusText
+                    )
+
+                    if let detail = title?.detailLine {
+                        Text(detail)
+                            .font(.system(size: 26 * metrics.scale, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.74))
+                            .lineLimit(3)
+                    }
+
+                    Text(title?.summaryText ?? "選擇開始觀看後進入選集。")
+                        .font(.system(size: 27 * metrics.scale, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.68))
+                        .lineLimit(8)
+
+                    Text("開始觀看")
+                        .font(.system(size: 34 * metrics.scale, weight: .bold))
+                        .padding(.horizontal, 34 * metrics.scale)
+                        .padding(.vertical, 22 * metrics.scale)
+                        .liquidGlassCard(isFocused: true, cornerRadius: 26 * metrics.scale)
+
+                    Text("OK 開始觀看，Back 回封面牆，Menu 搜尋動漫。")
+                        .font(.system(size: 24 * metrics.scale, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.62))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.horizontal, metrics.horizontalPadding)
+            .padding(.top, metrics.topPadding)
+            .padding(.bottom, 54 * metrics.scale)
+        }
+        .scrollIndicators(.hidden)
+    }
+
     private func episodeGridColumns(for metrics: TVMetrics, size: CGSize) -> Int {
         Self.adaptiveColumns(
             availableWidth: size.width - (metrics.horizontalPadding * 2),
@@ -75,67 +139,71 @@ public struct AnimeRuntimeView: View {
     }
 
     private func titleBrowser(metrics: TVMetrics) -> some View {
-        VStack(alignment: .leading, spacing: 34 * metrics.scale) {
-            animeHeader(metrics: metrics, title: app.name, subtitle: controller.statusText)
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 34 * metrics.scale) {
+                animeHeader(metrics: metrics, title: app.name, subtitle: controller.statusText)
 
-            searchKeywordBar(metrics: metrics)
+                searchKeywordBar(metrics: metrics)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 34 * metrics.scale) {
-                    ForEach(Array(controller.titles.enumerated()), id: \.element.id) { index, title in
-                        AnimeTitleCard(
-                            title: title,
-                            isFocused: index == controller.state.focusedTitleIndex,
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 34 * metrics.scale) {
+                        ForEach(Array(controller.titles.enumerated()), id: \.element.id) { index, title in
+                            AnimeTitleCard(
+                                title: title,
+                                isFocused: index == controller.state.focusedTitleIndex,
+                                metrics: metrics
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 18 * metrics.scale)
+                    .padding(.vertical, 20 * metrics.scale)
+                }
+
+                Text("方向鍵選作品，OK 進入詳情，Menu 搜尋動漫，Home 回主畫面。")
+                    .font(.system(size: 25 * metrics.scale, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.62))
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.horizontal, metrics.horizontalPadding)
+            .padding(.top, metrics.topPadding)
+            .padding(.bottom, 54 * metrics.scale)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private func episodeBrowser(metrics: TVMetrics) -> some View {
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 34 * metrics.scale) {
+                animeHeader(
+                    metrics: metrics,
+                    title: controller.currentTitle?.title ?? "選集",
+                    subtitle: controller.currentTitle?.subtitle ?? controller.statusText
+                )
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 230 * metrics.scale), spacing: 22 * metrics.scale)],
+                    alignment: .leading,
+                    spacing: 22 * metrics.scale
+                ) {
+                    ForEach(Array(controller.episodes.enumerated()), id: \.element.id) { index, episode in
+                        EpisodeCard(
+                            episode: episode,
+                            isFocused: index == controller.state.focusedEpisodeIndex,
                             metrics: metrics
                         )
                     }
                 }
-                .padding(.horizontal, 18 * metrics.scale)
-                .padding(.vertical, 20 * metrics.scale)
+
+                Text("方向鍵選集，OK 播放，Back 回詳情，播放中 Menu 開關彈幕。")
+                    .font(.system(size: 25 * metrics.scale, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.62))
             }
-
-            Spacer()
-
-            Text("方向鍵選作品，OK 進入選集，Menu 切換搜尋作品，Home 回主畫面。")
-                .font(.system(size: 25 * metrics.scale, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.horizontal, metrics.horizontalPadding)
+            .padding(.top, metrics.topPadding)
+            .padding(.bottom, 54 * metrics.scale)
         }
-        .padding(.horizontal, metrics.horizontalPadding)
-        .padding(.top, metrics.topPadding)
-        .padding(.bottom, 54 * metrics.scale)
-    }
-
-    private func episodeBrowser(metrics: TVMetrics) -> some View {
-        VStack(alignment: .leading, spacing: 34 * metrics.scale) {
-            animeHeader(
-                metrics: metrics,
-                title: controller.currentTitle?.title ?? "選集",
-                subtitle: controller.currentTitle?.subtitle ?? controller.statusText
-            )
-
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 230 * metrics.scale), spacing: 22 * metrics.scale)],
-                alignment: .leading,
-                spacing: 22 * metrics.scale
-            ) {
-                ForEach(Array(controller.episodes.enumerated()), id: \.element.id) { index, episode in
-                    EpisodeCard(
-                        episode: episode,
-                        isFocused: index == controller.state.focusedEpisodeIndex,
-                        metrics: metrics
-                    )
-                }
-            }
-
-            Spacer()
-
-            Text("方向鍵選集，OK 播放，Back 回作品，播放中 Menu 開關彈幕。")
-                .font(.system(size: 25 * metrics.scale, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.62))
-        }
-        .padding(.horizontal, metrics.horizontalPadding)
-        .padding(.top, metrics.topPadding)
-        .padding(.bottom, 54 * metrics.scale)
+        .scrollIndicators(.hidden)
     }
 
     private func animeHeader(metrics: TVMetrics, title: String, subtitle: String) -> some View {
@@ -208,12 +276,15 @@ final class AnimeRuntimeController: ObservableObject {
     @Published private(set) var visibleDanmaku: [DanmakuComment] = []
     @Published private(set) var currentYouTubeVideoID: String?
     @Published private(set) var searchKeywordIndex = 0
+    @Published private(set) var isKeyboardVisible = false
+    @Published private(set) var keyboardState = VirtualKeyboardState(text: "葬送的芙莉蓮")
 
     private var sourceProvider: (any AnimeSourceProvider)?
     private var danmakuProvider: any DanmakuProvider
     let searchKeywords = AnimeSearchKeywordCatalog.defaultKeywords
     private var comments: [DanmakuComment] = []
     private var episodeColumns = 4
+    private var currentQuery = "葬送的芙莉蓮"
     private nonisolated(unsafe) var observer: NSObjectProtocol?
     private nonisolated(unsafe) var timeObserver: Any?
     private nonisolated(unsafe) var itemObserver: NSKeyValueObservation?
@@ -256,6 +327,13 @@ final class AnimeRuntimeController: ObservableObject {
         return "\(currentTitle?.title ?? "動畫") · \(episodes[state.focusedEpisodeIndex].title)"
     }
 
+    var focusedTitle: AnimeSearchResult? {
+        guard titles.indices.contains(state.focusedTitleIndex) else {
+            return nil
+        }
+        return titles[state.focusedTitleIndex]
+    }
+
     func load(
         sourceProvider provider: (any AnimeSourceProvider)? = nil,
         danmakuProvider: (any DanmakuProvider)? = nil
@@ -273,7 +351,7 @@ final class AnimeRuntimeController: ObservableObject {
         }
 
         do {
-            let keyword = searchKeywords[searchKeywordIndex]
+            let keyword = currentQuery
             titles = try await sourceProvider.search(AnimeSearchQuery(keyword: keyword))
             guard titles.isEmpty == false else {
                 statusText = "沒有找到動畫。"
@@ -298,14 +376,15 @@ final class AnimeRuntimeController: ObservableObject {
     }
 
     private func handle(_ command: RemoteCommand) {
-        if state.phase == .titles, command == .menu {
-            searchKeywordIndex = (searchKeywordIndex + 1) % searchKeywords.count
-            titles = []
-            episodes = []
-            currentTitle = nil
-            state = AnimeRuntimeState(titleCount: 0, episodeCount: 0)
-            statusText = "正在搜尋：\(searchKeywords[searchKeywordIndex])..."
-            Task { await load() }
+        if isKeyboardVisible {
+            handleKeyboard(command)
+            return
+        }
+
+        if state.phase == .titles || state.phase == .details, command == .menu {
+            keyboardState = VirtualKeyboardState(text: currentQuery)
+            isKeyboardVisible = true
+            statusText = "動漫搜尋"
             return
         }
 
@@ -317,13 +396,32 @@ final class AnimeRuntimeController: ObservableObject {
             return
         }
 
-        if previousPhase == .titles, state.phase == .episodes {
+        if previousPhase == .titles, state.phase == .details {
+            currentTitle = focusedTitle
+            return
+        }
+
+        if previousPhase == .details, state.phase == .episodes {
             Task { await loadFocusedTitleEpisodes() }
             return
         }
 
         if previousPhase == .episodes, state.phase == .playing {
             Task { await playFocusedEpisode() }
+            if episodes.indices.contains(state.focusedEpisodeIndex) {
+                let episode = episodes[state.focusedEpisodeIndex]
+                NotificationCenter.default.post(
+                    name: .tvShellRecordWatch,
+                    object: nil,
+                    userInfo: [
+                        WatchHistoryNotification.entryKey: WatchHistoryEntry(
+                            title: currentTitle?.title ?? episode.title,
+                            subtitle: episode.title,
+                            kind: .anime
+                        )
+                    ]
+                )
+            }
             return
         }
 
@@ -335,6 +433,26 @@ final class AnimeRuntimeController: ObservableObject {
 
         if state.phase == .playing {
             handlePlayback(command)
+        }
+    }
+
+    private func handleKeyboard(_ command: RemoteCommand) {
+        let action = keyboardState.apply(command)
+        switch action {
+        case .none, .textChanged:
+            break
+        case let .submitted(query):
+            isKeyboardVisible = false
+            currentQuery = query
+            titles = []
+            episodes = []
+            currentTitle = nil
+            state = AnimeRuntimeState(titleCount: 0, episodeCount: 0)
+            statusText = "正在搜尋：\(query)..."
+            Task { await load() }
+        case .cancelled:
+            isKeyboardVisible = false
+            statusText = "已關閉搜尋"
         }
     }
 
@@ -358,7 +476,7 @@ final class AnimeRuntimeController: ObservableObject {
                 titleCount: titles.count,
                 episodeCount: 0,
                 focusedTitleIndex: state.focusedTitleIndex,
-                phase: .titles,
+                phase: .details,
                 isDanmakuVisible: state.isDanmakuVisible
             )
         }
@@ -416,12 +534,15 @@ final class AnimeRuntimeController: ObservableObject {
     private func loadDanmaku(for episode: AnimeEpisode, stream: AnimeStreamCandidate) async {
         do {
             comments = DanmakuAggregator.merge([try await danmakuProvider.comments(for: episode.identity)])
+            visibleDanmaku = Array(comments.prefix(5))
             statusText = "播放源：\(stream.quality) · Dandanplay 彈幕 \(comments.count) 條"
         } catch AnimeHTTPError.missingCredentials {
             comments = []
+            visibleDanmaku = []
             statusText = "播放源：\(stream.quality) · 尚未配置 Dandanplay AppID/AppSecret"
         } catch {
             comments = []
+            visibleDanmaku = []
             statusText = "播放源：\(stream.quality) · 彈幕載入失敗：\(error.localizedDescription)"
         }
     }

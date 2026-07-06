@@ -60,9 +60,14 @@ public enum ActiveRuntime: Equatable, Sendable {
 public extension Notification.Name {
     static let tvShellRuntimeCommand = Notification.Name("TVShellRuntimeCommand")
     static let tvShellRequestLauncher = Notification.Name("TVShellRequestLauncher")
+    static let tvShellRecordWatch = Notification.Name("TVShellRecordWatch")
 }
 
 public enum RuntimeCommandNotification {
     public static let commandKey = "command"
     public static let webModeKey = "webMode"
+}
+
+public enum WatchHistoryNotification {
+    public static let entryKey = "entry"
 }

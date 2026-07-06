@@ -22,6 +22,9 @@ public struct BangumiSubject: Codable, Equatable, Sendable {
     public var summary: String?
     public var episodeCount: Int?
     public var images: BangumiSubjectImages?
+    public var date: String?
+    public var rating: BangumiSubjectRating?
+    public var rank: Int?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -30,6 +33,9 @@ public struct BangumiSubject: Codable, Equatable, Sendable {
         case summary
         case episodeCount = "eps"
         case images
+        case date
+        case rating
+        case rank
     }
 
     public var title: String {
@@ -40,6 +46,11 @@ public struct BangumiSubject: Codable, Equatable, Sendable {
     public var coverURL: URL? {
         images?.coverURL
     }
+}
+
+public struct BangumiSubjectRating: Codable, Equatable, Sendable {
+    public var score: Double?
+    public var total: Int?
 }
 
 public struct BangumiSubjectImages: Codable, Equatable, Sendable {

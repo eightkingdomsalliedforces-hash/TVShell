@@ -23,7 +23,7 @@ public struct LauncherView: View {
                 launcher
                     .transition(.opacity.combined(with: .scale(scale: 0.985)))
             case let .web(app):
-                WebAppRuntimeView(app: app, webZoom: appState.webZoom)
+                WebAppRuntimeView(app: app, webZoom: appState.webZoom, webRemoteMode: appState.webRemoteMode)
                     .transition(.opacity.combined(with: .scale(scale: 1.015)))
             case let .media(app):
                 MediaRuntimeView(app: app)
@@ -87,6 +87,10 @@ public struct LauncherView: View {
                         .padding(.top, 16 * metrics.scale)
 
                         quickActionBar(metrics: metrics)
+
+                        if appState.watchingHistory.isEmpty == false {
+                            WatchHistoryRowView(entries: appState.watchingHistory, metrics: metrics)
+                        }
 
                         VStack(alignment: .leading, spacing: metrics.rowSpacing) {
                             ForEach(LauncherLayout.sections(for: appState.apps)) { section in
@@ -267,6 +271,42 @@ private struct OpeningAppOverlay: View {
 private extension Color {
     init(wallpaperColor: WallpaperColor) {
         self.init(red: wallpaperColor.red, green: wallpaperColor.green, blue: wallpaperColor.blue)
+    }
+}
+
+private struct WatchHistoryRowView: View {
+    let entries: [WatchHistoryEntry]
+    let metrics: TVMetrics
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18 * metrics.scale) {
+            Text("最近觀看")
+                .font(.system(size: metrics.rowTitleSize, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.78))
+
+            ScrollView(.horizontal) {
+                HStack(spacing: 20 * metrics.scale) {
+                    ForEach(entries.prefix(8)) { entry in
+                        VStack(alignment: .leading, spacing: 10 * metrics.scale) {
+                            Text(entry.title)
+                                .font(.system(size: 28 * metrics.scale, weight: .bold))
+                                .lineLimit(2)
+                            Text(entry.subtitle ?? entry.kind.rawValue)
+                                .font(.system(size: 20 * metrics.scale, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.62))
+                                .lineLimit(1)
+                        }
+                        .frame(width: 340 * metrics.scale, alignment: .leading)
+                        .frame(minHeight: 116 * metrics.scale, alignment: .leading)
+                        .padding(22 * metrics.scale)
+                        .liquidGlassCard(isFocused: false, cornerRadius: 24 * metrics.scale)
+                    }
+                }
+                .padding(.horizontal, 8 * metrics.scale)
+                .padding(.vertical, 10 * metrics.scale)
+            }
+            .scrollIndicators(.hidden)
+        }
     }
 }
 

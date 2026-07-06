@@ -14,7 +14,7 @@ public final class AppState: ObservableObject {
     @Published public var focusedManagementAppID: UUID?
     @Published public var wallpaperSource: WallpaperSource = .builtIn(.aurora)
     @Published public var settingsFocus: SettingsFocus = .scale
-    @Published public var webRemoteMode: WebRemoteMode = .keyboard
+    @Published public var webRemoteMode: WebRemoteMode = .mouse
     @Published public var webZoom: Double = 1.25
     @Published public var videoSourceLabel: String = "內建示範影片"
     @Published public var dandanplayCredentials: DandanplayCredentials = .environment()
@@ -22,9 +22,11 @@ public final class AppState: ObservableObject {
     @Published public var openingAppName: String?
     @Published public var animeSourceCatalog: AnimeSourceCatalogState
     @Published public var focusedAnimeSourceID: String?
+    @Published public var watchingHistory: [WatchHistoryEntry] = []
 
     private let nativeRuntime = NativeAppRuntime()
     private nonisolated(unsafe) var exitObserver: NSObjectProtocol?
+    private nonisolated(unsafe) var historyObserver: NSObjectProtocol?
 
     public init(apps: [TVAppProfile] = SeedApps.defaultApps) {
         self.apps = apps
@@ -41,11 +43,36 @@ public final class AppState: ObservableObject {
                 NSApp.activate(ignoringOtherApps: true)
             }
         }
+        historyObserver = NotificationCenter.default.addObserver(
+            forName: .tvShellRecordWatch,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let entry = notification.userInfo?[WatchHistoryNotification.entryKey] as? WatchHistoryEntry else {
+                return
+            }
+            Task { @MainActor in
+                self?.recordWatch(entry)
+            }
+        }
     }
 
     deinit {
         if let exitObserver {
             NotificationCenter.default.removeObserver(exitObserver)
+        }
+        if let historyObserver {
+            NotificationCenter.default.removeObserver(historyObserver)
+        }
+    }
+
+    private func recordWatch(_ entry: WatchHistoryEntry) {
+        watchingHistory.removeAll { existing in
+            existing.title == entry.title && existing.kind == entry.kind
+        }
+        watchingHistory.insert(entry, at: 0)
+        if watchingHistory.count > 24 {
+            watchingHistory = Array(watchingHistory.prefix(24))
         }
     }
 

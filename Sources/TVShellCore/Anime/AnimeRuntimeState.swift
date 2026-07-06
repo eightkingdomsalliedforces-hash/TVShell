@@ -1,5 +1,6 @@
 public enum AnimeRuntimePhase: String, Codable, Equatable, Sendable {
     case titles
+    case details
     case episodes
     case playing
 }
@@ -50,6 +51,8 @@ public struct AnimeRuntimeState: Equatable, Sendable {
         switch phase {
         case .titles:
             handleTitles(command)
+        case .details:
+            handleDetails(command)
         case .episodes:
             handleEpisodes(command, columns: episodeColumns)
         case .playing:
@@ -65,8 +68,19 @@ public struct AnimeRuntimeState: Equatable, Sendable {
             focusedTitleIndex = min(max(titleCount - 1, 0), focusedTitleIndex + 1)
         case .select:
             if titleCount > 0 {
-                phase = .episodes
+                phase = .details
             }
+        default:
+            break
+        }
+    }
+
+    private mutating func handleDetails(_ command: RemoteCommand) {
+        switch command {
+        case .select:
+            phase = .episodes
+        case .back:
+            phase = .titles
         default:
             break
         }
@@ -88,7 +102,7 @@ public struct AnimeRuntimeState: Equatable, Sendable {
                 phase = .playing
             }
         case .back:
-            phase = .titles
+            phase = .details
         default:
             break
         }
