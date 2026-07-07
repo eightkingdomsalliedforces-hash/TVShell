@@ -71,40 +71,53 @@ public struct YouTubeRuntimeView: View {
     }
 
     private func browser(metrics: TVMetrics) -> some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 32 * metrics.scale) {
-                VStack(alignment: .leading, spacing: 12 * metrics.scale) {
-                    Text(app.name)
-                        .font(.system(size: 76 * metrics.scale, weight: .bold))
-                    Text(controller.statusText)
-                        .font(.system(size: 28 * metrics.scale, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.7))
-                }
-
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 408 * metrics.scale), spacing: 28 * metrics.scale)],
-                    alignment: .leading,
-                    spacing: 30 * metrics.scale
-                ) {
-                    ForEach(Array(controller.videos.enumerated()), id: \.element.id) { index, video in
-                        YouTubeVideoCard(
-                            video: video,
-                            isFocused: index == controller.state.focusedIndex,
-                            metrics: metrics
-                        )
+        ScrollViewReader { scrollProxy in
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 32 * metrics.scale) {
+                    VStack(alignment: .leading, spacing: 12 * metrics.scale) {
+                        Text(app.name)
+                            .font(.system(size: 76 * metrics.scale, weight: .bold))
+                        Text(controller.statusText)
+                            .font(.system(size: 28 * metrics.scale, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.7))
                     }
-                }
 
-                Text("方向鍵選影片，OK 播放，Menu 搜尋，Back 或 Home 返回。設定 TVSHELL_YOUTUBE_API_KEY 後會使用 YouTube Data API。")
-                    .font(.system(size: 24 * metrics.scale, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.62))
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 408 * metrics.scale), spacing: 28 * metrics.scale)],
+                        alignment: .leading,
+                        spacing: 30 * metrics.scale
+                    ) {
+                        ForEach(Array(controller.videos.enumerated()), id: \.element.id) { index, video in
+                            YouTubeVideoCard(
+                                video: video,
+                                isFocused: index == controller.state.focusedIndex,
+                                metrics: metrics
+                            )
+                            .id("youtube-video-\(index)")
+                        }
+                    }
+
+                    Text("方向鍵選影片，OK 播放，Menu 搜尋，Back 或 Home 返回。設定 TVSHELL_YOUTUBE_API_KEY 後會使用 YouTube Data API。")
+                        .font(.system(size: 24 * metrics.scale, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.62))
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .padding(.horizontal, metrics.horizontalPadding)
+                .padding(.top, metrics.topPadding)
+                .padding(.bottom, 54 * metrics.scale)
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .padding(.horizontal, metrics.horizontalPadding)
-            .padding(.top, metrics.topPadding)
-            .padding(.bottom, 54 * metrics.scale)
+            .scrollIndicators(.hidden)
+            .onChange(of: controller.state.focusedIndex) { _, index in
+                withAnimation(TVMotion.focus) {
+                    scrollProxy.scrollTo("youtube-video-\(index)", anchor: .center)
+                }
+            }
+            .onChange(of: controller.videos.count) { _, _ in
+                withAnimation(TVMotion.focus) {
+                    scrollProxy.scrollTo("youtube-video-\(controller.state.focusedIndex)", anchor: .center)
+                }
+            }
         }
-        .scrollIndicators(.hidden)
     }
 
 

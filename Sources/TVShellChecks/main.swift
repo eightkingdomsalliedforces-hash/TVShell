@@ -925,10 +925,17 @@ struct TVShellChecks {
 
         let youtubeRuntime = try String(contentsOf: root.appending(path: "Sources/TVShellCore/YouTube/YouTubeRuntimeView.swift"))
         try expect(youtubeRuntime.contains("updateGridColumns"), "youtube runtime updates remote navigation columns from current window size")
+        try expect(youtubeRuntime.contains("ScrollViewReader"), "youtube runtime auto-scrolls focused cards into view")
+        try expect(youtubeRuntime.contains("youtube-video-\\(index)"), "youtube video cards expose stable scroll ids")
+        try expect(youtubeRuntime.contains("scrollTo(\"youtube-video-\\(index)\""), "youtube focus movement scrolls to focused card")
 
         let animeRuntime = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Anime/AnimeRuntimeView.swift"))
         try expect(animeRuntime.contains("updateTitleColumns"), "anime runtime updates poster grid columns from current window size")
         try expect(animeRuntime.contains("updateEpisodeColumns"), "anime runtime updates episode navigation columns from current window size")
+        try expect(animeRuntime.contains("anime-title-\\(index)"), "anime title cards expose stable scroll ids")
+        try expect(animeRuntime.contains("anime-episode-\\(index)"), "anime episode cards expose stable scroll ids")
+        try expect(animeRuntime.contains("scrollTo(\"anime-title-\\(index)\""), "anime title focus movement scrolls to focused poster")
+        try expect(animeRuntime.contains("scrollTo(\"anime-episode-\\(index)\""), "anime episode focus movement scrolls to focused episode")
         try expect(animeRuntime.contains(".animation(TVMotion.focus, value: comments)") == false, "danmaku overlay does not animate every comment refresh")
 
         let liquidGlass = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Design/LiquidGlass.swift"))

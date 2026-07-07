@@ -149,71 +149,97 @@ public struct AnimeRuntimeView: View {
     }
 
     private func titleBrowser(metrics: TVMetrics) -> some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 34 * metrics.scale) {
-                animeHeader(metrics: metrics, title: app.name, subtitle: controller.statusText)
+        ScrollViewReader { scrollProxy in
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 34 * metrics.scale) {
+                    animeHeader(metrics: metrics, title: app.name, subtitle: controller.statusText)
 
-                searchKeywordBar(metrics: metrics)
+                    searchKeywordBar(metrics: metrics)
 
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 184 * metrics.scale), spacing: 18 * metrics.scale)],
-                    alignment: .leading,
-                    spacing: 18 * metrics.scale
-                ) {
-                    ForEach(Array(controller.titles.enumerated()), id: \.element.id) { index, title in
-                        AnimeTitleCard(
-                            title: title,
-                            isFocused: index == controller.state.focusedTitleIndex,
-                            metrics: metrics
-                        )
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 184 * metrics.scale), spacing: 18 * metrics.scale)],
+                        alignment: .leading,
+                        spacing: 18 * metrics.scale
+                    ) {
+                        ForEach(Array(controller.titles.enumerated()), id: \.element.id) { index, title in
+                            AnimeTitleCard(
+                                title: title,
+                                isFocused: index == controller.state.focusedTitleIndex,
+                                metrics: metrics
+                            )
+                            .id("anime-title-\(index)")
+                        }
                     }
-                }
 
-                Text("方向鍵選作品，OK 進入詳情，Menu 搜尋動漫，Home 回主畫面。")
-                    .font(.system(size: 25 * metrics.scale, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.62))
+                    Text("方向鍵選作品，OK 進入詳情，Menu 搜尋動漫，Home 回主畫面。")
+                        .font(.system(size: 25 * metrics.scale, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.62))
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .padding(.horizontal, metrics.horizontalPadding)
+                .padding(.top, metrics.topPadding)
+                .padding(.bottom, 54 * metrics.scale)
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .padding(.horizontal, metrics.horizontalPadding)
-            .padding(.top, metrics.topPadding)
-            .padding(.bottom, 54 * metrics.scale)
+            .scrollIndicators(.hidden)
+            .onChange(of: controller.state.focusedTitleIndex) { _, index in
+                withAnimation(TVMotion.focus) {
+                    scrollProxy.scrollTo("anime-title-\(index)", anchor: .center)
+                }
+            }
+            .onChange(of: controller.titles.count) { _, _ in
+                withAnimation(TVMotion.focus) {
+                    scrollProxy.scrollTo("anime-title-\(controller.state.focusedTitleIndex)", anchor: .center)
+                }
+            }
         }
-        .scrollIndicators(.hidden)
     }
 
     private func episodeBrowser(metrics: TVMetrics) -> some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 34 * metrics.scale) {
-                animeHeader(
-                    metrics: metrics,
-                    title: controller.currentTitle?.title ?? "選集",
-                    subtitle: controller.currentTitle?.subtitle ?? controller.statusText
-                )
+        ScrollViewReader { scrollProxy in
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 34 * metrics.scale) {
+                    animeHeader(
+                        metrics: metrics,
+                        title: controller.currentTitle?.title ?? "選集",
+                        subtitle: controller.currentTitle?.subtitle ?? controller.statusText
+                    )
 
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 230 * metrics.scale), spacing: 22 * metrics.scale)],
-                    alignment: .leading,
-                    spacing: 22 * metrics.scale
-                ) {
-                    ForEach(Array(controller.episodes.enumerated()), id: \.element.id) { index, episode in
-                        EpisodeCard(
-                            episode: episode,
-                            isFocused: index == controller.state.focusedEpisodeIndex,
-                            metrics: metrics
-                        )
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 230 * metrics.scale), spacing: 22 * metrics.scale)],
+                        alignment: .leading,
+                        spacing: 22 * metrics.scale
+                    ) {
+                        ForEach(Array(controller.episodes.enumerated()), id: \.element.id) { index, episode in
+                            EpisodeCard(
+                                episode: episode,
+                                isFocused: index == controller.state.focusedEpisodeIndex,
+                                metrics: metrics
+                            )
+                            .id("anime-episode-\(index)")
+                        }
                     }
-                }
 
-                Text("方向鍵選集，OK 播放，Back 回詳情，播放中 Menu 開關彈幕。")
-                    .font(.system(size: 25 * metrics.scale, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.62))
+                    Text("方向鍵選集，OK 播放，Back 回詳情，播放中 Menu 開關彈幕。")
+                        .font(.system(size: 25 * metrics.scale, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.62))
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .padding(.horizontal, metrics.horizontalPadding)
+                .padding(.top, metrics.topPadding)
+                .padding(.bottom, 54 * metrics.scale)
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .padding(.horizontal, metrics.horizontalPadding)
-            .padding(.top, metrics.topPadding)
-            .padding(.bottom, 54 * metrics.scale)
+            .scrollIndicators(.hidden)
+            .onChange(of: controller.state.focusedEpisodeIndex) { _, index in
+                withAnimation(TVMotion.focus) {
+                    scrollProxy.scrollTo("anime-episode-\(index)", anchor: .center)
+                }
+            }
+            .onChange(of: controller.episodes.count) { _, _ in
+                withAnimation(TVMotion.focus) {
+                    scrollProxy.scrollTo("anime-episode-\(controller.state.focusedEpisodeIndex)", anchor: .center)
+                }
+            }
         }
-        .scrollIndicators(.hidden)
     }
 
     private func animeHeader(metrics: TVMetrics, title: String, subtitle: String) -> some View {
