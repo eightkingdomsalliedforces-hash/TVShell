@@ -2,29 +2,39 @@ import CoreGraphics
 import Foundation
 import TVShellCore
 
+private enum KeywordAnimeSourceError: Error {
+    case failingKeyword
+}
+
 private struct KeywordAnimeSourceProvider: AnimeMediaSourceAdapter {
     let id: String
     let displayName: String
     let resolverKind: AnimeResolverKind
     private let resultsByKeyword: [String: [AnimeSearchResult]]
     private let streamCandidates: [String: [AnimeStreamCandidate]]
+    private let failingKeywords: Set<String>
 
     init(
         id: String,
         displayName: String,
         resultsByKeyword: [String: [AnimeSearchResult]],
         streams: [String: [AnimeStreamCandidate]] = [:],
+        failingKeywords: Set<String> = [],
         resolverKind: AnimeResolverKind = .http
     ) {
         self.id = id
         self.displayName = displayName
         self.resultsByKeyword = resultsByKeyword
         self.streamCandidates = streams
+        self.failingKeywords = failingKeywords
         self.resolverKind = resolverKind
     }
 
     func search(_ query: AnimeSearchQuery) async throws -> [AnimeSearchResult] {
         let keyword = query.keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        if failingKeywords.contains(keyword) {
+            throw KeywordAnimeSourceError.failingKeyword
+        }
         return resultsByKeyword[keyword] ?? []
     }
 
@@ -735,9 +745,10 @@ struct TVShellChecks {
                     "虎子": [second],
                     "女子高中生": [third]
                 ],
-                streams: [:]
+                streams: [:],
+                failingKeywords: ["暫時失敗"]
             ),
-            homeKeywords: ["葬送的芙莉蓮", "虎子", "女子高中生"]
+            homeKeywords: ["葬送的芙莉蓮", "暫時失敗", "虎子", "女子高中生"]
         )
 
         let home = try await provider.search(AnimeSearchQuery(keyword: ""))

@@ -83,13 +83,30 @@ public struct AnimeHomeSourceProvider: AnimeSourceProvider {
             return try await base.search(query)
         }
 
+        let matches = await withTaskGroup(of: (Int, AnimeSearchResult?).self) { group in
+            for (index, homeKeyword) in homeKeywords.enumerated() {
+                group.addTask {
+                    do {
+                        let candidates = try await base.search(AnimeSearchQuery(keyword: homeKeyword))
+                        return (index, bestHomeCandidate(from: candidates, keyword: homeKeyword))
+                    } catch {
+                        return (index, nil)
+                    }
+                }
+            }
+
+            var loadedMatches: [(Int, AnimeSearchResult)] = []
+            for await (index, result) in group {
+                if let result {
+                    loadedMatches.append((index, result))
+                }
+            }
+            return loadedMatches.sorted { $0.0 < $1.0 }
+        }
+
         var seenTitles = Set<String>()
         var results: [AnimeSearchResult] = []
-        for homeKeyword in homeKeywords {
-            let candidates = try await base.search(AnimeSearchQuery(keyword: homeKeyword))
-            guard let best = bestHomeCandidate(from: candidates, keyword: homeKeyword) else {
-                continue
-            }
+        for (_, best) in matches {
             let normalized = normalizeTitle(best.title)
             guard seenTitles.contains(normalized) == false else {
                 continue
