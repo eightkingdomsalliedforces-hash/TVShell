@@ -31,35 +31,63 @@ public struct BTFeedAnimeSourceProvider: AnimeMediaSourceAdapter {
             ]
         ))
         let items = try BTFeedParser.parse(data)
-        let coverURL = await coverURL(keyword: query.keyword)
-        let results = items.compactMap { item -> AnimeSearchResult? in
+        let metadata = await bangumiMetadata(keyword: query.keyword)
+        let releases = items.compactMap { item -> BTFeedRelease? in
             guard let streamURL = item.streamURL else {
                 return nil
             }
-            let title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard title.isEmpty == false else {
+            let rawTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard rawTitle.isEmpty == false else {
                 return nil
             }
-            let episodeNumber = episodeNumber(from: title)
+            let displayTitle = metadata.title ?? cleanTitle(rawTitle)
+            let episodeNumber = episodeNumber(from: rawTitle)
+            let quality = qualityLabel(from: rawTitle)
             let episode = AnimeEpisode(
-                id: "\(id)-\(stableID(title))-episode-\(episodeNumber)",
-                title: title,
+                id: "\(id)-\(stableID(rawTitle))-episode-\(episodeNumber)",
+                title: "第 \(episodeNumber) 話 · \(quality)",
                 number: episodeNumber,
                 identity: AnimeEpisodeIdentity(
                     providerID: id,
-                    subjectID: title,
+                    subjectID: displayTitle,
                     episodeID: streamURL.absoluteString
                 )
             )
-            return AnimeSearchResult(
-                id: "\(id)-\(stableID(title))",
-                title: title,
-                subtitle: "\(displayName) · BT/RSS",
-                coverURL: coverURL,
-                episodeCount: 1,
-                episodes: [episode]
-            )
+            return BTFeedRelease(title: displayTitle, rawTitle: rawTitle, episode: episode)
         }
+
+        var grouped: [String: [BTFeedRelease]] = [:]
+        for release in releases {
+            grouped[release.title, default: []].append(release)
+        }
+
+        let results = grouped
+            .map { title, releases in
+                let sortedEpisodes = releases
+                    .map(\.episode)
+                    .sorted { left, right in
+                        if left.number == right.number {
+                            return left.title < right.title
+                        }
+                        return left.number < right.number
+                    }
+                let rawSubtitle = releases.first?.rawTitle ?? "\(displayName) · BT/RSS"
+                return AnimeSearchResult(
+                    id: "\(id)-\(stableID(title))",
+                    title: title,
+                    subtitle: "\(displayName) · \(rawSubtitle)",
+                    coverURL: metadata.coverURL,
+                    episodeCount: sortedEpisodes.count,
+                    episodes: sortedEpisodes
+                )
+            }
+            .sorted { left, right in
+                if left.title == right.title {
+                    return (left.episodeCount ?? 0) > (right.episodeCount ?? 0)
+                }
+                return left.title < right.title
+            }
+
         return Array(results.prefix(30))
     }
 
@@ -119,14 +147,43 @@ public struct BTFeedAnimeSourceProvider: AnimeMediaSourceAdapter {
         return String(value[swiftRange])
     }
 
-    private func coverURL(keyword: String) async -> URL? {
+    private func qualityLabel(from title: String) -> String {
+        let lowercased = title.lowercased()
+        if lowercased.contains("2160") || lowercased.contains("4k") {
+            return "4K"
+        }
+        if lowercased.contains("1080") {
+            return "1080p"
+        }
+        if lowercased.contains("720") {
+            return "720p"
+        }
+        return "BT"
+    }
+
+    private func bangumiMetadata(keyword: String) async -> (title: String?, coverURL: URL?) {
         do {
             let request = try BangumiAPI.searchSubjectsRequest(keyword: keyword)
             let data = try await transport.data(for: request)
-            return try BangumiAPI.decodeSubjectSearch(data).first?.coverURL
+            guard let subject = try BangumiAPI.decodeSubjectSearch(data).first else {
+                return (nil, nil)
+            }
+            return (subject.title, subject.coverURL)
         } catch {
-            return nil
+            return (nil, nil)
         }
+    }
+
+    private func cleanTitle(_ value: String) -> String {
+        var title = value
+        title = title.replacingOccurrences(of: #"\[[^\]]+\]"#, with: " ", options: .regularExpression)
+        title = title.replacingOccurrences(of: #"\([^\)]+\)"#, with: " ", options: .regularExpression)
+        title = title.replacingOccurrences(of: #"第\s*[0-9]+\s*[話话集]"#, with: " ", options: .regularExpression)
+        title = title.replacingOccurrences(of: #"EP\s*[0-9]+"#, with: " ", options: [.regularExpression, .caseInsensitive])
+        title = title.replacingOccurrences(of: #"Episode\s*[0-9]+"#, with: " ", options: [.regularExpression, .caseInsensitive])
+        title = title.replacingOccurrences(of: #"[0-9]{3,4}p|x264|x265|hevc|avc|繁中|簡中|简中|外挂|內封|内封|BIG5|GB|CHT|CHS"#, with: " ", options: [.regularExpression, .caseInsensitive])
+        title = title.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        return title.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func stableID(_ value: String) -> String {
@@ -358,6 +415,12 @@ private struct BTFeedItem {
     var streamURL: URL? {
         magnetURL ?? enclosureURL ?? link
     }
+}
+
+private struct BTFeedRelease {
+    var title: String
+    var rawTitle: String
+    var episode: AnimeEpisode
 }
 
 private final class BTFeedParser: NSObject, XMLParserDelegate {

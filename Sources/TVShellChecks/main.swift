@@ -899,6 +899,10 @@ struct TVShellChecks {
             <link>magnet:?xt=urn:btih:ABCDEF123456</link>
             <enclosure url="https://mikan.example/frieren.torrent" />
           </item>
+          <item>
+            <title>[字幕組] 葬送的芙莉蓮 第02話 [1080p][繁中]</title>
+            <link>magnet:?xt=urn:btih:ABCDEF123457</link>
+          </item>
         </channel></rss>
         """.data(using: .utf8)!
         let btCoverRequest = try BangumiAPI.searchSubjectsRequest(keyword: "芙莉蓮")
@@ -926,7 +930,11 @@ struct TVShellChecks {
             ])
         )
         let btResults = try await btProvider.search(AnimeSearchQuery(keyword: "芙莉蓮"))
-        try expect(btResults.first?.title.contains("葬送的芙莉蓮") == true, "Mikan RSS provider parses item titles")
+        try expect(btResults.count == 1, "BT RSS provider groups releases into one anime card")
+        try expect(btResults.first?.title == "葬送的芙莉蓮", "Mikan RSS provider shows clean anime title")
+        try expect(btResults.first?.episodeCount == 2, "BT RSS provider exposes grouped episode count")
+        try expect(btResults.first?.episodes.map(\.number) == [1, 2], "BT RSS provider sorts grouped episodes")
+        try expect(btResults.first?.episodes.first?.title == "第 1 話 · 1080p", "BT RSS provider shows clean episode labels")
         try expect(btResults.first?.coverURL?.absoluteString == "https://example.com/frieren-cover.jpg", "BT RSS provider enriches results with Bangumi covers")
         guard let btEpisode = btResults.first?.episodes.first else {
             throw CheckFailure("missing BT feed episode")
