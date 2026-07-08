@@ -17,6 +17,24 @@ public enum TorrentPlaybackError: LocalizedError, Equatable {
     }
 }
 
+public struct TorrentDownloadProgress: Equatable, Sendable {
+    public var downloadedBytes: UInt64
+    public var largestPlayableFileName: String?
+
+    public init(downloadedBytes: UInt64, largestPlayableFileName: String? = nil) {
+        self.downloadedBytes = downloadedBytes
+        self.largestPlayableFileName = largestPlayableFileName
+    }
+
+    public var megabytesText: String {
+        let megabytes = Double(downloadedBytes) / 1_048_576
+        if megabytes < 10 {
+            return String(format: "%.1f MB", megabytes)
+        }
+        return String(format: "%.0f MB", megabytes)
+    }
+}
+
 public struct Aria2TorrentPlaybackEngine: Sendable {
     public var cacheRoot: URL
     public var executablePath: String?
@@ -88,7 +106,10 @@ public struct Aria2TorrentPlaybackEngine: Sendable {
         }
     }
 
-    public func startStreaming(_ stream: AnimeStreamCandidate) async throws -> URL {
+    public func startStreaming(
+        _ stream: AnimeStreamCandidate,
+        onProgress: (@Sendable (TorrentDownloadProgress) -> Void)? = nil
+    ) async throws -> URL {
         guard let executable = resolvedExecutablePath() else {
             throw TorrentPlaybackError.aria2Unavailable
         }
@@ -96,7 +117,16 @@ public struct Aria2TorrentPlaybackEngine: Sendable {
         let directory = downloadDirectory(for: stream)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try launchAria2(executable: executable, stream: stream, directory: directory)
-        return try await waitForPlayableFile(in: directory)
+        return try await waitForPlayableFile(in: directory, onProgress: onProgress)
+    }
+
+    public func downloadProgress(in directory: URL) -> TorrentDownloadProgress {
+        let playableFiles = playableFiles(in: directory)
+        let largestFile = playableFiles.first
+        return TorrentDownloadProgress(
+            downloadedBytes: downloadedBytes(in: directory),
+            largestPlayableFileName: largestFile?.lastPathComponent
+        )
     }
 
     private var playableExtensions: Set<String> {
@@ -139,14 +169,38 @@ public struct Aria2TorrentPlaybackEngine: Sendable {
         }
     }
 
-    private func waitForPlayableFile(in directory: URL) async throws -> URL {
+    private func waitForPlayableFile(
+        in directory: URL,
+        onProgress: (@Sendable (TorrentDownloadProgress) -> Void)?
+    ) async throws -> URL {
         for _ in 0..<pollLimit {
+            onProgress?(downloadProgress(in: directory))
             if let file = readyPlayableFile(in: directory) {
                 return file
             }
             try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
         }
         throw TorrentPlaybackError.noPlayableFile(directory)
+    }
+
+    private func downloadedBytes(in directory: URL) -> UInt64 {
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return 0
+        }
+
+        return enumerator.reduce(UInt64(0)) { partial, item in
+            guard let url = item as? URL,
+                  url.pathExtension.lowercased() != "aria2"
+            else {
+                return partial
+            }
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            return partial + UInt64(max(0, size))
+        }
     }
 
     private func readyPlayableFile(in directory: URL) -> URL? {

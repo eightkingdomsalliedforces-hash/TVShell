@@ -90,6 +90,7 @@ struct TVShellChecks {
         try checkYouTubeLayoutAndPlayerShell()
         try await checkBangumiYouTubeAnimeSourceFindsPlayableCandidates()
         try await checkBuiltInAnimekoStyleSources()
+        try checkAnimeEpisodeGridLayout()
         try checkTorrentPlaybackEngine()
         try await checkAnimeHomeProviderAggregatesDistinctTitles()
         try checkAnimekoStyleSourceCatalog()
@@ -1086,6 +1087,16 @@ struct TVShellChecks {
         let sample = downloadDirectory.appendingPathComponent("第01話.mp4")
         FileManager.default.createFile(atPath: sample.path, contents: Data(repeating: 1, count: 2_048))
         try expect(engine.playableFiles(in: downloadDirectory).first?.lastPathComponent == sample.lastPathComponent, "torrent playback discovers playable media files")
+        try expect(engine.downloadProgress(in: downloadDirectory).downloadedBytes == 2_048, "torrent playback reports downloaded bytes")
+    }
+
+    static func checkAnimeEpisodeGridLayout() throws {
+        try expect(AnimeEpisodeGridLayout.rows(itemCount: 10, columns: 4) == [
+            [0, 1, 2, 3],
+            [4, 5, 6, 7],
+            [8, 9]
+        ], "episode grid layout creates stable rows")
+        try expect(AnimeEpisodeGridLayout.rows(itemCount: 3, columns: 0) == [[0], [1], [2]], "episode grid layout clamps invalid columns")
     }
 
     @MainActor
@@ -1349,8 +1360,11 @@ struct TVShellChecks {
         try expect(animeRuntime.contains("anime-episode-\\(index)"), "anime episode cards expose stable scroll ids")
         try expect(animeRuntime.contains("scrollTo(\"anime-title-\\(index)\""), "anime title focus movement scrolls to focused poster")
         try expect(animeRuntime.contains("scrollTo(\"anime-episode-\\(index)\""), "anime episode focus movement scrolls to focused episode")
-        try expect(animeRuntime.contains("fixedEpisodeGridColumns"), "anime episode grid uses fixed columns matched to remote navigation")
+        try expect(animeRuntime.contains("fixedEpisodeCardWidth"), "anime episode grid uses fixed card width matched to remote navigation")
+        try expect(animeRuntime.contains("ForEach(row, id: \\.self)"), "anime episode grid keys cards by stable visible offset")
+        try expect(animeRuntime.contains("LazyVStack"), "anime episode grid uses manual rows instead of LazyVGrid diffing")
         try expect(animeRuntime.contains("lineLimit(2)") && animeRuntime.contains("animeHeader"), "anime headers constrain long BT titles")
+        try expect(animeRuntime.contains("downloadProgress"), "anime player exposes torrent download progress")
         try expect(animeRuntime.contains("searchKeywordBar") == false, "anime title browser does not show the old keyword chip row")
         try expect(animeRuntime.contains(".animation(TVMotion.focus, value: comments)") == false, "danmaku overlay does not animate every comment refresh")
         try expect(animeRuntime.contains("DanmakuOverlay(comments: controller.visibleDanmaku"), "anime player renders danmaku overlay")

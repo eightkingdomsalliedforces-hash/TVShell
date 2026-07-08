@@ -136,12 +136,11 @@ public struct AnimeRuntimeView: View {
         )
     }
 
-    private func fixedEpisodeGridColumns(for metrics: TVMetrics, size: CGSize) -> [GridItem] {
+    private func fixedEpisodeCardWidth(for metrics: TVMetrics, size: CGSize) -> Double {
         let count = episodeGridColumns(for: metrics, size: size)
         let spacing = 22 * metrics.scale
         let availableWidth = max(230 * metrics.scale, size.width - (metrics.horizontalPadding * 2))
-        let cardWidth = (availableWidth - (Double(count - 1) * spacing)) / Double(count)
-        return Array(repeating: GridItem(.fixed(cardWidth), spacing: spacing, alignment: .topLeading), count: count)
+        return (availableWidth - (Double(count - 1) * spacing)) / Double(count)
     }
 
     private func titleGridColumns(for metrics: TVMetrics, size: CGSize) -> Int {
@@ -203,6 +202,10 @@ public struct AnimeRuntimeView: View {
     private func episodeBrowser(metrics: TVMetrics, size: CGSize) -> some View {
         ScrollViewReader { scrollProxy in
             ScrollView(.vertical) {
+                let columns = episodeGridColumns(for: metrics, size: size)
+                let cardWidth = fixedEpisodeCardWidth(for: metrics, size: size)
+                let rows = AnimeEpisodeGridLayout.rows(itemCount: controller.episodes.count, columns: columns)
+
                 VStack(alignment: .leading, spacing: 34 * metrics.scale) {
                     animeHeader(
                         metrics: metrics,
@@ -210,18 +213,21 @@ public struct AnimeRuntimeView: View {
                         subtitle: controller.currentTitle?.subtitle ?? controller.statusText
                     )
 
-                    LazyVGrid(
-                        columns: fixedEpisodeGridColumns(for: metrics, size: size),
-                        alignment: .leading,
-                        spacing: 22 * metrics.scale
-                    ) {
-                        ForEach(Array(controller.episodes.enumerated()), id: \.element.id) { index, episode in
-                            EpisodeCard(
-                                episode: episode,
-                                isFocused: index == controller.state.focusedEpisodeIndex,
-                                metrics: metrics
-                            )
-                            .id("anime-episode-\(index)")
+                    LazyVStack(alignment: .leading, spacing: 22 * metrics.scale) {
+                        ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                            HStack(alignment: .top, spacing: 22 * metrics.scale) {
+                                ForEach(row, id: \.self) { offset in
+                                    if controller.episodes.indices.contains(offset) {
+                                        EpisodeCard(
+                                            episode: controller.episodes[offset],
+                                            isFocused: offset == controller.state.focusedEpisodeIndex,
+                                            metrics: metrics
+                                        )
+                                        .frame(width: cardWidth)
+                                        .id("anime-episode-\(offset)")
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -626,11 +632,16 @@ final class AnimeRuntimeController: ObservableObject {
 
     private func playTorrent(_ stream: AnimeStreamCandidate) async {
         do {
-            let fileURL = try await torrentPlaybackEngine.startStreaming(stream)
+            let fileURL = try await torrentPlaybackEngine.startStreaming(stream) { [weak self] progress in
+                Task { @MainActor [weak self] in
+                    self?.updateTorrentProgress(progress)
+                }
+            }
             currentYouTubeVideoID = nil
             subtitleStatusText = "字幕：正在尋找中文軌"
             statusText = "BT 已開始邊下邊播：\(fileURL.lastPathComponent)"
             playAVURL(fileURL)
+            Task { await monitorTorrentProgress(stream) }
         } catch {
             subtitleStatusText = "字幕：BT 未就緒"
             statusText = error.localizedDescription
@@ -643,6 +654,20 @@ final class AnimeRuntimeController: ObservableObject {
                 isDanmakuVisible: state.isDanmakuVisible
             )
         }
+    }
+
+    private func monitorTorrentProgress(_ stream: AnimeStreamCandidate) async {
+        let directory = torrentPlaybackEngine.downloadDirectory(for: stream)
+        for _ in 0..<900 where state.phase == .playing {
+            updateTorrentProgress(torrentPlaybackEngine.downloadProgress(in: directory))
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+        }
+    }
+
+    private func updateTorrentProgress(_ progress: TorrentDownloadProgress) {
+        let fileName = progress.largestPlayableFileName ?? "等待影片檔"
+        subtitleStatusText = "BT：已下載 \(progress.megabytesText)"
+        statusText = "BT 下載中：\(progress.megabytesText) · \(fileName)"
     }
 
     private func playAVURL(_ url: URL) {
