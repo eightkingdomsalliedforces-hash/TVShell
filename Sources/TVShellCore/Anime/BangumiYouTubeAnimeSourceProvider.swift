@@ -77,6 +77,7 @@ public struct BangumiYouTubeAnimeSourceProvider: AnimeMediaSourceAdapter {
 
     private func episodes(for subject: BangumiSubject) -> [AnimeEpisode] {
         let count = max(subject.episodeCount ?? 1, 1)
+        let aliases = subjectAliases(for: subject)
         return (1...count).map { number in
             let episodeTitle = "\(subject.title) 第 \(number) 話"
             return AnimeEpisode(
@@ -86,16 +87,21 @@ public struct BangumiYouTubeAnimeSourceProvider: AnimeMediaSourceAdapter {
                 identity: AnimeEpisodeIdentity(
                     providerID: id,
                     subjectID: subject.title,
-                    episodeID: "\(number)"
+                    episodeID: "\(number)",
+                    subjectAliases: aliases
                 )
             )
         }
     }
 
+    private func subjectAliases(for subject: BangumiSubject) -> [String] {
+        uniqueNonEmpty([subject.title, subject.name])
+    }
+
     private func score(video: YouTubeVideo, episode: AnimeEpisode) -> Int {
         var value = 40
         let title = video.title
-        if title.localizedCaseInsensitiveContains(episode.identity.subjectID) {
+        if hasSubjectMatch(title: title, episode: episode) {
             value += 40
         }
         if matchesEpisodeNumber(title, episode: episode.number) {
@@ -108,14 +114,50 @@ public struct BangumiYouTubeAnimeSourceProvider: AnimeMediaSourceAdapter {
     }
 
     private func youtubeSearchQuery(for episode: AnimeEpisode) -> String {
-        "\(episode.identity.subjectID) 第\(episode.number)話 EP\(episode.number) 完整版 動畫"
+        "\(subjectSearchText(for: episode)) 第\(episode.number)話 EP\(episode.number) 完整版 動畫"
     }
 
     private func isPlayableEpisodeMatch(video: YouTubeVideo, episode: AnimeEpisode) -> Bool {
         let title = video.title
-        return title.localizedCaseInsensitiveContains(episode.identity.subjectID)
+        return hasSubjectMatch(title: title, episode: episode)
             && matchesEpisodeNumber(title, episode: episode.number)
             && isExcludedClip(title) == false
+    }
+
+    private func hasSubjectMatch(title: String, episode: AnimeEpisode) -> Bool {
+        subjectMatchTerms(for: episode).contains { term in
+            title.localizedCaseInsensitiveContains(term)
+        }
+    }
+
+    private func subjectSearchText(for episode: AnimeEpisode) -> String {
+        uniqueNonEmpty([episode.identity.subjectID] + episode.identity.subjectAliases)
+            .joined(separator: " ")
+    }
+
+    private func subjectMatchTerms(for episode: AnimeEpisode) -> [String] {
+        uniqueNonEmpty([episode.identity.subjectID] + episode.identity.subjectAliases)
+            .flatMap(matchTerms)
+    }
+
+    private func matchTerms(from alias: String) -> [String] {
+        let trimmed = alias.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else {
+            return []
+        }
+
+        var terms = [trimmed]
+        if let range = trimmed.range(of: "的") {
+            let suffix = String(trimmed[range.upperBound...])
+            if suffix.count >= 2 {
+                terms.append(suffix)
+            }
+        }
+        terms += trimmed
+            .split { $0.isWhitespace || $0 == ":" || $0 == "-" || $0 == "_" || $0 == "・" }
+            .map(String.init)
+            .filter { $0.count >= 4 || $0.rangeOfCharacter(from: .letters) != nil && $0.count >= 3 }
+        return uniqueNonEmpty(terms)
     }
 
     private func matchesEpisodeNumber(_ title: String, episode: Int) -> Bool {
@@ -140,6 +182,24 @@ public struct BangumiYouTubeAnimeSourceProvider: AnimeMediaSourceAdapter {
             title.localizedCaseInsensitiveContains("精華") ||
             title.localizedCaseInsensitiveContains("剪輯") ||
             title.localizedCaseInsensitiveContains("片段")
+    }
+
+    private func uniqueNonEmpty(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var results: [String] = []
+        for value in values {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.isEmpty == false else {
+                continue
+            }
+            let key = trimmed.lowercased()
+            guard seen.contains(key) == false else {
+                continue
+            }
+            seen.insert(key)
+            results.append(trimmed)
+        }
+        return results
     }
 }
 

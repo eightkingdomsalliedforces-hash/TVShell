@@ -12,11 +12,28 @@ public struct AnimeEpisodeIdentity: Codable, Equatable, Hashable, Sendable {
     public var providerID: String
     public var subjectID: String
     public var episodeID: String
+    public var subjectAliases: [String]
 
-    public init(providerID: String, subjectID: String, episodeID: String) {
+    private enum CodingKeys: String, CodingKey {
+        case providerID
+        case subjectID
+        case episodeID
+        case subjectAliases
+    }
+
+    public init(providerID: String, subjectID: String, episodeID: String, subjectAliases: [String] = []) {
         self.providerID = providerID
         self.subjectID = subjectID
         self.episodeID = episodeID
+        self.subjectAliases = subjectAliases
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        providerID = try container.decode(String.self, forKey: .providerID)
+        subjectID = try container.decode(String.self, forKey: .subjectID)
+        episodeID = try container.decode(String.self, forKey: .episodeID)
+        subjectAliases = try container.decodeIfPresent([String].self, forKey: .subjectAliases) ?? []
     }
 }
 

@@ -747,7 +747,7 @@ struct TVShellChecks {
         """.data(using: .utf8)!
         let bangumiRequest = try BangumiAPI.searchSubjectsRequest(keyword: "芙莉蓮")
         let youtubeRequest = try YouTubeDataAPI.searchRequest(
-            query: "葬送的芙莉蓮 第1話 EP1 完整版 動畫",
+            query: "葬送的芙莉蓮 Sousou no Frieren 第1話 EP1 完整版 動畫",
             credentials: YouTubeCredentials(apiKey: "yt-key"),
             maxResults: 10,
             profile: .animeEpisode
@@ -807,6 +807,37 @@ struct TVShellChecks {
         }
         let wrongOnlyStreams = try await wrongOnlyProvider.streams(for: wrongOnlyEpisode)
         try expect(wrongOnlyStreams.isEmpty, "bangumi youtube provider refuses to play a different anime when no matching episode exists")
+
+        let aliasOnlyYouTubeResponse = """
+        {
+          "items": [
+            {
+              "id": { "videoId": "frierenEnglish01" },
+              "snippet": {
+                "title": "Frieren Episode 1",
+                "channelTitle": "官方動畫頻道",
+                "description": "別名標題",
+                "thumbnails": {
+                  "high": { "url": "https://example.com/frieren-english.jpg" }
+                }
+              }
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let aliasOnlyProvider = BangumiYouTubeAnimeSourceProvider(
+            youtubeCredentials: YouTubeCredentials(apiKey: "yt-key"),
+            transport: StaticAnimeHTTPTransport(routes: [
+                bangumiRequest.url.absoluteString: bangumiResponse,
+                youtubeRequest.url.absoluteString: aliasOnlyYouTubeResponse
+            ])
+        )
+        let aliasOnlyResults = try await aliasOnlyProvider.search(AnimeSearchQuery(keyword: "芙莉蓮"))
+        guard let aliasOnlyEpisode = aliasOnlyResults.first?.episodes.first else {
+            throw CheckFailure("missing alias-only bangumi youtube episode")
+        }
+        let aliasOnlyStreams = try await aliasOnlyProvider.streams(for: aliasOnlyEpisode)
+        try expect(aliasOnlyStreams.first?.url.absoluteString == "youtube://frierenEnglish01", "bangumi youtube provider accepts official alias titles")
     }
 
     static func checkAnimeHomeProviderAggregatesDistinctTitles() async throws {
@@ -1098,6 +1129,7 @@ struct TVShellChecks {
         try expect(animeRuntime.contains("anime-episode-\\(index)"), "anime episode cards expose stable scroll ids")
         try expect(animeRuntime.contains("scrollTo(\"anime-title-\\(index)\""), "anime title focus movement scrolls to focused poster")
         try expect(animeRuntime.contains("scrollTo(\"anime-episode-\\(index)\""), "anime episode focus movement scrolls to focused episode")
+        try expect(animeRuntime.contains("searchKeywordBar") == false, "anime title browser does not show the old keyword chip row")
         try expect(animeRuntime.contains(".animation(TVMotion.focus, value: comments)") == false, "danmaku overlay does not animate every comment refresh")
         try expect(animeRuntime.contains("DanmakuOverlay(comments: controller.visibleDanmaku"), "anime player renders danmaku overlay")
         try expect(animeRuntime.contains(".zIndex(3)"), "danmaku overlay is above player surfaces")

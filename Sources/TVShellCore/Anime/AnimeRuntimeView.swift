@@ -154,8 +154,6 @@ public struct AnimeRuntimeView: View {
                 VStack(alignment: .leading, spacing: 34 * metrics.scale) {
                     animeHeader(metrics: metrics, title: app.name, subtitle: controller.statusText)
 
-                    searchKeywordBar(metrics: metrics)
-
                     LazyVGrid(
                         columns: [GridItem(.adaptive(minimum: 184 * metrics.scale), spacing: 18 * metrics.scale)],
                         alignment: .leading,
@@ -254,23 +252,6 @@ public struct AnimeRuntimeView: View {
         }
     }
 
-    private func searchKeywordBar(metrics: TVMetrics) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 14 * metrics.scale) {
-                ForEach(Array(controller.searchKeywords.enumerated()), id: \.offset) { index, keyword in
-                    Text(keyword)
-                        .font(.system(size: 22 * metrics.scale, weight: .bold))
-                        .lineLimit(1)
-                        .padding(.horizontal, 20 * metrics.scale)
-                        .padding(.vertical, 12 * metrics.scale)
-                        .liquidGlassCard(isFocused: index == controller.searchKeywordIndex, cornerRadius: 18 * metrics.scale)
-                        .opacity(index == controller.searchKeywordIndex ? 1 : 0.58)
-                }
-            }
-            .padding(.vertical, 8 * metrics.scale)
-        }
-    }
-
     private func player(metrics: TVMetrics) -> some View {
         ZStack(alignment: .bottomLeading) {
             if let youtubeVideoID = controller.currentYouTubeVideoID {
@@ -325,14 +306,12 @@ final class AnimeRuntimeController: ObservableObject {
     @Published private(set) var statusText = "正在載入動畫源..."
     @Published private(set) var visibleDanmaku: [DanmakuComment] = []
     @Published private(set) var currentYouTubeVideoID: String?
-    @Published private(set) var searchKeywordIndex = 0
     @Published private(set) var danmakuStatusText = "彈幕未載入"
     @Published private(set) var isKeyboardVisible = false
     @Published private(set) var keyboardState = VirtualKeyboardState(text: "", layout: .zhuyin)
 
     private var sourceProvider: (any AnimeSourceProvider)?
     private var danmakuProvider: any DanmakuProvider
-    let searchKeywords = AnimeSearchKeywordCatalog.defaultKeywords
     private var comments: [DanmakuComment] = []
     private var titleColumns = 6
     private var episodeColumns = 4
