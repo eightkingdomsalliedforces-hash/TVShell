@@ -4,7 +4,7 @@ import TVShellCore
 @main
 struct TVShellApp: App {
     @NSApplicationDelegateAdaptor(ShellAppDelegate.self) private var appDelegate
-    @StateObject private var appState = AppState(settingsStore: .applicationSupport())
+    @StateObject private var appState = AppState(settingsStore: .applicationSupport(), startNetworkRemote: true)
 
     var body: some Scene {
         WindowGroup {

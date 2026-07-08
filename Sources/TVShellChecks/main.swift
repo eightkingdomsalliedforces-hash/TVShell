@@ -65,6 +65,7 @@ struct TVShellChecks {
         try checkKeyCodeMapper()
         try checkVirtualKeyboardState()
         try checkRemoteMappingStore()
+        try checkNetworkRemoteControlServer()
         try checkFocusEngine()
         try checkNativeLaunchRequest()
         try checkDisplayScale()
@@ -224,6 +225,22 @@ struct TVShellChecks {
         try expect(candidateKeyboard.focusedCandidateIndex == 1, "zhuyin keyboard focuses next candidate")
         try expect(candidateKeyboard.apply(.select) == .textChanged, "zhuyin keyboard commits selected candidate")
         try expect(candidateKeyboard.text == "店", "zhuyin keyboard commits the focused candidate rather than always the first one")
+    }
+
+    static func checkNetworkRemoteControlServer() throws {
+        try expect(RemoteCommand.networkRemoteCommand(named: "up") == .up, "network remote maps up")
+        try expect(RemoteCommand.networkRemoteCommand(named: "ok") == .select, "network remote maps ok to select")
+        try expect(RemoteCommand.networkRemoteCommand(named: "enter") == .select, "network remote maps enter to select")
+        try expect(RemoteCommand.networkRemoteCommand(named: "back") == .back, "network remote maps back")
+        try expect(RemoteCommand.networkRemoteCommand(named: "play") == .playPause, "network remote maps play to play/pause")
+        try expect(RemoteCommand.networkRemoteCommand(named: "volumeup") == .volumeUp, "network remote maps Android volume up")
+
+        let request = "POST /command/ok HTTP/1.1\r\nHost: mactv\r\n\r\n"
+        try expect(NetworkRemoteControlServer.command(fromHTTPRequest: request) == .select, "network remote parses command paths")
+        let queryRequest = "GET /command?name=home HTTP/1.1\r\nHost: mactv\r\n\r\n"
+        try expect(NetworkRemoteControlServer.command(fromHTTPRequest: queryRequest) == .home, "network remote parses command query")
+        try expect(NetworkRemoteControlServer.remotePageHTML.contains("/command/up"), "network remote page includes up button")
+        try expect(NetworkRemoteControlServer.remotePageHTML.contains("MacTV Remote"), "network remote page identifies itself")
     }
 
     static func checkRemoteMappingStore() throws {

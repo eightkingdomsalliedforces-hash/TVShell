@@ -31,6 +31,26 @@ public struct RemoteLearningView: View {
                         .padding(.vertical, 24 * metrics.scale)
                         .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 18 * metrics.scale, style: .continuous))
 
+                    VStack(alignment: .leading, spacing: 14 * metrics.scale) {
+                        Text("Android 藍牙備援")
+                            .font(.system(size: 34 * metrics.scale, weight: .bold))
+                        Text("如果 Android TV 遙控器無法和 macOS 藍牙配對，請用同一 Wi-Fi 的 Android 手機瀏覽器打開：")
+                            .font(.system(size: 25 * metrics.scale, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .lineLimit(3)
+                        Text(appState.networkRemoteStatus.urlText)
+                            .font(.system(size: 36 * metrics.scale, weight: .heavy, design: .rounded))
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.58)
+                            .textSelection(.enabled)
+                        Text(appState.networkRemoteStatus.message)
+                            .font(.system(size: 23 * metrics.scale, weight: .semibold))
+                            .foregroundStyle(appState.networkRemoteStatus.isRunning ? .green.opacity(0.86) : .orange.opacity(0.86))
+                    }
+                    .padding(.horizontal, 34 * metrics.scale)
+                    .padding(.vertical, 28 * metrics.scale)
+                    .liquidGlassCard(isFocused: true, cornerRadius: 24 * metrics.scale)
+
                     PermissionStatusView()
                 }
                 .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .topLeading)
@@ -40,5 +60,8 @@ public struct RemoteLearningView: View {
             .scrollIndicators(.hidden)
         }
         .foregroundStyle(.white)
+        .onAppear {
+            appState.startNetworkRemoteServer()
+        }
     }
 }

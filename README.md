@@ -130,6 +130,14 @@ swift run TVShell
 
 如果遙控器按下後輸出注音或文字，通常代表 macOS 目前在中文輸入法中，該按鍵被當成文字輸入。請切到英文輸入法後再測，或到「遙控器」頁面觀察收到的按鍵。
 
+Android TV 原廠遙控器有些只會和對應電視盒配對，macOS 藍牙可能看不到或無法完成配對。這種情況 App 收不到任何 HID 事件，無法靠按鍵映射修復。MacTV 會在啟動時開啟 Wi-Fi 網路遙控器，可到「遙控器」頁面查看網址，例如：
+
+```text
+http://你的-Mac-IP:8787
+```
+
+用同一 Wi-Fi 的 Android 手機瀏覽器打開後，就能操作方向、OK、Back、Home、Menu、播放/暫停與音量。第一次使用時 macOS 可能會詢問是否允許本機網路連線，請允許。
+
 ## 內建 App
 
 預設 App 由 `Sources/TVShellCore/Launcher/SeedApps.swift` 定義：

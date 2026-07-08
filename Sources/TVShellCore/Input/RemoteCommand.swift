@@ -37,3 +37,31 @@ extension RemoteCommand: CustomStringConvertible {
         }
     }
 }
+
+public extension RemoteCommand {
+    static func networkRemoteCommand(named rawName: String) -> RemoteCommand? {
+        let name = rawName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .lowercased()
+
+        return switch name {
+        case "up": .up
+        case "down": .down
+        case "left": .left
+        case "right": .right
+        case "ok", "enter", "select": .select
+        case "back", "return": .back
+        case "home": .home
+        case "menu", "settings": .menu
+        case "play", "pause", "playpause": .playPause
+        case "rewind", "backward": .rewind
+        case "fastforward", "forward": .fastForward
+        case "volumeup", "volup": .volumeUp
+        case "volumedown", "voldown": .volumeDown
+        case "mute": .mute
+        default: nil
+        }
+    }
+}

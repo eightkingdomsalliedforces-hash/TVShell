@@ -24,13 +24,23 @@ public final class AppState: ObservableObject {
     @Published public var focusedAnimeSourceID: String?
     @Published public var watchingHistory: [WatchHistoryEntry] = []
     @Published public var danmakuDisplaySettings = DanmakuDisplaySettings()
+    @Published public var networkRemoteStatus = NetworkRemoteControlStatus(
+        isRunning: false,
+        urlText: NetworkRemoteControlServer.remoteURLText(),
+        message: "網路遙控器尚未啟動"
+    )
 
     private let nativeRuntime = NativeAppRuntime()
+    private let networkRemoteServer = NetworkRemoteControlServer.shared
     private let settingsStore: AppSettingsStore?
     private nonisolated(unsafe) var exitObserver: NSObjectProtocol?
     private nonisolated(unsafe) var historyObserver: NSObjectProtocol?
 
-    public init(apps: [TVAppProfile] = SeedApps.defaultApps, settingsStore: AppSettingsStore? = nil) {
+    public init(
+        apps: [TVAppProfile] = SeedApps.defaultApps,
+        settingsStore: AppSettingsStore? = nil,
+        startNetworkRemote: Bool = false
+    ) {
         self.settingsStore = settingsStore
         let loadedSnapshot: AppSettingsSnapshot?
         if let settingsStore {
@@ -73,6 +83,9 @@ public final class AppState: ObservableObject {
                 self?.recordWatch(entry)
             }
         }
+        if startNetworkRemote {
+            startNetworkRemoteServer()
+        }
     }
 
     deinit {
@@ -90,6 +103,14 @@ public final class AppState: ObservableObject {
 
     public func recordWatchForTesting(_ entry: WatchHistoryEntry) {
         recordWatch(entry)
+    }
+
+    public func startNetworkRemoteServer() {
+        networkRemoteStatus = networkRemoteServer.start { [weak self] command in
+            Task { @MainActor in
+                self?.handle(command)
+            }
+        }
     }
 
     private func recordWatch(_ entry: WatchHistoryEntry) {
