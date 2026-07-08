@@ -40,12 +40,40 @@ jobs:
       - name: Build Release Product
         run: swift build -c release --product TVShell
 
+      - name: Download VLCKit
+        run: |
+          set -euo pipefail
+          VLCKIT_METADATA="https://code.videolan.org/videolan/VLCKit/raw/master/Packaging/VLCKit.json"
+          VLCKIT_URL="$(curl -fsSL "$VLCKIT_METADATA" | jq -r 'to_entries | sort_by(.key | split(".") | map(tonumber)) | last.value')"
+          if [ -z "$VLCKIT_URL" ] || [ "$VLCKIT_URL" = "null" ]; then
+            echo "Could not resolve VLCKit download URL from $VLCKIT_METADATA" >&2
+            exit 1
+          fi
+
+          mkdir -p "$RUNNER_TEMP/vlckit"
+          curl -fL --retry 3 --retry-delay 5 -o "$RUNNER_TEMP/VLCKit.tar.xz" "$VLCKIT_URL"
+          tar -xJf "$RUNNER_TEMP/VLCKit.tar.xz" -C "$RUNNER_TEMP/vlckit"
+
+          VLCKIT_FRAMEWORK="$(find "$RUNNER_TEMP/vlckit" -name VLCKit.framework -type d | head -n 1)"
+          if [ -z "$VLCKIT_FRAMEWORK" ] || [ ! -d "$VLCKIT_FRAMEWORK" ]; then
+            echo "VLCKit.framework was not found after extracting $VLCKIT_URL" >&2
+            find "$RUNNER_TEMP/vlckit" -maxdepth 4 -print
+            exit 1
+          fi
+
+          echo "VLCKIT_URL=$VLCKIT_URL" >> "$GITHUB_ENV"
+          echo "VLCKIT_FRAMEWORK=$VLCKIT_FRAMEWORK" >> "$GITHUB_ENV"
+          echo "Using VLCKit from $VLCKIT_URL"
+
       - name: Package App Bundle
         run: |
+          set -euo pipefail
           APP="dist/MacTV.app"
-          mkdir -p "$APP/Contents/MacOS"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
           cp .build/release/TVShell "$APP/Contents/MacOS/TVShell"
           chmod +x "$APP/Contents/MacOS/TVShell"
+          cp -R "$VLCKIT_FRAMEWORK" "$APP/Contents/Frameworks/VLCKit.framework"
+          xattr -cr "$APP/Contents/Frameworks/VLCKit.framework" || true
           cat > "$APP/Contents/Info.plist" <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -76,6 +104,15 @@ jobs:
           </dict>
           </plist>
           PLIST
+          cat > "$APP/Contents/Resources/ThirdPartyNotices.txt" <<NOTICE
+          MacTV embeds VideoLAN VLCKit for broad local and streaming media playback.
+
+          VLCKit is distributed by VideoLAN under LGPL-2.1-or-later.
+          Source and license information: https://code.videolan.org/videolan/VLCKit
+          Binary metadata used by this build: https://code.videolan.org/videolan/VLCKit/raw/master/Packaging/VLCKit.json
+          Download used by this build: ${VLCKIT_URL}
+          NOTICE
+          codesign --force --deep --sign - "$APP"
           (cd dist && zip -9 -r TVShell-macOS-${{ github.sha }}.zip MacTV.app)
 
       - name: Upload Artifact
