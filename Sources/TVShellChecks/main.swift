@@ -192,6 +192,7 @@ struct TVShellChecks {
         try expect(ZhuyinComposer.candidates(for: "ㄎㄧㄚˇ").first == "卡", "zhuyin keyboard tolerates common non-standard ka input")
         try expect(ZhuyinComposer.candidates(for: "ㄓㄨˋㄧㄣ").first == "注音", "zhuyin keyboard composes multi-syllable words")
         try expect(ZhuyinComposer.candidates(for: "ㄎㄜˇㄎㄜˇ").first == "可可", "zhuyin keyboard segments repeated syllables")
+        try expect(ZhuyinComposer.candidates(for: "ㄉㄧㄢˋ").first == "電", "zhuyin keyboard suggests dian fourth tone as electric")
     }
 
     static func checkRemoteMappingStore() throws {
