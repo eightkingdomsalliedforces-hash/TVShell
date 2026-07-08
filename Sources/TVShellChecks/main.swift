@@ -901,16 +901,33 @@ struct TVShellChecks {
           </item>
         </channel></rss>
         """.data(using: .utf8)!
+        let btCoverRequest = try BangumiAPI.searchSubjectsRequest(keyword: "芙莉蓮")
+        let btCoverResponse = """
+        {
+          "data": [
+            {
+              "id": 424883,
+              "name": "Sousou no Frieren",
+              "name_cn": "葬送的芙莉蓮",
+              "images": {
+                "large": "https://example.com/frieren-cover.jpg"
+              }
+            }
+          ]
+        }
+        """.data(using: .utf8)!
         let btProvider = BTFeedAnimeSourceProvider(
             id: "mikan",
             displayName: "Mikan Project",
             searchURLTemplate: "https://mikanani.me/RSS/Search?searchstr={keyword}",
             transport: StaticAnimeHTTPTransport(routes: [
-                "https://mikanani.me/RSS/Search?searchstr=%E8%8A%99%E8%8E%89%E8%93%AE": rss
+                "https://mikanani.me/RSS/Search?searchstr=%E8%8A%99%E8%8E%89%E8%93%AE": rss,
+                btCoverRequest.url.absoluteString: btCoverResponse
             ])
         )
         let btResults = try await btProvider.search(AnimeSearchQuery(keyword: "芙莉蓮"))
         try expect(btResults.first?.title.contains("葬送的芙莉蓮") == true, "Mikan RSS provider parses item titles")
+        try expect(btResults.first?.coverURL?.absoluteString == "https://example.com/frieren-cover.jpg", "BT RSS provider enriches results with Bangumi covers")
         guard let btEpisode = btResults.first?.episodes.first else {
             throw CheckFailure("missing BT feed episode")
         }

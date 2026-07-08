@@ -31,6 +31,7 @@ public struct BTFeedAnimeSourceProvider: AnimeMediaSourceAdapter {
             ]
         ))
         let items = try BTFeedParser.parse(data)
+        let coverURL = await coverURL(keyword: query.keyword)
         let results = items.compactMap { item -> AnimeSearchResult? in
             guard let streamURL = item.streamURL else {
                 return nil
@@ -54,6 +55,7 @@ public struct BTFeedAnimeSourceProvider: AnimeMediaSourceAdapter {
                 id: "\(id)-\(stableID(title))",
                 title: title,
                 subtitle: "\(displayName) · BT/RSS",
+                coverURL: coverURL,
                 episodeCount: 1,
                 episodes: [episode]
             )
@@ -115,6 +117,16 @@ public struct BTFeedAnimeSourceProvider: AnimeMediaSourceAdapter {
             return nil
         }
         return String(value[swiftRange])
+    }
+
+    private func coverURL(keyword: String) async -> URL? {
+        do {
+            let request = try BangumiAPI.searchSubjectsRequest(keyword: keyword)
+            let data = try await transport.data(for: request)
+            return try BangumiAPI.decodeSubjectSearch(data).first?.coverURL
+        } catch {
+            return nil
+        }
     }
 
     private func stableID(_ value: String) -> String {
