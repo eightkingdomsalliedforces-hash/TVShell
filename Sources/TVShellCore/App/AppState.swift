@@ -40,7 +40,8 @@ public final class AppState: ObservableObject {
         }
         let restoredApps = loadedSnapshot?.apps.isEmpty == false ? loadedSnapshot?.apps : apps
         self.apps = restoredApps ?? apps
-        animeSourceCatalog = loadedSnapshot?.animeSourceCatalog ?? AnimeSourceCatalogState(definitions: AnimeSourceCatalog.defaultSources)
+        animeSourceCatalog = (loadedSnapshot?.animeSourceCatalog ?? AnimeSourceCatalogState(definitions: AnimeSourceCatalog.defaultSources))
+            .removingUnusableSources()
         displayScale = loadedSnapshot?.displayScale ?? .auto
         wallpaperSource = loadedSnapshot?.wallpaperSource ?? .builtIn(.aurora)
         webRemoteMode = loadedSnapshot?.webRemoteMode ?? .mouse

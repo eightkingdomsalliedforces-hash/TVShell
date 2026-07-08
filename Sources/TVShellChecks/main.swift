@@ -1311,24 +1311,18 @@ struct TVShellChecks {
     @MainActor
     static func checkAnimekoStyleSourceCatalog() throws {
         let sources = AnimeSourceCatalog.defaultSources
-        try expect(sources.count >= 20, "anime source catalog includes animeko-style source list")
+        try expect(sources.count == 6, "anime source catalog only keeps currently playable built-in sources")
         try expect(sources.first?.id == "bangumi-youtube", "catalog starts with playable bangumi youtube source")
-        try expect(sources.contains { $0.title == "girigiri 愛動漫" }, "catalog includes girigiri source")
-        try expect(sources.contains { $0.title == "喵物次元" && $0.health == .needsCloudflare }, "catalog marks cloudflare source")
-        try expect(sources.contains { $0.title == "新優酷" && $0.health == .needsCaptcha }, "catalog marks captcha source")
-        try expect(sources.contains { $0.title == "櫻花動漫" && $0.health == .failed }, "catalog marks failed source")
-
-        guard let hoibi = sources.first(where: { $0.title == "吼哔動漫" }) else {
-            throw CheckFailure("missing hoibi source")
-        }
-        try expect(hoibi.lines.map(\.title) == ["吼哔2線", "吼哔1線", "吼哔4線"], "hoibi source keeps screenshot line order")
+        try expect(sources.allSatisfy { $0.health == .available }, "catalog removes sources without working adapters")
+        try expect(sources.contains { $0.id == "girigiri" } == false, "catalog removes girigiri until a working adapter exists")
+        try expect(sources.contains { $0.id == "omofun111" } == false, "catalog removes omofun111 until the authorized API adapter is configured")
+        try expect(sources.contains { $0.health == .needsCloudflare || $0.health == .needsCaptcha || $0.health == .failed || $0.health == .needsAdapter } == false, "catalog hides unusable verification and failed sources")
 
         var catalog = AnimeSourceCatalogState(definitions: sources)
-        try expect(catalog.enabledInstances.contains { $0.definition.title == "hanime1[720p]" } == false, "adult source is not enabled by default")
         try expect(catalog.focusedID == catalog.instances.first?.id, "catalog focuses first source by default")
 
-        catalog.selectLine(sourceID: hoibi.id, lineID: "hoibi-1")
-        try expect(catalog.instance(id: hoibi.id)?.selectedLine?.title == "吼哔1線", "catalog can select a source line")
+        catalog.selectLine(sourceID: "mikan", lineID: "mikan-0")
+        try expect(catalog.instance(id: "mikan")?.selectedLine?.title == "RSS / BT", "catalog can select a source line")
 
         catalog.toggleEnabled(sourceID: "bangumi-youtube")
         try expect(catalog.instance(id: "bangumi-youtube")?.isEnabled == false, "catalog can disable a playable source")
@@ -1545,9 +1539,16 @@ struct TVShellChecks {
     static func checkAnimeSourcesExposePlayableStatusAndSearchChoices() throws {
         let sources = AnimeSourceCatalog.defaultSources
         try expect(sources.first(where: { $0.id == "bangumi-youtube" })?.health == .available, "bangumi youtube remains playable by default")
-        try expect(sources.first(where: { $0.id == "girigiri" })?.health == .needsAdapter, "unimplemented scraped source is marked as needing adapter")
-        try expect(sources.first(where: { $0.id == "hoibi" })?.defaultEnabled == false, "unimplemented scraped source is not enabled by default")
-        try expect(sources.first(where: { $0.id == "miaowu" })?.health == .needsCloudflare, "cloudflare sources still show verification status")
+        try expect(sources.contains { $0.health != .available } == false, "default anime source list does not show unusable sources")
+        var oldCatalog = AnimeSourceCatalogState(definitions: [
+            AnimeSourceDefinition(id: "ok", title: "可用", iconLabel: "OK", lines: [], health: .available),
+            AnimeSourceDefinition(id: "pending", title: "待接入", iconLabel: "P", lines: [], health: .needsAdapter),
+            AnimeSourceDefinition(id: "failed", title: "失敗", iconLabel: "F", lines: [], health: .failed)
+        ])
+        oldCatalog.focus(sourceID: "pending")
+        let migratedCatalog = oldCatalog.removingUnusableSources()
+        try expect(migratedCatalog.instances.map(\.id) == ["ok"], "saved anime source catalogs are pruned during migration")
+        try expect(migratedCatalog.focusedID == "ok", "source migration moves focus to a remaining playable source")
 
         let keywords = AnimeSearchKeywordCatalog.defaultKeywords
         try expect(keywords.count >= 36, "anime runtime offers a broad homepage search range")
@@ -1556,10 +1557,7 @@ struct TVShellChecks {
 
         let state = AppState(apps: SeedApps.defaultApps)
         state.activeRuntime = .animeSourceManagement
-        state.focusedAnimeSourceID = "girigiri"
-        state.handle(.select)
-        try expect(state.animeSourceCatalog.instance(id: "girigiri")?.isEnabled == false, "pending adapter source cannot be enabled from remote")
-        try expect(state.statusMessage?.contains("待接入") == true, "pending adapter source explains why it cannot play")
+        try expect(state.animeSourceCatalog.instances.contains { $0.definition.health != .available } == false, "app state starts without unusable anime sources")
     }
 
     static func checkBigScreenViewsStayScrollableAndWindowIsResizable() throws {

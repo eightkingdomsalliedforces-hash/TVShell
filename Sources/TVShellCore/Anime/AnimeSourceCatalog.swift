@@ -180,6 +180,17 @@ public struct AnimeSourceCatalogState: Codable, Equatable, Sendable {
         }
         return next
     }
+
+    public func removingUnusableSources() -> AnimeSourceCatalogState {
+        var next = self
+        next.instances = instances.filter { $0.definition.health == .available }
+        if let focusedID, next.instances.contains(where: { $0.id == focusedID }) {
+            next.focusedID = focusedID
+        } else {
+            next.focusedID = next.instances.first?.id
+        }
+        return next
+    }
 }
 
 public enum AnimeSourceCatalog {
@@ -189,37 +200,7 @@ public enum AnimeSourceCatalog {
         source("dmhy", "動漫花園", "花", ["RSS / BT"], health: .available, defaultEnabled: false),
         source("ani-subs-bt", "ani-subs BT 訂閱", "AS", ["RSS / BT 訂閱"], health: .available, defaultEnabled: false),
         source("jellyfin", "Jellyfin", "JF", ["自有媒體庫"], health: .available, defaultEnabled: false),
-        source("emby", "Emby", "E", ["自有媒體庫"], health: .available, defaultEnabled: false),
-        pendingSource("girigiri", "girigiri 愛動漫", "G", ["在線"]),
-        source("omofun111", "omofun111", "O", ["授權 Adapter", "WebView 入口"], health: .needsAdapter, defaultEnabled: false),
-        pendingSource("e-acg", "E-ACG", "EA", ["E-ACG"]),
-        pendingSource("hoibi", "吼哔動漫", "吼", [
-            AnimeSourceLine(id: "hoibi-2", title: "吼哔2線"),
-            AnimeSourceLine(id: "hoibi-1", title: "吼哔1線"),
-            AnimeSourceLine(id: "hoibi-4", title: "吼哔4線")
-        ]),
-        pendingSource("fengche", "風車影視", "風", ["動漫大全", "線路②", "線路①", "線路③", "備用②", "備用③"]),
-        pendingSource("qukanba", "去看吧", "去", ["EDD"]),
-        pendingSource("haixing", "海星動漫", "海", ["播放I", "播放II", "播放III", "播放IV", "播放V", "播放VI"]),
-        pendingSource("fanqie", "番茄動漫", "番", ["番茄2線", "番茄1線", "速播資源1"]),
-        pendingSource("hanime1-720p", "hanime1[720p]", "720", ["720p"], isAdult: true),
-        pendingSource("uzvod", "UZVOD", "UZ", ["在線"]),
-        pendingSource("ark", "次元方舟", "舟", ["在線"]),
-        pendingSource("2k", "2k動漫", "2K", ["極速資源-LZ", "極速資源-FF"]),
-        pendingSource("blue-ray", "高清藍光", "藍", ["高清藍光-OF", "高清藍光-LM", "高清藍光-LX"]),
-        pendingSource("dilidili", "嘀哩嘀哩", "嘀", ["在線"]),
-        pendingSource("fantuan", "飯團動漫", "飯", ["線路二", "線路四", "線路六", "線路三"]),
-        pendingSource("mx", "MX動漫", "MX", ["在線"]),
-        source("miaowu", "喵物次元", "喵", ["Cloudflare 驗證"], health: .needsCloudflare, defaultEnabled: false),
-        source("new-youku", "新優酷", "NU", ["驗證碼"], health: .needsCaptcha, defaultEnabled: false),
-        pendingSource("dongmandan", "動漫蛋", "蛋", ["在線"]),
-        pendingSource("mengdao", "萌道動漫", "萌", ["播放地址"]),
-        pendingSource("gugufan", "咕咕番", "咕", [
-            AnimeSourceLine(id: "gugufan-a", title: "咕咕A線"),
-            AnimeSourceLine(id: "gugufan-b", title: "咕咕B線(已弃用)", isDeprecated: true)
-        ]),
-        source("first-anime", "第一動漫", "一", ["重試"], health: .failed, defaultEnabled: false),
-        source("sakura", "櫻花動漫", "櫻", ["重試"], health: .failed, defaultEnabled: false)
+        source("emby", "Emby", "E", ["自有媒體庫"], health: .available, defaultEnabled: false)
     ]
 
     private static func source(
@@ -264,39 +245,4 @@ public enum AnimeSourceCatalog {
         )
     }
 
-    private static func pendingSource(
-        _ id: String,
-        _ title: String,
-        _ iconLabel: String,
-        _ lineTitles: [String],
-        isAdult: Bool = false
-    ) -> AnimeSourceDefinition {
-        source(
-            id,
-            title,
-            iconLabel,
-            lineTitles,
-            health: .needsAdapter,
-            defaultEnabled: false,
-            isAdult: isAdult
-        )
-    }
-
-    private static func pendingSource(
-        _ id: String,
-        _ title: String,
-        _ iconLabel: String,
-        _ lines: [AnimeSourceLine],
-        isAdult: Bool = false
-    ) -> AnimeSourceDefinition {
-        source(
-            id,
-            title,
-            iconLabel,
-            lines,
-            health: .needsAdapter,
-            defaultEnabled: false,
-            isAdult: isAdult
-        )
-    }
 }
