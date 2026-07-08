@@ -59,18 +59,20 @@ public struct BangumiYouTubeAnimeSourceProvider: AnimeMediaSourceAdapter {
             profile: .animeEpisode
         )
         let data = try await transport.data(for: request)
-        return try YouTubeDataAPI.decodeSearchResponse(data).map { video in
-            AnimeStreamCandidate(
-                url: URL(string: "youtube://\(video.id)")!,
-                quality: "YouTube",
-                priority: score(video: video, episode: episode),
-                headers: [
-                    "title": video.title,
-                    "channel": video.channelTitle
-                ]
-            )
-        }
-        .sorted { $0.priority > $1.priority }
+        return try YouTubeDataAPI.decodeSearchResponse(data)
+            .filter { isPlayableEpisodeMatch(video: $0, episode: episode) }
+            .map { video in
+                AnimeStreamCandidate(
+                    url: URL(string: "youtube://\(video.id)")!,
+                    quality: "YouTube",
+                    priority: score(video: video, episode: episode),
+                    headers: [
+                        "title": video.title,
+                        "channel": video.channelTitle
+                    ]
+                )
+            }
+            .sorted { $0.priority > $1.priority }
     }
 
     private func episodes(for subject: BangumiSubject) -> [AnimeEpisode] {
@@ -99,15 +101,7 @@ public struct BangumiYouTubeAnimeSourceProvider: AnimeMediaSourceAdapter {
         if matchesEpisodeNumber(title, episode: episode.number) {
             value += 44
         }
-        if title.localizedCaseInsensitiveContains("reaction") ||
-            title.localizedCaseInsensitiveContains("解說") ||
-            title.localizedCaseInsensitiveContains("預告") ||
-            title.localizedCaseInsensitiveContains("trailer") ||
-            title.localizedCaseInsensitiveContains("shorts") ||
-            title.localizedCaseInsensitiveContains("short") ||
-            title.localizedCaseInsensitiveContains("精華") ||
-            title.localizedCaseInsensitiveContains("剪輯") ||
-            title.localizedCaseInsensitiveContains("片段") {
+        if isExcludedClip(title) {
             value -= 70
         }
         return value
@@ -115,6 +109,13 @@ public struct BangumiYouTubeAnimeSourceProvider: AnimeMediaSourceAdapter {
 
     private func youtubeSearchQuery(for episode: AnimeEpisode) -> String {
         "\(episode.identity.subjectID) 第\(episode.number)話 EP\(episode.number) 完整版 動畫"
+    }
+
+    private func isPlayableEpisodeMatch(video: YouTubeVideo, episode: AnimeEpisode) -> Bool {
+        let title = video.title
+        return title.localizedCaseInsensitiveContains(episode.identity.subjectID)
+            && matchesEpisodeNumber(title, episode: episode.number)
+            && isExcludedClip(title) == false
     }
 
     private func matchesEpisodeNumber(_ title: String, episode: Int) -> Bool {
@@ -127,6 +128,18 @@ public struct BangumiYouTubeAnimeSourceProvider: AnimeMediaSourceAdapter {
             "E\(episode)",
             "Episode \(episode)"
         ].contains { title.localizedCaseInsensitiveContains($0) }
+    }
+
+    private func isExcludedClip(_ title: String) -> Bool {
+        title.localizedCaseInsensitiveContains("reaction") ||
+            title.localizedCaseInsensitiveContains("解說") ||
+            title.localizedCaseInsensitiveContains("預告") ||
+            title.localizedCaseInsensitiveContains("trailer") ||
+            title.localizedCaseInsensitiveContains("shorts") ||
+            title.localizedCaseInsensitiveContains("short") ||
+            title.localizedCaseInsensitiveContains("精華") ||
+            title.localizedCaseInsensitiveContains("剪輯") ||
+            title.localizedCaseInsensitiveContains("片段")
     }
 }
 

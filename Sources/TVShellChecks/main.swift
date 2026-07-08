@@ -710,6 +710,17 @@ struct TVShellChecks {
         {
           "items": [
             {
+              "id": { "videoId": "jjk01" },
+              "snippet": {
+                "title": "咒術迴戰 第 1 話",
+                "channelTitle": "錯誤作品頻道",
+                "description": "不同作品",
+                "thumbnails": {
+                  "high": { "url": "https://example.com/jjk.jpg" }
+                }
+              }
+            },
+            {
               "id": { "videoId": "frierenShort" },
               "snippet": {
                 "title": "葬送的芙莉蓮 shorts 精華片段",
@@ -764,6 +775,38 @@ struct TVShellChecks {
         let streams = try await provider.streams(for: episode)
         try expect(streams.first?.url.absoluteString == "youtube://frieren01", "bangumi youtube provider resolves youtube candidate")
         try expect(streams.first?.quality == "YouTube", "bangumi youtube provider labels youtube source")
+        try expect(streams.contains { $0.url.absoluteString == "youtube://jjk01" } == false, "bangumi youtube provider filters videos from a different anime")
+
+        let wrongOnlyYouTubeResponse = """
+        {
+          "items": [
+            {
+              "id": { "videoId": "jjk01" },
+              "snippet": {
+                "title": "咒術迴戰 第 1 話",
+                "channelTitle": "錯誤作品頻道",
+                "description": "不同作品",
+                "thumbnails": {
+                  "high": { "url": "https://example.com/jjk.jpg" }
+                }
+              }
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let wrongOnlyProvider = BangumiYouTubeAnimeSourceProvider(
+            youtubeCredentials: YouTubeCredentials(apiKey: "yt-key"),
+            transport: StaticAnimeHTTPTransport(routes: [
+                bangumiRequest.url.absoluteString: bangumiResponse,
+                youtubeRequest.url.absoluteString: wrongOnlyYouTubeResponse
+            ])
+        )
+        let wrongOnlyResults = try await wrongOnlyProvider.search(AnimeSearchQuery(keyword: "芙莉蓮"))
+        guard let wrongOnlyEpisode = wrongOnlyResults.first?.episodes.first else {
+            throw CheckFailure("missing wrong-only bangumi youtube episode")
+        }
+        let wrongOnlyStreams = try await wrongOnlyProvider.streams(for: wrongOnlyEpisode)
+        try expect(wrongOnlyStreams.isEmpty, "bangumi youtube provider refuses to play a different anime when no matching episode exists")
     }
 
     static func checkAnimeHomeProviderAggregatesDistinctTitles() async throws {
