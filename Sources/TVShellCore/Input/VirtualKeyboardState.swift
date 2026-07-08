@@ -43,18 +43,27 @@ public struct VirtualKeyboardKey: Identifiable, Equatable, Sendable {
 
 public struct VirtualKeyboardState: Equatable, Sendable {
     public private(set) var text: String
+    public private(set) var composition: String
     public private(set) var focusedRow: Int
     public private(set) var focusedColumn: Int
     public private(set) var layout: VirtualKeyboardLayout
+    private var lastCompositionKey: String?
+
+    public var candidates: [String] {
+        ZhuyinComposer.candidates(for: composition)
+    }
+
     public var rows: [[VirtualKeyboardKey]] {
         Self.rows(for: layout)
     }
 
     public init(text: String = "", layout: VirtualKeyboardLayout = .latin) {
         self.text = text
+        self.composition = ""
         self.focusedRow = 0
         self.focusedColumn = 0
         self.layout = layout
+        self.lastCompositionKey = nil
     }
 
     private static func rows(for layout: VirtualKeyboardLayout) -> [[VirtualKeyboardKey]] {
@@ -116,6 +125,11 @@ public struct VirtualKeyboardState: Equatable, Sendable {
             focusedColumn = min(focusedColumn, rows[focusedRow].count - 1)
             return .none
         case .back:
+            if composition.isEmpty == false {
+                composition.removeLast()
+                lastCompositionKey = nil
+                return .textChanged
+            }
             if text.isEmpty {
                 return .cancelled
             }
@@ -131,24 +145,111 @@ public struct VirtualKeyboardState: Equatable, Sendable {
     private mutating func activateFocusedKey() -> VirtualKeyboardAction {
         let key = focusedKey
         switch key.kind {
-        case .character, .space:
+        case .character:
+            if layout == .zhuyin {
+                if composition.isEmpty == false,
+                   key.label == lastCompositionKey,
+                   let candidate = candidates.first {
+                    commit(candidate)
+                } else {
+                    composition += key.value ?? key.label
+                    lastCompositionKey = key.label
+                }
+                return .textChanged
+            }
             text += key.value ?? key.label
             return .textChanged
+        case .space:
+            if layout == .zhuyin, composition.isEmpty == false {
+                commit(candidates.first ?? composition)
+            } else {
+                text += key.value ?? key.label
+            }
+            return .textChanged
         case .delete:
-            if text.isEmpty == false {
+            if composition.isEmpty == false {
+                composition.removeLast()
+                lastCompositionKey = nil
+            } else if text.isEmpty == false {
                 text.removeLast()
             }
             return .textChanged
         case .submit:
+            if composition.isEmpty == false {
+                commit(candidates.first ?? composition)
+            }
             let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
             return query.isEmpty ? .none : .submitted(query)
         case .cancel:
             return .cancelled
         case .layoutSwitch:
             layout = layout == .latin ? .zhuyin : .latin
+            composition = ""
+            lastCompositionKey = nil
             focusedRow = min(focusedRow, rows.count - 1)
             focusedColumn = min(focusedColumn, rows[focusedRow].count - 1)
             return .none
         }
+    }
+
+    private mutating func commit(_ value: String) {
+        text += value
+        composition = ""
+        lastCompositionKey = nil
+    }
+
+    public mutating func typeZhuyinForTesting(_ value: String) {
+        composition = value
+        lastCompositionKey = focusedKey.label
+    }
+}
+
+public enum ZhuyinComposer {
+    private static let dictionary: [String: [String]] = [
+        "ㄅ": ["不", "ㄅ"],
+        "ㄆ": ["片", "ㄆ"],
+        "ㄇ": ["嗎", "魔", "ㄇ"],
+        "ㄈ": ["非", "ㄈ"],
+        "ㄈㄨˊ": ["芙", "福", "服"],
+        "ㄌㄧˋ": ["莉", "麗", "力"],
+        "ㄌㄧㄢˊ": ["蓮", "連"],
+        "ㄈㄨˊㄌㄧˋㄌㄧㄢˊ": ["芙莉蓮"],
+        "ㄉㄨㄥˋ": ["動"],
+        "ㄇㄢˋ": ["漫"],
+        "ㄉㄨㄥˋㄇㄢˋ": ["動漫"],
+        "ㄓㄨㄥ": ["中"],
+        "ㄨㄣˊ": ["文"],
+        "ㄓㄨㄥㄨㄣˊ": ["中文"],
+        "ㄖㄣˊ": ["人"],
+        "ㄐㄧㄣˋ": ["進"],
+        "ㄐㄧˊ": ["擊"],
+        "ㄐㄧㄣˋㄐㄧˊ": ["進擊"],
+        "ㄍㄨㄟˇ": ["鬼"],
+        "ㄇㄧㄝˋ": ["滅"],
+        "ㄖㄣˋ": ["刃"],
+        "ㄍㄨㄟˇㄇㄧㄝˋㄓㄖㄣˋ": ["鬼滅之刃"],
+        "ㄆㄞˊ": ["排"],
+        "ㄑㄧㄡˊ": ["球"],
+        "ㄆㄞˊㄑㄧㄡˊ": ["排球"],
+        "ㄓㄡˋ": ["咒"],
+        "ㄕㄨˋ": ["術"],
+        "ㄏㄨㄟˊ": ["迴"],
+        "ㄓㄢˋ": ["戰"],
+        "ㄓㄡˋㄕㄨˋㄏㄨㄟˊㄓㄢˋ": ["咒術迴戰"]
+    ]
+
+    public static func candidates(for composition: String) -> [String] {
+        guard composition.isEmpty == false else { return [] }
+        if let exact = dictionary[composition] {
+            return exact
+        }
+
+        let matches = dictionary
+            .filter { key, _ in key.hasPrefix(composition) || composition.hasPrefix(key) }
+            .flatMap(\.value)
+        if matches.isEmpty == false {
+            return Array(matches.prefix(8))
+        }
+        return [composition]
     }
 }

@@ -89,6 +89,7 @@ struct TVShellChecks {
         try checkYouTubeLayoutAndPlayerShell()
         try await checkBangumiYouTubeAnimeSourceFindsPlayableCandidates()
         try await checkBuiltInAnimekoStyleSources()
+        try checkTorrentPlaybackEngine()
         try await checkAnimeHomeProviderAggregatesDistinctTitles()
         try checkAnimekoStyleSourceCatalog()
         try await checkAnimeSourceRegistryUsesCatalog()
@@ -147,7 +148,11 @@ struct TVShellChecks {
         var zhuyinKeyboard = VirtualKeyboardState(layout: .zhuyin)
         try expect(zhuyinKeyboard.focusedKey.label == "ㄅ", "zhuyin keyboard starts at bopomofo keys")
         try expect(zhuyinKeyboard.apply(.select) == .textChanged, "zhuyin keyboard types focused bopomofo key")
-        try expect(zhuyinKeyboard.text == "ㄅ", "zhuyin keyboard appends bopomofo text")
+        try expect(zhuyinKeyboard.composition == "ㄅ", "zhuyin keyboard keeps bopomofo composition")
+        try expect(zhuyinKeyboard.candidates.contains("不"), "zhuyin keyboard exposes Chinese candidates")
+        try expect(zhuyinKeyboard.text.isEmpty, "zhuyin keyboard does not commit raw bopomofo immediately")
+        try expect(zhuyinKeyboard.apply(.select) == .textChanged, "zhuyin keyboard commits the focused candidate")
+        try expect(zhuyinKeyboard.text == "不", "zhuyin keyboard commits Chinese text")
         _ = zhuyinKeyboard.apply(.down)
         _ = zhuyinKeyboard.apply(.down)
         _ = zhuyinKeyboard.apply(.down)
@@ -163,6 +168,16 @@ struct TVShellChecks {
         try expect(zhuyinKeyboard.focusedKey.label == "ABC", "zhuyin keyboard exposes ABC switch")
         try expect(zhuyinKeyboard.apply(.select) == .none, "layout switch does not submit text")
         try expect(zhuyinKeyboard.layout == .latin, "zhuyin keyboard switches back to latin")
+
+        var phraseKeyboard = VirtualKeyboardState(layout: .zhuyin)
+        phraseKeyboard.typeZhuyinForTesting("ㄈㄨˊ")
+        try expect(phraseKeyboard.candidates.first == "芙", "zhuyin keyboard suggests anime search characters")
+        _ = phraseKeyboard.apply(.select)
+        phraseKeyboard.typeZhuyinForTesting("ㄌㄧˋ")
+        _ = phraseKeyboard.apply(.select)
+        phraseKeyboard.typeZhuyinForTesting("ㄌㄧㄢˊ")
+        _ = phraseKeyboard.apply(.select)
+        try expect(phraseKeyboard.text == "芙莉蓮", "zhuyin keyboard can compose a Chinese anime title")
     }
 
     static func checkRemoteMappingStore() throws {
@@ -371,6 +386,7 @@ struct TVShellChecks {
         try expect(webRuntime.contains("didFinish"), "web runtime reapplies virtual cursor after page navigation")
         try expect(webRuntime.contains("tv-shell-cursor-label"), "virtual cursor includes a visible TV label")
         try expect(webRuntime.contains("tv-shell-keyboard"), "web runtime injects an in-browser virtual keyboard")
+        try expect(webRuntime.contains("zhuyinMap") && webRuntime.contains("ㄅ"), "web runtime injects a zhuyin browser keyboard")
         try expect(webRuntime.contains("mode === 'mouse'") && webRuntime.contains("ensureCursor()"), "mouse mode ensures the cursor exists")
     }
 
@@ -992,6 +1008,31 @@ struct TVShellChecks {
         let mediaStreams = try await mediaProvider.streams(for: mediaEpisodes[0])
         try expect(mediaStreams.first?.url.absoluteString.contains("/Videos/episode-1/stream.mp4") == true, "media server provider creates direct stream url")
         try expect(mediaStreams.first?.headers["X-Emby-Token"] == "jf-key", "media server stream carries auth header")
+    }
+
+    static func checkTorrentPlaybackEngine() throws {
+        let stream = AnimeStreamCandidate(
+            url: URL(string: "magnet:?xt=urn:btih:ABCDEF1234567890&dn=Frieren")!,
+            quality: "BT 1080p",
+            priority: 90,
+            headers: ["resolver": "torrent"]
+        )
+        let tempRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("TVShellChecks-Torrent-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let engine = Aria2TorrentPlaybackEngine(cacheRoot: tempRoot, executablePath: "/usr/bin/aria2c")
+        let downloadDirectory = engine.downloadDirectory(for: stream)
+        let arguments = engine.arguments(for: stream, downloadDirectory: downloadDirectory)
+        try expect(arguments.contains("--bt-prioritize-piece=head=32M,tail=8M"), "torrent playback prioritizes the head and tail pieces")
+        try expect(arguments.contains("--file-allocation=none"), "torrent playback avoids slow preallocation")
+        try expect(arguments.last == stream.url.absoluteString, "torrent playback passes the source URL to aria2c")
+
+        try FileManager.default.createDirectory(at: downloadDirectory, withIntermediateDirectories: true)
+        let sample = downloadDirectory.appendingPathComponent("第01話.mp4")
+        FileManager.default.createFile(atPath: sample.path, contents: Data(repeating: 1, count: 2_048))
+        try expect(engine.playableFiles(in: downloadDirectory).first?.lastPathComponent == sample.lastPathComponent, "torrent playback discovers playable media files")
     }
 
     @MainActor

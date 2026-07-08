@@ -224,18 +224,55 @@ public struct WebAppRuntimeView: NSViewRepresentable {
         y: Math.round(window.innerHeight / 2),
         visible: false
       };
-      const keyboardRows = [
-        ['1','2','3','4','5','6','7','8','9','0'],
-        ['Q','W','E','R','T','Y','U','I','O','P'],
-        ['A','S','D','F','G','H','J','K','L'],
-        ['Z','X','C','V','B','N','M'],
-        ['SPACE','DELETE','DONE']
-      ];
+      const keyboardLayouts = {
+        zhuyin: [
+          ['ㄅ','ㄆ','ㄇ','ㄈ','ㄉ','ㄊ','ㄋ','ㄌ'],
+          ['ㄍ','ㄎ','ㄏ','ㄐ','ㄑ','ㄒ'],
+          ['ㄓ','ㄔ','ㄕ','ㄖ','ㄗ','ㄘ','ㄙ'],
+          ['ㄧ','ㄨ','ㄩ','ㄚ','ㄛ','ㄜ','ㄝ'],
+          ['ㄞ','ㄟ','ㄠ','ㄡ','ㄢ','ㄣ','ㄤ','ㄥ','ㄦ'],
+          ['ˊ','ˇ','ˋ','˙','空格','刪除','完成','ABC']
+        ],
+        latin: [
+          ['1','2','3','4','5','6','7','8','9','0'],
+          ['Q','W','E','R','T','Y','U','I','O','P'],
+          ['A','S','D','F','G','H','J','K','L'],
+          ['Z','X','C','V','B','N','M'],
+          ['SPACE','DELETE','DONE','注音']
+        ]
+      };
+      const zhuyinMap = {
+        'ㄅ': ['不'],
+        'ㄈㄨˊ': ['芙'],
+        'ㄌㄧˋ': ['莉'],
+        'ㄌㄧㄢˊ': ['蓮'],
+        'ㄉㄨㄥˋ': ['動'],
+        'ㄇㄢˋ': ['漫'],
+        'ㄉㄨㄥˋㄇㄢˋ': ['動漫'],
+        'ㄓㄨㄥ': ['中'],
+        'ㄨㄣˊ': ['文'],
+        'ㄓㄨㄥㄨㄣˊ': ['中文'],
+        'ㄍㄨㄟˇ': ['鬼'],
+        'ㄇㄧㄝˋ': ['滅'],
+        'ㄖㄣˋ': ['刃']
+      };
+      const keyboardRows = () => keyboardLayouts[keyboardState.layout];
+      const zhuyinCandidates = () => {
+        if (!keyboardState.composition) return [];
+        if (zhuyinMap[keyboardState.composition]) return zhuyinMap[keyboardState.composition];
+        const matches = Object.keys(zhuyinMap)
+          .filter((key) => key.startsWith(keyboardState.composition) || keyboardState.composition.startsWith(key))
+          .flatMap((key) => zhuyinMap[key]);
+        return matches.length ? matches.slice(0, 6) : [keyboardState.composition];
+      };
       const keyboardState = {
         visible: false,
         row: 0,
         column: 0,
-        target: null
+        target: null,
+        layout: 'zhuyin',
+        composition: '',
+        lastKey: null
       };
 
       const ensureCursor = () => {
@@ -322,10 +359,13 @@ public struct WebAppRuntimeView: NSViewRepresentable {
         const keyboard = ensureKeyboard();
         const target = activeInput();
         const preview = inputValue(target);
+        const rows = keyboardRows();
+        const candidates = zhuyinCandidates();
         keyboard.classList.toggle('tv-shell-hidden', !keyboardState.visible);
         keyboard.innerHTML = `
-          <div class="tv-shell-keyboard-preview">${preview || '輸入文字'}</div>
-          ${keyboardRows.map((row, rowIndex) => `
+          <div class="tv-shell-keyboard-preview">${preview || keyboardState.composition || '輸入文字'}</div>
+          ${keyboardState.composition ? `<div class="tv-shell-keyboard-row">${[keyboardState.composition].concat(candidates).map((item, index) => `<div class="tv-shell-key ${index === 1 ? 'tv-shell-focused' : ''}">${item}</div>`).join('')}</div>` : ''}
+          ${rows.map((row, rowIndex) => `
             <div class="tv-shell-keyboard-row">
               ${row.map((key, columnIndex) => `
                 <div class="tv-shell-key ${rowIndex === keyboardState.row && columnIndex === keyboardState.column ? 'tv-shell-focused' : ''}">${key}</div>
@@ -351,17 +391,53 @@ public struct WebAppRuntimeView: NSViewRepresentable {
       const typeKeyboardKey = () => {
         const target = activeInput();
         if (!target) return false;
-        const key = keyboardRows[keyboardState.row][keyboardState.column];
+        const rows = keyboardRows();
+        const key = rows[keyboardState.row][keyboardState.column];
         let value = inputValue(target);
-        if (key === 'DONE') {
+        if (key === 'ABC' || key === '注音') {
+          keyboardState.layout = keyboardState.layout === 'zhuyin' ? 'latin' : 'zhuyin';
+          keyboardState.row = Math.min(keyboardState.row, keyboardRows().length - 1);
+          keyboardState.column = Math.min(keyboardState.column, keyboardRows()[keyboardState.row].length - 1);
+          keyboardState.composition = '';
+          keyboardState.lastKey = null;
+          renderKeyboard();
+          return true;
+        }
+        if (key === 'DONE' || key === '完成') {
+          if (keyboardState.composition) {
+            value += zhuyinCandidates()[0] || keyboardState.composition;
+            setInputValue(target, value);
+            keyboardState.composition = '';
+            keyboardState.lastKey = null;
+          }
           hideKeyboard();
           target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
           return true;
         }
-        if (key === 'DELETE') {
-          value = value.slice(0, -1);
-        } else if (key === 'SPACE') {
-          value += ' ';
+        if (key === 'DELETE' || key === '刪除') {
+          if (keyboardState.composition) {
+            keyboardState.composition = keyboardState.composition.slice(0, -1);
+            keyboardState.lastKey = null;
+          } else {
+            value = value.slice(0, -1);
+          }
+        } else if (key === 'SPACE' || key === '空格') {
+          if (keyboardState.composition) {
+            value += zhuyinCandidates()[0] || keyboardState.composition;
+            keyboardState.composition = '';
+            keyboardState.lastKey = null;
+          } else {
+            value += ' ';
+          }
+        } else if (keyboardState.layout === 'zhuyin') {
+          if (keyboardState.composition && key === keyboardState.lastKey) {
+            value += zhuyinCandidates()[0] || keyboardState.composition;
+            keyboardState.composition = '';
+            keyboardState.lastKey = null;
+          } else {
+            keyboardState.composition += key;
+            keyboardState.lastKey = key;
+          }
         } else {
           value += key;
         }
@@ -373,14 +449,14 @@ public struct WebAppRuntimeView: NSViewRepresentable {
       const handleKeyboardCommand = (command) => {
         if (!keyboardState.visible) return false;
         if (command === 'left') keyboardState.column = Math.max(0, keyboardState.column - 1);
-        if (command === 'right') keyboardState.column = Math.min(keyboardRows[keyboardState.row].length - 1, keyboardState.column + 1);
+        if (command === 'right') keyboardState.column = Math.min(keyboardRows()[keyboardState.row].length - 1, keyboardState.column + 1);
         if (command === 'up') {
           keyboardState.row = Math.max(0, keyboardState.row - 1);
-          keyboardState.column = Math.min(keyboardState.column, keyboardRows[keyboardState.row].length - 1);
+          keyboardState.column = Math.min(keyboardState.column, keyboardRows()[keyboardState.row].length - 1);
         }
         if (command === 'down') {
-          keyboardState.row = Math.min(keyboardRows.length - 1, keyboardState.row + 1);
-          keyboardState.column = Math.min(keyboardState.column, keyboardRows[keyboardState.row].length - 1);
+          keyboardState.row = Math.min(keyboardRows().length - 1, keyboardState.row + 1);
+          keyboardState.column = Math.min(keyboardState.column, keyboardRows()[keyboardState.row].length - 1);
         }
         if (command === 'select') return typeKeyboardKey();
         if (command === 'back') {

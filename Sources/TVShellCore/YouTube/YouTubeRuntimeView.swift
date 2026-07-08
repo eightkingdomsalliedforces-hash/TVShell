@@ -154,7 +154,7 @@ final class YouTubeRuntimeController: ObservableObject {
     @Published private(set) var videos: [YouTubeVideo] = []
     @Published private(set) var statusText = "正在載入 YouTube..."
     @Published private(set) var isKeyboardVisible = false
-    @Published private(set) var keyboardState = VirtualKeyboardState(text: "anime")
+    @Published private(set) var keyboardState = VirtualKeyboardState(text: "anime", layout: .zhuyin)
     private var gridColumns = 3
     private var currentQuery = "anime"
 
@@ -201,7 +201,7 @@ final class YouTubeRuntimeController: ObservableObject {
     private func load(query: String) async {
         do {
             currentQuery = query
-            keyboardState = VirtualKeyboardState(text: query)
+            keyboardState = VirtualKeyboardState(text: query, layout: .zhuyin)
             videos = try await provider.search(query: query)
             state.updateItemCount(videos.count)
             statusText = "來源：\(provider.displayName) · 搜尋：\(query) · 已載入 \(videos.count) 部影片"
@@ -219,7 +219,7 @@ final class YouTubeRuntimeController: ObservableObject {
         }
 
         if state.phase == .browsing, command == .menu {
-            keyboardState = VirtualKeyboardState(text: currentQuery)
+            keyboardState = VirtualKeyboardState(text: currentQuery, layout: .zhuyin)
             isKeyboardVisible = true
             statusText = "YouTube 搜尋"
             return

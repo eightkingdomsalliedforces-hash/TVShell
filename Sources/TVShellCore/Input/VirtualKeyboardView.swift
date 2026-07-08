@@ -28,14 +28,33 @@ public struct VirtualKeyboardView: View {
                         .liquidGlassCard(isFocused: false, cornerRadius: 16 * metrics.scale)
                 }
 
-                Text(state.text.isEmpty ? "輸入搜尋內容" : state.text)
-                    .font(.system(size: 48 * metrics.scale, weight: .heavy, design: .rounded))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.48)
-                    .frame(maxWidth: .infinity, minHeight: 78 * metrics.scale, alignment: .leading)
-                    .padding(.horizontal, 28 * metrics.scale)
-                    .padding(.vertical, 18 * metrics.scale)
-                    .liquidGlassCard(isFocused: true, cornerRadius: 24 * metrics.scale)
+                VStack(alignment: .leading, spacing: 12 * metrics.scale) {
+                    Text(previewText)
+                        .font(.system(size: 48 * metrics.scale, weight: .heavy, design: .rounded))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.48)
+                        .frame(maxWidth: .infinity, minHeight: 66 * metrics.scale, alignment: .leading)
+
+                    if state.composition.isEmpty == false {
+                        HStack(spacing: 10 * metrics.scale) {
+                            Text(state.composition)
+                                .font(.system(size: 25 * metrics.scale, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.78))
+
+                            ForEach(Array(state.candidates.prefix(6).enumerated()), id: \.offset) { index, candidate in
+                                Text(candidate)
+                                    .font(.system(size: 25 * metrics.scale, weight: .heavy, design: .rounded))
+                                    .padding(.horizontal, 16 * metrics.scale)
+                                    .padding(.vertical, 8 * metrics.scale)
+                                    .liquidGlassCard(isFocused: index == 0, cornerRadius: 14 * metrics.scale)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(.horizontal, 28 * metrics.scale)
+                .padding(.vertical, 18 * metrics.scale)
+                .liquidGlassCard(isFocused: true, cornerRadius: 24 * metrics.scale)
 
                 VStack(alignment: .leading, spacing: 14 * metrics.scale) {
                     ForEach(Array(state.rows.enumerated()), id: \.offset) { rowIndex, row in
@@ -76,5 +95,12 @@ public struct VirtualKeyboardView: View {
         case .delete, .submit, .cancel, .layoutSwitch:
             132 * metrics.scale
         }
+    }
+
+    private var previewText: String {
+        if state.text.isEmpty && state.composition.isEmpty {
+            return "輸入搜尋內容"
+        }
+        return state.text + state.composition
     }
 }

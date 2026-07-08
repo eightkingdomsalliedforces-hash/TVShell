@@ -322,6 +322,7 @@ final class AnimeRuntimeController: ObservableObject {
     private nonisolated(unsafe) var timeObserver: Any?
     private nonisolated(unsafe) var itemObserver: NSKeyValueObservation?
     private var mediaState = MediaControlState()
+    private let torrentPlaybackEngine = Aria2TorrentPlaybackEngine()
 
     init(
         sourceProvider: (any AnimeSourceProvider)? = nil,
@@ -604,14 +605,40 @@ final class AnimeRuntimeController: ObservableObject {
             currentYouTubeVideoID = nil
             player.pause()
             player.replaceCurrentItem(with: nil)
-            subtitleStatusText = "字幕：等待 BT 引擎"
-            statusText = "已找到 BT 來源：\(stream.quality)。下一階段接入 BT 邊下邊播引擎後可直接播放。"
+            subtitleStatusText = "字幕：BT 下載中"
+            statusText = "正在啟動 BT 邊下邊播：\(stream.quality)..."
+            Task { await playTorrent(stream) }
             return
         }
 
         currentYouTubeVideoID = nil
+        playAVURL(stream.url)
+    }
+
+    private func playTorrent(_ stream: AnimeStreamCandidate) async {
+        do {
+            let fileURL = try await torrentPlaybackEngine.startStreaming(stream)
+            currentYouTubeVideoID = nil
+            subtitleStatusText = "字幕：正在尋找中文軌"
+            statusText = "BT 已開始邊下邊播：\(fileURL.lastPathComponent)"
+            playAVURL(fileURL)
+        } catch {
+            subtitleStatusText = "字幕：BT 未就緒"
+            statusText = error.localizedDescription
+            state = AnimeRuntimeState(
+                titleCount: titles.count,
+                episodeCount: episodes.count,
+                focusedTitleIndex: state.focusedTitleIndex,
+                focusedEpisodeIndex: state.focusedEpisodeIndex,
+                phase: .episodes,
+                isDanmakuVisible: state.isDanmakuVisible
+            )
+        }
+    }
+
+    private func playAVURL(_ url: URL) {
         subtitleStatusText = "字幕：正在尋找中文軌"
-        let item = AVPlayerItem(url: stream.url)
+        let item = AVPlayerItem(url: url)
         itemObserver?.invalidate()
         itemObserver = item.observe(\.status, options: [.new, .initial]) { [weak self] item, _ in
             Task { @MainActor in
