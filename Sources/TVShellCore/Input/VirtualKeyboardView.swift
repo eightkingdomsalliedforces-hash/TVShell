@@ -41,12 +41,15 @@ public struct VirtualKeyboardView: View {
                                 .font(.system(size: 25 * metrics.scale, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white.opacity(0.78))
 
-                            ForEach(Array(state.candidates.prefix(6).enumerated()), id: \.offset) { index, candidate in
+                            ForEach(Array(state.visibleCandidates.enumerated()), id: \.offset) { index, candidate in
                                 Text(candidate)
                                     .font(.system(size: 25 * metrics.scale, weight: .heavy, design: .rounded))
                                     .padding(.horizontal, 16 * metrics.scale)
                                     .padding(.vertical, 8 * metrics.scale)
-                                    .liquidGlassCard(isFocused: index == 0, cornerRadius: 14 * metrics.scale)
+                                    .liquidGlassCard(
+                                        isFocused: state.focusedCandidateIndex == index,
+                                        cornerRadius: 14 * metrics.scale
+                                    )
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -77,6 +80,9 @@ public struct VirtualKeyboardView: View {
                 Text("方向鍵選字，OK 輸入，Back 刪除，搜尋鍵提交。")
                     .font(.system(size: 22 * metrics.scale, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.68))
+                Text("注音組字後按上進入候選列，左右選字，OK 確定候選。")
+                    .font(.system(size: 20 * metrics.scale, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.58))
             }
             .foregroundStyle(.white)
             .padding(36 * metrics.scale)

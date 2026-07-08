@@ -46,11 +46,20 @@ public struct VirtualKeyboardState: Equatable, Sendable {
     public private(set) var composition: String
     public private(set) var focusedRow: Int
     public private(set) var focusedColumn: Int
+    public private(set) var focusedCandidateIndex: Int?
     public private(set) var layout: VirtualKeyboardLayout
     private var lastCompositionKey: String?
 
     public var candidates: [String] {
         ZhuyinComposer.candidates(for: composition)
+    }
+
+    public var visibleCandidates: [String] {
+        Array(candidates.prefix(8))
+    }
+
+    public var isCandidateRowFocused: Bool {
+        focusedCandidateIndex != nil
     }
 
     public var rows: [[VirtualKeyboardKey]] {
@@ -62,6 +71,7 @@ public struct VirtualKeyboardState: Equatable, Sendable {
         self.composition = ""
         self.focusedRow = 0
         self.focusedColumn = 0
+        self.focusedCandidateIndex = nil
         self.layout = layout
         self.lastCompositionKey = nil
     }
@@ -111,23 +121,43 @@ public struct VirtualKeyboardState: Equatable, Sendable {
     public mutating func apply(_ command: RemoteCommand) -> VirtualKeyboardAction {
         switch command {
         case .left:
-            focusedColumn = max(0, focusedColumn - 1)
+            if let index = focusedCandidateIndex {
+                focusedCandidateIndex = max(0, index - 1)
+            } else {
+                focusedColumn = max(0, focusedColumn - 1)
+            }
             return .none
         case .right:
-            focusedColumn = min(rows[focusedRow].count - 1, focusedColumn + 1)
+            if let index = focusedCandidateIndex {
+                focusedCandidateIndex = min(max(visibleCandidates.count - 1, 0), index + 1)
+            } else {
+                focusedColumn = min(rows[focusedRow].count - 1, focusedColumn + 1)
+            }
             return .none
         case .up:
-            focusedRow = max(0, focusedRow - 1)
-            focusedColumn = min(focusedColumn, rows[focusedRow].count - 1)
+            if let index = focusedCandidateIndex {
+                focusedCandidateIndex = max(0, index - 1)
+            } else if shouldEnterCandidateRow {
+                focusedCandidateIndex = min(focusedColumn, visibleCandidates.count - 1)
+            } else {
+                focusedRow = max(0, focusedRow - 1)
+                focusedColumn = min(focusedColumn, rows[focusedRow].count - 1)
+            }
             return .none
         case .down:
-            focusedRow = min(rows.count - 1, focusedRow + 1)
-            focusedColumn = min(focusedColumn, rows[focusedRow].count - 1)
+            if let index = focusedCandidateIndex {
+                focusedColumn = min(index, rows[focusedRow].count - 1)
+                focusedCandidateIndex = nil
+            } else {
+                focusedRow = min(rows.count - 1, focusedRow + 1)
+                focusedColumn = min(focusedColumn, rows[focusedRow].count - 1)
+            }
             return .none
         case .back:
             if composition.isEmpty == false {
                 composition.removeLast()
                 lastCompositionKey = nil
+                focusedCandidateIndex = nil
                 return .textChanged
             }
             if text.isEmpty {
@@ -143,6 +173,12 @@ public struct VirtualKeyboardState: Equatable, Sendable {
     }
 
     private mutating func activateFocusedKey() -> VirtualKeyboardAction {
+        if let focusedCandidateIndex,
+           visibleCandidates.indices.contains(focusedCandidateIndex) {
+            commit(visibleCandidates[focusedCandidateIndex])
+            return .textChanged
+        }
+
         let key = focusedKey
         switch key.kind {
         case .character:
@@ -154,6 +190,7 @@ public struct VirtualKeyboardState: Equatable, Sendable {
                 } else {
                     composition += key.value ?? key.label
                     lastCompositionKey = key.label
+                    focusedCandidateIndex = nil
                 }
                 return .textChanged
             }
@@ -170,6 +207,7 @@ public struct VirtualKeyboardState: Equatable, Sendable {
             if composition.isEmpty == false {
                 composition.removeLast()
                 lastCompositionKey = nil
+                focusedCandidateIndex = nil
             } else if text.isEmpty == false {
                 text.removeLast()
             }
@@ -186,21 +224,31 @@ public struct VirtualKeyboardState: Equatable, Sendable {
             layout = layout == .latin ? .zhuyin : .latin
             composition = ""
             lastCompositionKey = nil
+            focusedCandidateIndex = nil
             focusedRow = min(focusedRow, rows.count - 1)
             focusedColumn = min(focusedColumn, rows[focusedRow].count - 1)
             return .none
         }
     }
 
+    private var shouldEnterCandidateRow: Bool {
+        layout == .zhuyin
+            && composition.isEmpty == false
+            && visibleCandidates.isEmpty == false
+            && focusedRow == 0
+    }
+
     private mutating func commit(_ value: String) {
         text += value
         composition = ""
         lastCompositionKey = nil
+        focusedCandidateIndex = nil
     }
 
     public mutating func typeZhuyinForTesting(_ value: String) {
         composition = value
         lastCompositionKey = focusedKey.label
+        focusedCandidateIndex = nil
     }
 }
 

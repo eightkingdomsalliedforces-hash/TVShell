@@ -342,7 +342,8 @@ public struct WebAppRuntimeView: NSViewRepresentable {
         target: null,
         layout: 'zhuyin',
         composition: '',
-        lastKey: null
+        lastKey: null,
+        candidateIndex: null
       };
 
       const ensureCursor = () => {
@@ -434,11 +435,11 @@ public struct WebAppRuntimeView: NSViewRepresentable {
         keyboard.classList.toggle('tv-shell-hidden', !keyboardState.visible);
         keyboard.innerHTML = `
           <div class="tv-shell-keyboard-preview">${preview || keyboardState.composition || '輸入文字'}</div>
-          ${keyboardState.composition ? `<div class="tv-shell-keyboard-row">${[keyboardState.composition].concat(candidates).map((item, index) => `<div class="tv-shell-key ${index === 1 ? 'tv-shell-focused' : ''}">${item}</div>`).join('')}</div>` : ''}
+          ${keyboardState.composition ? `<div class="tv-shell-keyboard-row"><div class="tv-shell-key">${keyboardState.composition}</div>${candidates.map((item, index) => `<div class="tv-shell-key ${keyboardState.candidateIndex === index ? 'tv-shell-focused' : ''}">${item}</div>`).join('')}</div>` : ''}
           ${rows.map((row, rowIndex) => `
             <div class="tv-shell-keyboard-row">
               ${row.map((key, columnIndex) => `
-                <div class="tv-shell-key ${rowIndex === keyboardState.row && columnIndex === keyboardState.column ? 'tv-shell-focused' : ''}">${key}</div>
+                <div class="tv-shell-key ${keyboardState.candidateIndex === null && rowIndex === keyboardState.row && columnIndex === keyboardState.column ? 'tv-shell-focused' : ''}">${key}</div>
               `).join('')}
             </div>
           `).join('')}
@@ -464,12 +465,25 @@ public struct WebAppRuntimeView: NSViewRepresentable {
         const rows = keyboardRows();
         const key = rows[keyboardState.row][keyboardState.column];
         let value = inputValue(target);
+        if (keyboardState.candidateIndex !== null) {
+          const candidate = zhuyinCandidates()[keyboardState.candidateIndex];
+          if (candidate) {
+            value += candidate;
+            setInputValue(target, value);
+            keyboardState.composition = '';
+            keyboardState.lastKey = null;
+            keyboardState.candidateIndex = null;
+          }
+          renderKeyboard();
+          return true;
+        }
         if (key === 'ABC' || key === '注音') {
           keyboardState.layout = keyboardState.layout === 'zhuyin' ? 'latin' : 'zhuyin';
           keyboardState.row = Math.min(keyboardState.row, keyboardRows().length - 1);
           keyboardState.column = Math.min(keyboardState.column, keyboardRows()[keyboardState.row].length - 1);
           keyboardState.composition = '';
           keyboardState.lastKey = null;
+          keyboardState.candidateIndex = null;
           renderKeyboard();
           return true;
         }
@@ -479,6 +493,7 @@ public struct WebAppRuntimeView: NSViewRepresentable {
             setInputValue(target, value);
             keyboardState.composition = '';
             keyboardState.lastKey = null;
+            keyboardState.candidateIndex = null;
           }
           hideKeyboard();
           target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
@@ -488,6 +503,7 @@ public struct WebAppRuntimeView: NSViewRepresentable {
           if (keyboardState.composition) {
             keyboardState.composition = keyboardState.composition.slice(0, -1);
             keyboardState.lastKey = null;
+            keyboardState.candidateIndex = null;
           } else {
             value = value.slice(0, -1);
           }
@@ -496,6 +512,7 @@ public struct WebAppRuntimeView: NSViewRepresentable {
             value += zhuyinCandidates()[0] || keyboardState.composition;
             keyboardState.composition = '';
             keyboardState.lastKey = null;
+            keyboardState.candidateIndex = null;
           } else {
             value += ' ';
           }
@@ -504,9 +521,11 @@ public struct WebAppRuntimeView: NSViewRepresentable {
             value += zhuyinCandidates()[0] || keyboardState.composition;
             keyboardState.composition = '';
             keyboardState.lastKey = null;
+            keyboardState.candidateIndex = null;
           } else {
             keyboardState.composition += key;
             keyboardState.lastKey = key;
+            keyboardState.candidateIndex = null;
           }
         } else {
           value += key;
@@ -518,21 +537,40 @@ public struct WebAppRuntimeView: NSViewRepresentable {
 
       const handleKeyboardCommand = (command) => {
         if (!keyboardState.visible) return false;
-        if (command === 'left') keyboardState.column = Math.max(0, keyboardState.column - 1);
-        if (command === 'right') keyboardState.column = Math.min(keyboardRows()[keyboardState.row].length - 1, keyboardState.column + 1);
+        const candidates = zhuyinCandidates();
+        if (command === 'left') {
+          if (keyboardState.candidateIndex !== null) keyboardState.candidateIndex = Math.max(0, keyboardState.candidateIndex - 1);
+          else keyboardState.column = Math.max(0, keyboardState.column - 1);
+        }
+        if (command === 'right') {
+          if (keyboardState.candidateIndex !== null) keyboardState.candidateIndex = Math.min(candidates.length - 1, keyboardState.candidateIndex + 1);
+          else keyboardState.column = Math.min(keyboardRows()[keyboardState.row].length - 1, keyboardState.column + 1);
+        }
         if (command === 'up') {
-          keyboardState.row = Math.max(0, keyboardState.row - 1);
-          keyboardState.column = Math.min(keyboardState.column, keyboardRows()[keyboardState.row].length - 1);
+          if (keyboardState.candidateIndex !== null) {
+            keyboardState.candidateIndex = Math.max(0, keyboardState.candidateIndex - 1);
+          } else if (keyboardState.row === 0 && keyboardState.composition && candidates.length) {
+            keyboardState.candidateIndex = Math.min(keyboardState.column, candidates.length - 1);
+          } else {
+            keyboardState.row = Math.max(0, keyboardState.row - 1);
+            keyboardState.column = Math.min(keyboardState.column, keyboardRows()[keyboardState.row].length - 1);
+          }
         }
         if (command === 'down') {
-          keyboardState.row = Math.min(keyboardRows().length - 1, keyboardState.row + 1);
-          keyboardState.column = Math.min(keyboardState.column, keyboardRows()[keyboardState.row].length - 1);
+          if (keyboardState.candidateIndex !== null) {
+            keyboardState.column = Math.min(keyboardState.candidateIndex, keyboardRows()[keyboardState.row].length - 1);
+            keyboardState.candidateIndex = null;
+          } else {
+            keyboardState.row = Math.min(keyboardRows().length - 1, keyboardState.row + 1);
+            keyboardState.column = Math.min(keyboardState.column, keyboardRows()[keyboardState.row].length - 1);
+          }
         }
         if (command === 'select') return typeKeyboardKey();
         if (command === 'back') {
           const target = activeInput();
           if (target && inputValue(target).length > 0) {
             setInputValue(target, inputValue(target).slice(0, -1));
+            keyboardState.candidateIndex = null;
           } else {
             hideKeyboard();
           }

@@ -210,6 +210,16 @@ struct TVShellChecks {
         let chewingDictionary = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Input/ZhuyinChewingDictionary.swift"))
         try expect(chewingDictionary.contains("LGPL-2.1-or-later"), "chewing zhuyin dictionary keeps source license notice")
         try expect(chewingDictionary.contains("libchewing-data"), "chewing zhuyin dictionary keeps source project notice")
+
+        var candidateKeyboard = VirtualKeyboardState(layout: .zhuyin)
+        candidateKeyboard.typeZhuyinForTesting("ㄉㄧㄢˋ")
+        try expect(candidateKeyboard.visibleCandidates.prefix(2) == ["電", "店"], "zhuyin keyboard exposes multiple selectable candidates")
+        try expect(candidateKeyboard.apply(.up) == .none, "zhuyin keyboard moves focus into candidate row")
+        try expect(candidateKeyboard.focusedCandidateIndex == 0, "zhuyin keyboard focuses first candidate")
+        try expect(candidateKeyboard.apply(.right) == .none, "zhuyin keyboard moves across candidates")
+        try expect(candidateKeyboard.focusedCandidateIndex == 1, "zhuyin keyboard focuses next candidate")
+        try expect(candidateKeyboard.apply(.select) == .textChanged, "zhuyin keyboard commits selected candidate")
+        try expect(candidateKeyboard.text == "店", "zhuyin keyboard commits the focused candidate rather than always the first one")
     }
 
     static func checkRemoteMappingStore() throws {
@@ -446,7 +456,13 @@ struct TVShellChecks {
         try expect(webRuntime.contains("tv-shell-cursor-label"), "virtual cursor includes a visible TV label")
         try expect(webRuntime.contains("tv-shell-keyboard"), "web runtime injects an in-browser virtual keyboard")
         try expect(webRuntime.contains("zhuyinMap") && webRuntime.contains("ㄅ"), "web runtime injects a zhuyin browser keyboard")
+        try expect(webRuntime.contains("candidateIndex"), "web zhuyin keyboard can focus candidates")
+        try expect(webRuntime.contains("keyboardState.candidateIndex !== null"), "web zhuyin keyboard commits focused candidates")
         try expect(webRuntime.contains("mode === 'mouse'") && webRuntime.contains("ensureCursor()"), "mouse mode ensures the cursor exists")
+
+        let keyboardView = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Input/VirtualKeyboardView.swift"))
+        try expect(keyboardView.contains("state.focusedCandidateIndex == index"), "native zhuyin keyboard highlights focused candidates")
+        try expect(keyboardView.contains("注音組字後按上進入候選列"), "native zhuyin keyboard explains candidate selection")
     }
 
     static func checkSettingsFocusIncludesVideoAndWebZoom() throws {
