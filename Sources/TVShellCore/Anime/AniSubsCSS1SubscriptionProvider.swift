@@ -23,7 +23,7 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
         for source in sources {
             do {
                 let searchURL = try source.searchURL(keyword: query.keyword)
-                let searchHTML = try await html(for: searchURL, userAgent: source.userAgent)
+                let searchHTML = try await html(for: searchURL, source: source)
                 let subjects = CSS1HTMLSelectorEngine.anchors(
                     matching: source.searchSelector,
                     in: searchHTML,
@@ -31,7 +31,7 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
                 )
 
                 for subject in subjects.prefix(20) {
-                    let detailHTML = try await html(for: subject.url, userAgent: source.userAgent)
+                    let detailHTML = try await html(for: subject.url, source: source)
                     let episodes = parseEpisodes(
                         source: source,
                         subjectTitle: subject.title,
@@ -71,11 +71,25 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
             throw AnimeHTTPError.missingRoute("ani-subs css1 playback url: \(episode.identity.episodeID)")
         }
         let source = try await source(named: episode.identity.providerID)
-        let watchHTML = try await html(for: watchURL, userAgent: source.userAgent)
+        let watchHTML = try await html(for: watchURL, source: source)
+        let playbackHTML: String
+        let playbackBaseURL: URL
+        if source.enableNestedURL,
+           let nestedURL = CSS1HTMLSelectorEngine.firstNestedURL(
+                in: watchHTML,
+                pattern: source.nestedURLPattern,
+                baseURL: watchURL
+           ) {
+            playbackHTML = try await html(for: nestedURL, source: source)
+            playbackBaseURL = nestedURL
+        } else {
+            playbackHTML = watchHTML
+            playbackBaseURL = watchURL
+        }
         guard let streamURL = CSS1HTMLSelectorEngine.firstVideoURL(
-            in: watchHTML,
+            in: playbackHTML,
             pattern: source.videoPattern,
-            baseURL: watchURL
+            baseURL: playbackBaseURL
         ) else {
             throw AnimeHTTPError.missingRoute("ani-subs css1 video url: \(watchURL.absoluteString)")
         }
@@ -91,7 +105,7 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
                     "title": episode.identity.subjectID,
                     "episode": episode.title,
                     "User-Agent": source.userAgent
-                ]
+                ].merging(source.videoHeaders, uniquingKeysWith: { _, new in new })
             )
         ]
     }
@@ -116,14 +130,11 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
         return try AniSubsCSS1Subscription.decode(data)
     }
 
-    private func html(for url: URL, userAgent: String) async throws -> String {
+    private func html(for url: URL, source: AniSubsCSS1Source) async throws -> String {
         let data = try await transport.data(for: AnimeHTTPRequest(
             method: "GET",
             url: url,
-            headers: [
-                "Accept": "text/html,application/xhtml+xml",
-                "User-Agent": userAgent
-            ]
+            headers: source.requestHeaders
         ))
         let html = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
         if let captcha = CSS1HTMLSelectorEngine.detectCaptcha(url: url, html: html) {
@@ -140,12 +151,19 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
     ) -> [AnimeEpisode] {
         let episodeHTML = CSS1HTMLSelectorEngine.blocks(matching: source.episodeListSelector, in: detailHTML)
             .joined(separator: "\n")
-        let targetHTML = episodeHTML.isEmpty ? detailHTML : episodeHTML
-        let anchors = CSS1HTMLSelectorEngine.anchors(
-            matching: source.episodeSelector,
-            in: targetHTML,
+        let narrowedAnchors = CSS1HTMLSelectorEngine.episodeAnchors(
+            titleSelector: source.episodeSelector,
+            linkSelector: source.episodeLinkSelector,
+            in: episodeHTML,
             baseURL: detailURL
         )
+        let fullAnchors = CSS1HTMLSelectorEngine.episodeAnchors(
+            titleSelector: source.episodeSelector,
+            linkSelector: source.episodeLinkSelector,
+            in: detailHTML,
+            baseURL: detailURL
+        )
+        let anchors = narrowedAnchors.count >= fullAnchors.count ? narrowedAnchors : fullAnchors
 
         return anchors.enumerated().map { offset, anchor in
             let number = CSS1HTMLSelectorEngine.episodeNumber(
@@ -183,9 +201,24 @@ public struct AniSubsCSS1Source: Equatable, Sendable {
     public var searchSelector: String
     public var episodeListSelector: String
     public var episodeSelector: String
+    public var episodeLinkSelector: String?
     public var episodeSortPattern: String?
+    public var enableNestedURL: Bool
+    public var nestedURLPattern: String?
     public var videoPattern: String
     public var userAgent: String
+    public var videoHeaders: [String: String]
+
+    var requestHeaders: [String: String] {
+        var headers = [
+            "Accept": "text/html,application/xhtml+xml",
+            "User-Agent": userAgent
+        ]
+        if let cookie = videoHeaders["Cookie"], cookie.isEmpty == false {
+            headers["Cookie"] = cookie
+        }
+        return headers
+    }
 
     func searchURL(keyword: String) throws -> URL {
         let encodedKeyword = keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? keyword
@@ -220,9 +253,16 @@ private enum AniSubsCSS1Subscription {
                 searchSelector: searchSelector,
                 episodeListSelector: episodeListSelector,
                 episodeSelector: episodeSelector,
+                episodeLinkSelector: searchConfig.selectorChannelFormatFlattened?.selectEpisodeLinksFromList?.nilIfBlank
+                    ?? searchConfig.selectorChannelFormatNoChannel?.selectEpisodeLinks?.nilIfBlank,
                 episodeSortPattern: searchConfig.selectorChannelFormatFlattened?.matchEpisodeSortFromName,
+                enableNestedURL: searchConfig.matchVideo?.enableNestedUrl ?? false,
+                nestedURLPattern: searchConfig.matchVideo?.matchNestedUrl?.nilIfBlank,
                 videoPattern: videoPattern,
-                userAgent: source.arguments.userAgent ?? "TVShell/0.1 ani-subs-css1"
+                userAgent: source.arguments.userAgent
+                    ?? searchConfig.matchVideo?.addHeadersToVideo?.userAgent
+                    ?? "TVShell/0.1 ani-subs-css1",
+                videoHeaders: searchConfig.matchVideo?.normalizedVideoHeaders ?? [:]
             )
         }
     }
@@ -252,6 +292,7 @@ private struct AniSubsCSS1SearchConfig: Decodable {
     var selectorSubjectFormatA: AniSubsCSS1SubjectSelector?
     var selectorSubjectFormatIndexed: AniSubsCSS1SubjectSelector?
     var selectorChannelFormatFlattened: AniSubsCSS1EpisodeSelector?
+    var selectorChannelFormatNoChannel: AniSubsCSS1NoChannelEpisodeSelector?
     var matchVideo: AniSubsCSS1VideoMatcher?
 }
 
@@ -262,11 +303,46 @@ private struct AniSubsCSS1SubjectSelector: Decodable {
 private struct AniSubsCSS1EpisodeSelector: Decodable {
     var selectEpisodeLists: String?
     var selectEpisodesFromList: String?
+    var selectEpisodeLinksFromList: String?
     var matchEpisodeSortFromName: String?
 }
 
 private struct AniSubsCSS1VideoMatcher: Decodable {
+    var enableNestedUrl: Bool?
+    var matchNestedUrl: String?
     var matchVideoUrl: String?
+    var cookies: String?
+    var addHeadersToVideo: AniSubsCSS1VideoHeaders?
+
+    var normalizedVideoHeaders: [String: String] {
+        var headers = addHeadersToVideo?.normalized ?? [:]
+        if let cookies = cookies?.nilIfBlank {
+            headers["Cookie"] = cookies
+        }
+        return headers
+    }
+}
+
+private struct AniSubsCSS1NoChannelEpisodeSelector: Decodable {
+    var selectEpisodes: String?
+    var selectEpisodeLinks: String?
+    var matchEpisodeSortFromName: String?
+}
+
+private struct AniSubsCSS1VideoHeaders: Decodable {
+    var referer: String?
+    var userAgent: String?
+
+    var normalized: [String: String] {
+        var headers: [String: String] = [:]
+        if let referer = referer?.nilIfBlank {
+            headers["Referer"] = referer
+        }
+        if let userAgent = userAgent?.nilIfBlank {
+            headers["User-Agent"] = userAgent
+        }
+        return headers
+    }
 }
 
 private enum CSS1HTMLSelectorEngine {
@@ -275,8 +351,33 @@ private enum CSS1HTMLSelectorEngine {
         var url: URL
     }
 
+    static func episodeAnchors(
+        titleSelector: String,
+        linkSelector: String?,
+        in html: String,
+        baseURL: URL
+    ) -> [Anchor] {
+        guard let linkSelector, linkSelector.isEmpty == false else {
+            return anchors(matching: titleSelector, in: html, baseURL: baseURL)
+        }
+
+        let titles = texts(matching: titleSelector, in: html)
+        let links = anchors(matching: linkSelector, in: html, baseURL: baseURL)
+        guard links.isEmpty == false else {
+            return []
+        }
+
+        return links.enumerated().map { index, link in
+            guard titles.indices.contains(index), titles[index].isEmpty == false else {
+                return link
+            }
+            return Anchor(title: titles[index], url: link.url)
+        }
+    }
+
     static func anchors(matching selector: String, in html: String, baseURL: URL) -> [Anchor] {
         let requiredClasses = classNames(in: selector)
+        let expectedTag = tagName(in: selector)
         let anchorRegex = try? NSRegularExpression(
             pattern: #"<a\b([^>]*)>(.*?)</a>"#,
             options: [.caseInsensitive, .dotMatchesLineSeparators]
@@ -290,6 +391,9 @@ private enum CSS1HTMLSelectorEngine {
             }
             let prefixStart = html.index(html.startIndex, offsetBy: max(0, match.range.location - 1800))
             let prefix = String(html[prefixStart..<tagRange.lowerBound])
+            if let expectedTag, expectedTag != "a" {
+                return nil
+            }
             if requiredClasses.isEmpty == false,
                requiredClasses.allSatisfy({ prefix.contains($0) || String(html[tagRange]).contains($0) }) == false {
                 return nil
@@ -304,6 +408,41 @@ private enum CSS1HTMLSelectorEngine {
                 return nil
             }
             return Anchor(title: title, url: url)
+        } ?? []
+    }
+
+    static func texts(matching selector: String, in html: String) -> [String] {
+        let expectedTag = tagName(in: selector)
+        let requiredClasses = classNames(in: selector)
+        let pattern: String
+        if let expectedTag {
+            pattern = #"<(?<tag>"# + NSRegularExpression.escapedPattern(for: expectedTag) + #")\b(?<attrs>[^>]*)>(?<body>.*?)</"# + NSRegularExpression.escapedPattern(for: expectedTag) + #">"#
+        } else {
+            pattern = #"<(?<tag>[a-zA-Z0-9]+)\b(?<attrs>[^>]*)>(?<body>.*?)</\k<tag>>"#
+        }
+        let elementRegex = try? NSRegularExpression(
+            pattern: pattern,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        let nsRange = NSRange(html.startIndex..<html.endIndex, in: html)
+        return elementRegex?.matches(in: html, range: nsRange).compactMap { match in
+            guard let tagRange = Range(match.range(withName: "tag"), in: html),
+                  let attrsRange = Range(match.range(withName: "attrs"), in: html),
+                  let bodyRange = Range(match.range(withName: "body"), in: html)
+            else {
+                return nil
+            }
+            let tag = String(html[tagRange]).lowercased()
+            let attrs = String(html[attrsRange])
+            if let expectedTag, expectedTag != tag {
+                return nil
+            }
+            if requiredClasses.isEmpty == false,
+               requiredClasses.allSatisfy({ attrs.contains($0) }) == false {
+                return nil
+            }
+            let text = normalize(stripHTML(String(html[bodyRange])))
+            return text.isEmpty ? nil : text
         } ?? []
     }
 
@@ -358,6 +497,38 @@ private enum CSS1HTMLSelectorEngine {
         return resolveURL(cleanURLCandidate(String(normalizedHTML[range])), relativeTo: baseURL)
     }
 
+    static func firstNestedURL(in html: String, pattern: String?, baseURL: URL) -> URL? {
+        guard let pattern, pattern.isEmpty == false else {
+            return nil
+        }
+        let normalizedHTML = html
+            .replacingOccurrences(of: #"\/"#, with: "/")
+            .replacingOccurrences(of: #"\\u002F"#, with: "/")
+        guard let regex = try? NSRegularExpression(
+            pattern: pattern.replacingOccurrences(of: #"\\/"#, with: "/"),
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        ) else {
+            return nil
+        }
+
+        let nsRange = NSRange(normalizedHTML.startIndex..<normalizedHTML.endIndex, in: normalizedHTML)
+        guard let match = regex.firstMatch(in: normalizedHTML, range: nsRange) else {
+            return nil
+        }
+        for group in 1..<match.numberOfRanges {
+            guard let range = Range(match.range(at: group), in: normalizedHTML),
+                  let url = resolveURL(cleanURLCandidate(String(normalizedHTML[range])), relativeTo: baseURL)
+            else {
+                continue
+            }
+            return url
+        }
+        guard let range = Range(match.range, in: normalizedHTML) else {
+            return nil
+        }
+        return resolveURL(cleanURLCandidate(String(normalizedHTML[range])), relativeTo: baseURL)
+    }
+
     static func episodeNumber(from title: String, pattern: String?) -> Int? {
         if let pattern,
            let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
@@ -401,6 +572,20 @@ private enum CSS1HTMLSelectorEngine {
                 }
                 return String(selector[range])
             } ?? []
+    }
+
+    private static func tagName(in selector: String) -> String? {
+        let lastComponent = selector
+            .split(separator: ">")
+            .last?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? selector
+        guard let regex = try? NSRegularExpression(pattern: #"^([A-Za-z][A-Za-z0-9_-]*)"#),
+              let match = regex.firstMatch(in: lastComponent, range: NSRange(lastComponent.startIndex..<lastComponent.endIndex, in: lastComponent)),
+              let range = Range(match.range(at: 1), in: lastComponent)
+        else {
+            return nil
+        }
+        return String(lastComponent[range]).lowercased()
     }
 
     private static func attribute(_ name: String, in tag: String) -> String? {
@@ -464,4 +649,11 @@ private func mergeCSS1Results(_ results: [AnimeSearchResult]) -> [AnimeSearchRes
         }
     }
     return order.compactMap { byTitle[$0] }
+}
+
+private extension String {
+    var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 }

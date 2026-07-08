@@ -49,7 +49,7 @@ public final class AppState: ObservableObject {
             loadedSnapshot = nil
         }
         let restoredApps = loadedSnapshot?.apps.isEmpty == false ? loadedSnapshot?.apps : apps
-        self.apps = restoredApps ?? apps
+        self.apps = SeedApps.includingMissingDefaults(in: restoredApps ?? apps, defaults: apps)
         animeSourceCatalog = (loadedSnapshot?.animeSourceCatalog ?? AnimeSourceCatalogState(definitions: AnimeSourceCatalog.defaultSources))
             .includingDefaultSources()
             .removingUnusableSources()

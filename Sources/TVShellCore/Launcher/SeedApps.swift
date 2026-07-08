@@ -58,4 +58,16 @@ public enum SeedApps {
             controlMode: .web
         )
     ]
+
+    public static func includingMissingDefaults(
+        in apps: [TVAppProfile],
+        defaults: [TVAppProfile] = defaultApps
+    ) -> [TVAppProfile] {
+        var merged = apps
+        var knownTargets = Set(apps.map { $0.target.stableIdentity })
+        for defaultApp in defaults where knownTargets.insert(defaultApp.target.stableIdentity).inserted {
+            merged.append(defaultApp)
+        }
+        return merged
+    }
 }

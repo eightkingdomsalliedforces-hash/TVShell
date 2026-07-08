@@ -16,6 +16,25 @@ public enum LaunchTarget: Equatable, Codable, Sendable {
     case nativeApp(bundleIdentifier: String)
 }
 
+public extension LaunchTarget {
+    var stableIdentity: String {
+        switch self {
+        case .web(let url):
+            "web:\(url.absoluteString)"
+        case .media(let url):
+            "media:\(url.absoluteString)"
+        case .anime:
+            "anime"
+        case .youtube:
+            "youtube"
+        case .bilibili:
+            "bilibili"
+        case .nativeApp(let bundleIdentifier):
+            "native:\(bundleIdentifier)"
+        }
+    }
+}
+
 public struct TVAppProfile: Identifiable, Equatable, Codable, Sendable {
     public let id: UUID
     public var name: String

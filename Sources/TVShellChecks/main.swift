@@ -76,6 +76,7 @@ struct TVShellChecks {
         try checkTVMetricsScaleWithWindowSize()
         try checkAppCatalogVisibilityAndOrdering()
         try checkSettingsPersistAcrossRelaunch()
+        try checkSavedSettingsMigrateDefaultApps()
         try checkWatchHistoryMergesByMediaID()
         try checkWallpaperPresetCyclingAndProvider()
         try checkQuickActionsAndBrowserArePresent()
@@ -465,6 +466,61 @@ struct TVShellChecks {
         try expect(restored.watchingHistory.first?.title == "葬送的芙莉蓮", "watch history persists")
         try expect(restored.watchingHistory.first?.resumeTimeLabel == "02:05", "watch history persists exact playback time")
         try expect(restored.resumeTime(for: "anime:frieren:1") == 125, "app state can look up resume time by media id")
+    }
+
+    @MainActor
+    static func checkSavedSettingsMigrateDefaultApps() throws {
+        let file = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("TVShellChecks-AppMigration-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        var legacyApps = SeedApps.defaultApps.filter { app in
+            if case .bilibili = app.target {
+                return false
+            }
+            return true
+        }
+        guard let safariIndex = legacyApps.firstIndex(where: { app in
+            if case .nativeApp(bundleIdentifier: "com.apple.Safari") = app.target {
+                return true
+            }
+            return false
+        }) else {
+            throw CheckFailure("legacy app list contains Safari")
+        }
+        legacyApps[safariIndex].isVisibleOnHome = false
+
+        let store = AppSettingsStore(fileURL: file)
+        try store.save(AppSettingsSnapshot(
+            apps: legacyApps,
+            displayScale: .auto,
+            wallpaperSource: .builtIn(.aurora),
+            webRemoteMode: .mouse,
+            webZoom: 1.25,
+            videoSourceLabel: "內建示範影片",
+            animeSourceCatalog: AnimeSourceCatalogState(definitions: AnimeSourceCatalog.defaultSources),
+            watchingHistory: []
+        ))
+
+        let restored = AppState(apps: SeedApps.defaultApps, settingsStore: store)
+        try expect(restored.apps.contains { app in
+            if case .bilibili = app.target {
+                return true
+            }
+            return false
+        }, "saved settings migration restores the new Bilibili app")
+        try expect(restored.apps.filter { app in
+            if case .youtube = app.target {
+                return true
+            }
+            return false
+        }.count == 1, "saved settings migration does not duplicate existing default apps")
+        try expect(restored.apps.first { app in
+            if case .nativeApp(bundleIdentifier: "com.apple.Safari") = app.target {
+                return true
+            }
+            return false
+        }?.isVisibleOnHome == false, "saved settings migration preserves user visibility choices")
     }
 
     @MainActor
@@ -1457,11 +1513,17 @@ struct TVShellChecks {
                     },
                     "selectorChannelFormatFlattened": {
                       "selectEpisodeLists": ".module-play-list-content",
-                      "selectEpisodesFromList": "a",
+                      "selectEpisodesFromList": "span.episode-title",
+                      "selectEpisodeLinksFromList": "a.play-link",
                       "matchEpisodeSortFromName": "第\\\\s*(?<ep>.+)\\\\s*[话集]"
                     },
                     "matchVideo": {
-                      "matchVideoUrl": "url=(?<v>http(s)?:\\\\/\\\\/.+\\\\.(mp4|m3u8|flv|mkv))|(^http(s)?:\\\\/\\\\/.+\\\\.(mp4|m3u8|flv|mkv))"
+                      "enableNestedUrl": true,
+                      "matchNestedUrl": "src=\\\\\\\"(?<u>/player/[^\\\\\\\"]+)\\\\\\\"",
+                      "matchVideoUrl": "url=(?<v>http(s)?:\\\\/\\\\/.+\\\\.(mp4|m3u8|flv|mkv))|(^http(s)?:\\\\/\\\\/.+\\\\.(mp4|m3u8|flv|mkv))",
+                      "addHeadersToVideo": {
+                        "referer": "https://web.example/"
+                      }
                     }
                   }
                 }
@@ -1483,16 +1545,18 @@ struct TVShellChecks {
         """.data(using: .utf8)!
         let detailHTML = """
         <div class="module-play-list-content">
-          <a href="/watch/frieren-1">第 1 話</a>
-          <a href="/watch/frieren-2">第 2 話</a>
+          <div><span class="episode-title">第 1 話</span><a class="play-link" href="/watch/frieren-1">播放</a></div>
+          <div><span class="episode-title">第 2 話</span><a class="play-link" href="/watch/frieren-2">播放</a></div>
         </div>
         """.data(using: .utf8)!
-        let watchHTML = #"var player = {"url":"https://cdn.example/frieren-1.mkv"};"#.data(using: .utf8)!
+        let watchHTML = #"<iframe src="/player/frieren-1"></iframe>"#.data(using: .utf8)!
+        let nestedHTML = #"var player = {"url":"https:\/\/cdn.example\/frieren-1.mkv"};"#.data(using: .utf8)!
         let transport = StaticAnimeHTTPTransport(routes: [
             subscriptionURL.absoluteString: subscription,
             "https://web.example/search?wd=%E8%8A%99%E8%8E%89%E8%93%AE": searchHTML,
             "https://web.example/show/frieren": detailHTML,
-            "https://web.example/watch/frieren-1": watchHTML
+            "https://web.example/watch/frieren-1": watchHTML,
+            "https://web.example/player/frieren-1": nestedHTML
         ])
         let provider = AniSubsCSS1SubscriptionProvider(subscriptionURL: subscriptionURL, transport: transport)
         let results = try await provider.search(AnimeSearchQuery(keyword: "芙莉蓮"))
@@ -1504,6 +1568,7 @@ struct TVShellChecks {
         let streams = try await provider.streams(for: episode)
         try expect(streams.first?.url.absoluteString == "https://cdn.example/frieren-1.mkv", "css1 provider parses nested video url")
         try expect(streams.first?.headers["resolver"] == "web-selector", "css1 stream marks web selector resolver")
+        try expect(streams.first?.headers["Referer"] == "https://web.example/", "css1 stream carries video headers from subscription")
     }
 
     static func checkTorrentPlaybackEngine() throws {
