@@ -1671,7 +1671,11 @@ struct TVShellChecks {
         try expect(workflow.contains("xcode-select"), "release workflow selects a compatible Xcode toolchain")
         try expect(workflow.contains("swift run TVShellChecks"), "release workflow runs TVShellChecks")
         try expect(workflow.contains("swift build -c release --product TVShell"), "release workflow builds release product")
-        try expect(workflow.contains("gh release create"), "release workflow publishes GitHub releases for tags")
+        try expect(workflow.contains("Prepare Release Metadata"), "release workflow prepares metadata for automatic releases")
+        try expect(workflow.contains("tag=latest"), "release workflow publishes a rolling latest release from successful main builds")
+        try expect(workflow.contains("gh release delete \"$TAG\" --yes --cleanup-tag"), "release workflow refreshes the rolling latest release")
+        try expect(workflow.contains("gh release create"), "release workflow publishes GitHub releases after successful builds")
+        try expect(workflow.contains("github.event_name != 'pull_request'"), "release workflow skips publishing releases for pull requests")
         try expect(workflow.contains("upload-artifact"), "release workflow uploads build artifacts")
     }
 }

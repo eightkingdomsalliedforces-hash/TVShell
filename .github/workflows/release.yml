@@ -52,12 +52,48 @@ jobs:
           name: TVShell-macOS
           path: dist/TVShell-macOS-${{ github.sha }}.zip
 
+      - name: Prepare Release Metadata
+        if: github.event_name != 'pull_request'
+        id: release
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "title=MacTV ${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "notes=Automated macOS release for ${GITHUB_REF_NAME}." >> "$GITHUB_OUTPUT"
+            echo "mode=versioned" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+            echo "title=MacTV latest" >> "$GITHUB_OUTPUT"
+            echo "notes=Automated macOS release from main at ${GITHUB_SHA}." >> "$GITHUB_OUTPUT"
+            echo "mode=rolling" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name != 'pull_request'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${{ github.ref_name }}" \
-            "dist/TVShell-macOS-${{ github.sha }}.zip" \
-            --title "MacTV ${{ github.ref_name }}" \
-            --notes "Automated macOS release for ${{ github.ref_name }}."
+          TAG="${{ steps.release.outputs.tag }}"
+          TITLE="${{ steps.release.outputs.title }}"
+          NOTES="${{ steps.release.outputs.notes }}"
+          ASSET="dist/TVShell-macOS-${{ github.sha }}.zip"
+
+          if [[ "${{ steps.release.outputs.mode }}" == "rolling" ]]; then
+            gh release delete "$TAG" --yes --cleanup-tag || true
+            gh release create "$TAG" "$ASSET" \
+              --target "${GITHUB_SHA}" \
+              --title "$TITLE" \
+              --notes "$NOTES" \
+              --latest
+          elif gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ASSET" --clobber
+            gh release edit "$TAG" \
+              --title "$TITLE" \
+              --notes "$NOTES" \
+              --latest
+          else
+            gh release create "$TAG" "$ASSET" \
+              --title "$TITLE" \
+              --notes "$NOTES" \
+              --latest
+          fi

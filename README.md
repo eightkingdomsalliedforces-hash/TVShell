@@ -61,14 +61,16 @@ swift run TVShellChecks
 
 ## GitHub Release
 
-GitHub Actions 會在 push / PR 時自動執行檢查與 release build。若要發布 GitHub Release，建立並推送 `v*` tag：
+GitHub Actions 會在 push / PR 時自動執行檢查與 release build。每次 push 到 `main` 並建置成功後，workflow 會自動建立或更新 `latest` GitHub Release，並上傳 `TVShell` zip。
+
+若要發布固定版本，建立並推送 `v*` tag：
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-workflow 會打包 `TVShell` release binary，並把 zip 上傳到該 tag 的 GitHub Release。
+workflow 會打包 `TVShell` release binary；`main` 會更新 `latest` release，`v*` tag 會發布到對應版本的 GitHub Release。
 
 ## API 與環境變數
 
