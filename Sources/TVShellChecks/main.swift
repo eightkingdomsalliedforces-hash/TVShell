@@ -1708,7 +1708,14 @@ struct TVShellChecks {
         }
         """.data(using: .utf8)!
         let searchHTML = """
+        <div class="module-card-item"><div class="module-card-item-info"><div class="module-card-item-title"><a href="/show/source-name">米粒米粒</a></div></div></div>
+        <div class="module-card-item"><div class="module-card-item-info"><div class="module-card-item-title"><a href="/show/rezero">Re:從零開始的異世界生活</a></div></div></div>
         <div class="module-card-item"><div class="module-card-item-info"><div class="module-card-item-title"><a href="/show/frieren">葬送的芙莉蓮</a></div></div></div>
+        """.data(using: .utf8)!
+        let wrongDetailHTML = """
+        <div class="module-play-list-content">
+          <div><span class="episode-title">第 1 話</span><a class="play-link" href="/watch/rezero-1">播放</a></div>
+        </div>
         """.data(using: .utf8)!
         let detailHTML = """
         <div class="module-play-list-content">
@@ -1717,10 +1724,11 @@ struct TVShellChecks {
         </div>
         """.data(using: .utf8)!
         let watchHTML = #"<iframe src="/player/frieren-1"></iframe>"#.data(using: .utf8)!
-        let nestedHTML = #"var player = {"url":"https:\/\/cdn.example\/frieren-1.mkv"};"#.data(using: .utf8)!
+        let nestedHTML = #"var player = {"url":"https%3A%2F%2Fcdn.example%2Ffrieren-1.mkv%3Ftoken%3Dabc"};"#.data(using: .utf8)!
         let transport = StaticAnimeHTTPTransport(routes: [
             subscriptionURL.absoluteString: subscription,
             "https://web.example/search?wd=%E8%8A%99%E8%8E%89%E8%93%AE": searchHTML,
+            "https://web.example/show/rezero": wrongDetailHTML,
             "https://web.example/show/frieren": detailHTML,
             "https://web.example/watch/frieren-1": watchHTML,
             "https://web.example/player/frieren-1": nestedHTML
@@ -1728,12 +1736,14 @@ struct TVShellChecks {
         let provider = AniSubsCSS1SubscriptionProvider(subscriptionURL: subscriptionURL, transport: transport)
         let results = try await provider.search(AnimeSearchQuery(keyword: "芙莉蓮"))
         try expect(results.first?.title == "葬送的芙莉蓮", "css1 provider parses web-selector search result")
+        try expect(results.contains { $0.title.localizedCaseInsensitiveContains("Re:") } == false, "css1 provider filters unrelated search-page recommendations")
+        try expect(results.contains { $0.title == "米粒米粒" } == false, "css1 provider does not treat source names as anime titles")
         try expect(results.first?.episodes.count == 2, "css1 provider parses episode list")
         guard let episode = results.first?.episodes.first else {
             throw CheckFailure("missing css1 episode")
         }
         let streams = try await provider.streams(for: episode)
-        try expect(streams.first?.url.absoluteString == "https://cdn.example/frieren-1.mkv", "css1 provider parses nested video url")
+        try expect(streams.first?.url.absoluteString == "https://cdn.example/frieren-1.mkv?token=abc", "css1 provider parses nested encoded video url")
         try expect(streams.first?.headers["resolver"] == "web-selector", "css1 stream marks web selector resolver")
         try expect(streams.first?.headers["Referer"] == "https://web.example/", "css1 stream carries video headers from subscription")
 

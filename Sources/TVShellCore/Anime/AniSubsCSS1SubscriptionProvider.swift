@@ -25,20 +25,27 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
     public func search(_ query: AnimeSearchQuery) async throws -> [AnimeSearchResult] {
         let healthState = (try? healthStore.load()) ?? AniSubsCSS1SourceHealthState()
         let sources = try await webSelectorSources()
-            .filter { healthState.disabledSourceNames.contains($0.name) == false }
+            .filter { healthState.skippedSourceNames.contains($0.name) == false }
         var allResults: [AnimeSearchResult] = []
 
         for source in sources {
+            let subjects: [CSS1HTMLSelectorEngine.Anchor]
             do {
                 let searchURL = try source.searchURL(keyword: query.keyword)
                 let searchHTML = try await html(for: searchURL, source: source)
-                let subjects = CSS1HTMLSelectorEngine.anchors(
+                subjects = CSS1HTMLSelectorEngine.anchors(
                     matching: source.searchSelector,
                     in: searchHTML,
                     baseURL: searchURL
                 )
+            } catch {
+                try? healthStore.recordFailure(sourceName: source.name, reason: String(describing: error))
+                continue
+            }
 
-                for subject in subjects.prefix(20) {
+            let matchedSubjects = filteredSubjects(subjects, keyword: query.keyword)
+            for subject in matchedSubjects.prefix(20) {
+                do {
                     let detailHTML = try await html(for: subject.url, source: source)
                     let episodes = parseEpisodes(
                         source: source,
@@ -56,12 +63,11 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
                         episodeCount: episodes.count,
                         episodes: episodes
                     ))
+                } catch {
+                    continue
                 }
-                try? healthStore.recordSuccess(sourceName: source.name)
-            } catch {
-                try? healthStore.recordFailure(sourceName: source.name, reason: String(describing: error))
-                continue
             }
+            try? healthStore.recordSuccess(sourceName: source.name)
         }
 
         return Array(mergeCSS1Results(allResults).prefix(60))
@@ -123,7 +129,7 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
     private func source(named name: String) async throws -> AniSubsCSS1Source {
         let healthState = (try? healthStore.load()) ?? AniSubsCSS1SourceHealthState()
         let sources = try await webSelectorSources()
-            .filter { healthState.disabledSourceNames.contains($0.name) == false }
+            .filter { healthState.skippedSourceNames.contains($0.name) == false }
         guard let source = sources.first(where: { $0.name == name }) ?? sources.first else {
             throw AnimeHTTPError.missingRoute("ani-subs css1 source")
         }
@@ -157,6 +163,32 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
             throw SelectorAnimeSourceError.captchaRequired(captcha)
         }
         return html
+    }
+
+    private func filteredSubjects(
+        _ subjects: [CSS1HTMLSelectorEngine.Anchor],
+        keyword: String
+    ) -> [CSS1HTMLSelectorEngine.Anchor] {
+        let keywordKey = normalizedSearchKey(keyword)
+        guard keywordKey.isEmpty == false else {
+            return subjects
+        }
+        return subjects.filter { subject in
+            let titleKey = normalizedSearchKey(subject.title)
+            guard titleKey.isEmpty == false else {
+                return false
+            }
+            return titleKey.contains(keywordKey) || keywordKey.contains(titleKey)
+        }
+    }
+
+    private func normalizedSearchKey(_ value: String) -> String {
+        value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
+            .replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"[\s\p{P}\p{S}_]+"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
     }
 
     private func withCSS1Timeout<T: Sendable>(
@@ -276,6 +308,12 @@ public struct AniSubsCSS1SourceHealthState: Codable, Equatable, Sendable {
     public var disabledSourceNames: Set<String> {
         Set(disabledSources.keys)
     }
+
+    public var skippedSourceNames: Set<String> {
+        Set(disabledSources.compactMap { name, disabledSource in
+            disabledSource.shouldSkipAutomatically ? name : nil
+        })
+    }
 }
 
 public struct AniSubsCSS1DisabledSource: Codable, Equatable, Sendable {
@@ -285,6 +323,16 @@ public struct AniSubsCSS1DisabledSource: Codable, Equatable, Sendable {
     public init(reason: String, disabledAt: Date = Date()) {
         self.reason = reason
         self.disabledAt = disabledAt
+    }
+
+    var shouldSkipAutomatically: Bool {
+        let lowercasedReason = reason.lowercased()
+        return lowercasedReason.contains("request timeout")
+            || lowercasedReason.contains("timed out")
+            || lowercasedReason.contains("captcha")
+            || lowercasedReason.contains("cloudflare")
+            || lowercasedReason.contains("驗證")
+            || lowercasedReason.contains("验证")
     }
 }
 
@@ -573,16 +621,31 @@ private enum CSS1HTMLSelectorEngine {
         let normalizedHTML = html
             .replacingOccurrences(of: #"\/"#, with: "/")
             .replacingOccurrences(of: #"\\u002F"#, with: "/")
-        if let regex = try? NSRegularExpression(pattern: pattern.replacingOccurrences(of: #"\\/"#, with: "/"), options: [.caseInsensitive, .dotMatchesLineSeparators]) {
-            let nsRange = NSRange(normalizedHTML.startIndex..<normalizedHTML.endIndex, in: normalizedHTML)
-            for match in regex.matches(in: normalizedHTML, range: nsRange) {
-                for group in 1..<match.numberOfRanges {
-                    guard let range = Range(match.range(at: group), in: normalizedHTML) else {
-                        continue
+        let documents = Array(Set([normalizedHTML, normalizedHTML.removingPercentEncoding ?? normalizedHTML]))
+
+        for document in documents {
+            if let url = firstVideoURLByQueryParameter(in: document, baseURL: baseURL) {
+                return url
+            }
+        }
+
+        let normalizedPattern = pattern.replacingOccurrences(of: #"\\/"#, with: "/")
+        let hasNamedVideoGroup = normalizedPattern.contains("(?<v>")
+        if let regex = try? NSRegularExpression(pattern: normalizedPattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
+            for document in documents {
+                let nsRange = NSRange(document.startIndex..<document.endIndex, in: document)
+                for match in regex.matches(in: document, range: nsRange) {
+                    if hasNamedVideoGroup,
+                       let range = Range(match.range(withName: "v"), in: document),
+                       let url = resolveVideoURL(cleanURLCandidate(String(document[range])), relativeTo: baseURL) {
+                        return url
                     }
-                    let candidate = cleanURLCandidate(String(normalizedHTML[range]))
-                    if candidate.hasPrefix("http"),
-                       let url = resolveURL(candidate, relativeTo: baseURL) {
+                    for group in 1..<match.numberOfRanges {
+                        guard let range = Range(match.range(at: group), in: document),
+                              let url = resolveVideoURL(cleanURLCandidate(String(document[range])), relativeTo: baseURL)
+                        else {
+                            continue
+                        }
                         return url
                     }
                 }
@@ -593,13 +656,17 @@ private enum CSS1HTMLSelectorEngine {
         guard let fallback = try? NSRegularExpression(pattern: fallbackPattern, options: [.caseInsensitive]) else {
             return nil
         }
-        let nsRange = NSRange(normalizedHTML.startIndex..<normalizedHTML.endIndex, in: normalizedHTML)
-        guard let match = fallback.firstMatch(in: normalizedHTML, range: nsRange),
-              let range = Range(match.range, in: normalizedHTML)
-        else {
-            return nil
+        for document in documents {
+            let nsRange = NSRange(document.startIndex..<document.endIndex, in: document)
+            guard let match = fallback.firstMatch(in: document, range: nsRange),
+                  let range = Range(match.range, in: document),
+                  let url = resolveVideoURL(cleanURLCandidate(String(document[range])), relativeTo: baseURL)
+            else {
+                continue
+            }
+            return url
         }
-        return resolveURL(cleanURLCandidate(String(normalizedHTML[range])), relativeTo: baseURL)
+        return nil
     }
 
     static func firstNestedURL(in html: String, pattern: String?, baseURL: URL) -> URL? {
@@ -721,10 +788,38 @@ private enum CSS1HTMLSelectorEngine {
     }
 
     private static func cleanURLCandidate(_ value: String) -> String {
-        value
+        let cleaned = value
             .trimmingCharacters(in: CharacterSet(charactersIn: #" "';)"#).union(.whitespacesAndNewlines))
             .replacingOccurrences(of: #"\/"#, with: "/")
             .replacingOccurrences(of: "&amp;", with: "&")
+        return cleaned.removingPercentEncoding ?? cleaned
+    }
+
+    private static func firstVideoURLByQueryParameter(in html: String, baseURL: URL) -> URL? {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"(?:^|[?&"'`\s])(?:url|v|video|src)=([^&"'`\s<>]+)"#,
+            options: [.caseInsensitive]
+        ) else {
+            return nil
+        }
+        let nsRange = NSRange(html.startIndex..<html.endIndex, in: html)
+        for match in regex.matches(in: html, range: nsRange) {
+            guard let range = Range(match.range(at: 1), in: html),
+                  let url = resolveVideoURL(cleanURLCandidate(String(html[range])), relativeTo: baseURL)
+            else {
+                continue
+            }
+            return url
+        }
+        return nil
+    }
+
+    private static func resolveVideoURL(_ rawValue: String, relativeTo baseURL: URL) -> URL? {
+        let value = cleanURLCandidate(rawValue)
+        guard value.range(of: #"\.(mp4|m3u8|flv|mkv)(?:\?|$)"#, options: [.regularExpression, .caseInsensitive]) != nil else {
+            return nil
+        }
+        return resolveURL(value, relativeTo: baseURL)
     }
 
     private static func resolveURL(_ rawValue: String, relativeTo baseURL: URL) -> URL? {
