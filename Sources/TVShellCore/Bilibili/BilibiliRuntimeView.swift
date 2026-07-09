@@ -101,6 +101,8 @@ public struct BilibiliRuntimeView: View {
                 VStack(alignment: .leading, spacing: 32 * metrics.scale) {
                     header(metrics: metrics, title: app.name, subtitle: controller.statusText)
 
+                    BilibiliModeSwitcher(mode: controller.contentMode, metrics: metrics)
+
                     BilibiliSectionGrid(
                         title: "番劇",
                         items: controller.bangumiItems,
@@ -117,7 +119,7 @@ public struct BilibiliRuntimeView: View {
                         metrics: metrics
                     )
 
-                    Text("方向鍵選內容，OK 進入詳情，Menu 搜尋番劇或一般影片，Back 或 Home 返回。登入 Cookie 可在設定的 credentials.json 保存。")
+                    Text("方向鍵選內容，OK 進入詳情，播放/暫停鍵切換全部、番劇、一般影片，Menu 搜尋，Back 或 Home 返回。登入 Cookie 可在設定的 credentials.json 保存。")
                         .font(.system(size: 22 * metrics.scale, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.62))
                 }
@@ -201,6 +203,16 @@ public struct BilibiliRuntimeView: View {
             BilibiliPlayerSurface(player: controller.player)
                 .ignoresSafeArea()
 
+            DanmakuOverlay(
+                comments: controller.visibleDanmaku,
+                currentTime: controller.danmakuPlaybackTime,
+                sampleDate: controller.danmakuPlaybackDate,
+                isClockRunning: controller.isDanmakuClockRunning,
+                settings: appState.danmakuDisplaySettings,
+                metrics: metrics
+            )
+            .zIndex(3)
+
             if controller.isPlayerHUDVisible {
                 VStack(alignment: .leading, spacing: 12 * metrics.scale) {
                     Text(controller.playingTitle)
@@ -243,6 +255,11 @@ final class BilibiliRuntimeController: ObservableObject {
     @Published private(set) var isKeyboardVisible = false
     @Published private(set) var isPlayerHUDVisible = false
     @Published private(set) var keyboardState = VirtualKeyboardState(text: "间谍过家家", layout: .zhuyin)
+    @Published private(set) var contentMode: BilibiliContentMode = .all
+    @Published private(set) var visibleDanmaku: [DanmakuComment] = []
+    @Published private(set) var danmakuPlaybackTime: Double = 0
+    @Published private(set) var danmakuPlaybackDate = Date()
+    @Published private(set) var isDanmakuClockRunning = false
     let player = AVPlayer()
 
     private var provider: any BilibiliBangumiProviding
@@ -254,6 +271,7 @@ final class BilibiliRuntimeController: ObservableObject {
     private var mediaState = MediaControlState()
     private var currentEpisode: BilibiliEpisode?
     private var currentStream: BilibiliPlaybackStream?
+    private var comments: [DanmakuComment] = []
     private var lastRecordedMediaID: String?
     private var lastRecordedTime: Double = -1
     private var hidePlayerHUDTask: Task<Void, Never>?
@@ -305,11 +323,28 @@ final class BilibiliRuntimeController: ObservableObject {
     }
 
     var bangumiItems: [BilibiliSeason] {
-        seasons.filter { $0.itemKind == .bangumi }
+        guard contentMode != .video else {
+            return []
+        }
+        return seasons.filter { $0.itemKind == .bangumi }
     }
 
     var videoItems: [BilibiliSeason] {
-        seasons.filter { $0.itemKind == .video }
+        guard contentMode != .bangumi else {
+            return []
+        }
+        return seasons.filter { $0.itemKind == .video }
+    }
+
+    var visibleSeasons: [BilibiliSeason] {
+        switch contentMode {
+        case .all:
+            return seasons
+        case .bangumi:
+            return seasons.filter { $0.itemKind == .bangumi }
+        case .video:
+            return seasons.filter { $0.itemKind == .video }
+        }
     }
 
     var bangumiStartIndex: Int {
@@ -335,10 +370,11 @@ final class BilibiliRuntimeController: ObservableObject {
     }
 
     var focusedSeason: BilibiliSeason? {
-        guard seasons.indices.contains(state.focusedSeasonIndex) else {
+        let items = visibleSeasons
+        guard items.indices.contains(state.focusedSeasonIndex) else {
             return nil
         }
-        return seasons[state.focusedSeasonIndex]
+        return items[state.focusedSeasonIndex]
     }
 
     var focusedEpisode: BilibiliEpisode? {
@@ -368,8 +404,8 @@ final class BilibiliRuntimeController: ObservableObject {
     func loadHome() async {
         do {
             seasons = try await provider.home()
-            state.updateSeasonCount(seasons.count)
-            statusText = seasons.isEmpty ? "Bilibili 沒有回傳推薦。" : "Bilibili 推薦 · 已載入 \(seasons.count) 部"
+            state.updateSeasonCount(visibleSeasons.count)
+            statusText = seasons.isEmpty ? "Bilibili 沒有回傳推薦。" : "Bilibili 推薦 · \(contentMode.title) · 已載入 \(visibleSeasons.count) 部"
         } catch {
             seasons = []
             state.updateSeasonCount(0)
@@ -381,8 +417,8 @@ final class BilibiliRuntimeController: ObservableObject {
         do {
             currentQuery = keyword
             seasons = try await provider.search(keyword: keyword)
-            state = BilibiliRuntimeState(seasonCount: seasons.count)
-            statusText = seasons.isEmpty ? "Bilibili 找不到：\(keyword)" : "Bilibili 搜尋：\(keyword) · \(seasons.count) 部"
+            state = BilibiliRuntimeState(seasonCount: visibleSeasons.count)
+            statusText = visibleSeasons.isEmpty ? "Bilibili 找不到：\(keyword)" : "Bilibili 搜尋：\(keyword) · \(contentMode.title) · \(visibleSeasons.count) 部"
         } catch {
             seasons = []
             state = BilibiliRuntimeState(seasonCount: 0)
@@ -413,6 +449,7 @@ final class BilibiliRuntimeController: ObservableObject {
                 currentStream = stream
                 state.openPlayer()
                 load(stream: stream, episode: episode)
+                await loadDanmaku(for: episode)
                 showPlayerHUD()
             } catch {
                 statusText = "Bilibili 無法播放：\(error.localizedDescription)"
@@ -448,6 +485,7 @@ final class BilibiliRuntimeController: ObservableObject {
         }
         player.replaceCurrentItem(with: item)
         mediaState = MediaControlState(isPlaying: true)
+        isDanmakuClockRunning = true
         installTimeObserverIfNeeded()
         installItemEndObserver(for: item)
         recordPlaybackProgress(time: resume, force: true)
@@ -468,6 +506,10 @@ final class BilibiliRuntimeController: ObservableObject {
 
         switch state.phase {
         case .browsing:
+            if command == .playPause {
+                toggleContentMode()
+                return
+            }
             if command == .back {
                 NotificationCenter.default.post(name: .tvShellRequestLauncher, object: nil)
                 return
@@ -490,6 +532,7 @@ final class BilibiliRuntimeController: ObservableObject {
         case .playing:
             if command == .back {
                 player.pause()
+                isDanmakuClockRunning = false
                 state.closePlayer()
                 return
             }
@@ -527,6 +570,13 @@ final class BilibiliRuntimeController: ObservableObject {
             showPlayerHUD()
         }
         mediaState.isPlaying ? player.play() : player.pause()
+        isDanmakuClockRunning = mediaState.isPlaying
+    }
+
+    private func toggleContentMode() {
+        contentMode = contentMode.next
+        state = BilibiliRuntimeState(seasonCount: visibleSeasons.count)
+        statusText = "Bilibili：已切換到\(contentMode.title) · \(visibleSeasons.count) 部"
     }
 
     private func resumeTime(for episode: BilibiliEpisode) -> Double {
@@ -547,8 +597,30 @@ final class BilibiliRuntimeController: ObservableObject {
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
             Task { @MainActor in
                 self?.recordPlaybackProgress(time: time.seconds)
+                self?.updateDanmaku(time: time.seconds)
             }
         }
+    }
+
+    private func loadDanmaku(for episode: BilibiliEpisode) async {
+        do {
+            comments = try await provider.danmaku(episode: episode)
+            updateDanmaku(time: player.currentTime().seconds)
+            statusText = "播放/暫停控制播放，左右快轉倒退，Back 回選集 · Bilibili 彈幕 \(comments.count) 條"
+        } catch {
+            comments = []
+            visibleDanmaku = []
+            statusText = "播放/暫停控制播放，左右快轉倒退，Back 回選集 · Bilibili 彈幕載入失敗"
+        }
+    }
+
+    private func updateDanmaku(time: Double) {
+        danmakuPlaybackTime = time
+        danmakuPlaybackDate = Date()
+        isDanmakuClockRunning = mediaState.isPlaying
+        visibleDanmaku = comments
+            .filter { time >= $0.time && time - $0.time < 8.0 }
+            .suffix(12)
     }
 
     private func recordPlaybackProgress(time: Double, force: Bool = false) {
@@ -609,6 +681,27 @@ final class BilibiliRuntimeController: ObservableObject {
                     self.state.closePlayer()
                 }
             }
+        }
+    }
+}
+
+private struct BilibiliModeSwitcher: View {
+    let mode: BilibiliContentMode
+    let metrics: TVMetrics
+
+    var body: some View {
+        HStack(spacing: 14 * metrics.scale) {
+            ForEach(BilibiliContentMode.allCases, id: \.self) { item in
+                Text(item.title)
+                    .font(.system(size: 24 * metrics.scale, weight: .heavy))
+                    .foregroundStyle(item == mode ? .black.opacity(0.82) : .white.opacity(0.72))
+                    .padding(.horizontal, 26 * metrics.scale)
+                    .padding(.vertical, 14 * metrics.scale)
+                    .background(item == mode ? .white.opacity(0.92) : .white.opacity(0.12), in: Capsule())
+            }
+            Text("播放/暫停鍵切換")
+                .font(.system(size: 20 * metrics.scale, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.54))
         }
     }
 }

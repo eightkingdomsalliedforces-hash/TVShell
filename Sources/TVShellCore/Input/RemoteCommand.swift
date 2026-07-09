@@ -55,6 +55,7 @@ public extension RemoteCommand {
         case "back", "return": .back
         case "home": .home
         case "menu", "settings": .menu
+        case "longmenu", "longpressmenu", "menulong", "quicksettings": .longPress(.menu)
         case "play", "pause", "playpause": .playPause
         case "rewind", "backward": .rewind
         case "fastforward", "forward": .fastForward

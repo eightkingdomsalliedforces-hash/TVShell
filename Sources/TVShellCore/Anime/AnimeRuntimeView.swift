@@ -1246,7 +1246,7 @@ private struct TorrentDownloadRow: View {
     }
 }
 
-private struct DanmakuOverlay: View {
+struct DanmakuOverlay: View {
     let comments: [DanmakuComment]
     let currentTime: Double
     let sampleDate: Date
@@ -1288,13 +1288,13 @@ private struct DanmakuOverlay: View {
     }
 }
 
-private extension DanmakuComment {
+extension DanmakuComment {
     var stableIdentity: String {
         "\(time)-\(text)-\(colorHex)-\(mode.rawValue)"
     }
 }
 
-private struct DanmakuTextStyle: ViewModifier {
+struct DanmakuTextStyle: ViewModifier {
     let settings: DanmakuDisplaySettings
     let metrics: TVMetrics
 

@@ -25,6 +25,28 @@ public enum BilibiliItemKind: String, Codable, Equatable, Sendable {
     case video
 }
 
+public enum BilibiliContentMode: String, Codable, Equatable, CaseIterable, Sendable {
+    case all
+    case bangumi
+    case video
+
+    public var title: String {
+        switch self {
+        case .all: "全部"
+        case .bangumi: "番劇"
+        case .video: "一般影片"
+        }
+    }
+
+    public var next: BilibiliContentMode {
+        switch self {
+        case .all: .bangumi
+        case .bangumi: .video
+        case .video: .all
+        }
+    }
+}
+
 public struct BilibiliSeason: Identifiable, Codable, Equatable, Sendable {
     public var id: Int
     public var itemKind: BilibiliItemKind

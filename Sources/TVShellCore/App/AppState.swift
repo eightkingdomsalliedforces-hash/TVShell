@@ -120,6 +120,23 @@ public final class AppState: ObservableObject {
         recordWatch(entry)
     }
 
+    public func deleteWatchHistory(_ entry: WatchHistoryEntry) {
+        watchingHistory.removeAll { existing in
+            if let mediaID = entry.mediaID {
+                return existing.mediaID == mediaID
+            }
+            return existing.id == entry.id
+        }
+        saveSettings()
+        statusMessage = "已刪除最近觀看：\(entry.title)"
+    }
+
+    public func clearWatchingHistory() {
+        watchingHistory.removeAll()
+        saveSettings()
+        statusMessage = "已清除最近觀看"
+    }
+
     public func startNetworkRemoteServer() {
         networkRemoteStatus = networkRemoteServer.start { [weak self] command in
             Task { @MainActor in
@@ -185,6 +202,12 @@ public final class AppState: ObservableObject {
     public func handle(_ command: RemoteCommand) {
         lastCommand = command
 
+        if command == .longPress(.menu) {
+            activeRuntime = .settings
+            statusMessage = "快捷設定"
+            return
+        }
+
         switch activeRuntime {
         case .launcher:
             handleLauncher(command)
@@ -209,6 +232,10 @@ public final class AppState: ObservableObject {
             moveFocusedApp(command)
         case .select:
             openFocusedApp()
+        case .menu:
+            if watchingHistory.isEmpty == false {
+                clearWatchingHistory()
+            }
         case .home:
             activeRuntime = .launcher
         default:

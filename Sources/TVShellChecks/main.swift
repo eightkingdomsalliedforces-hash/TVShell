@@ -437,6 +437,9 @@ struct TVShellChecks {
         state.focusedAppID = bilibili.id
         state.handle(.select)
         try expect(state.activeRuntime == .bilibili(bilibili), "select opens focused bilibili app")
+
+        state.handle(.longPress(.menu))
+        try expect(state.activeRuntime == .settings, "long-press menu opens quick settings")
     }
 
     static func checkTVMetricsScaleWithWindowSize() throws {
@@ -565,6 +568,11 @@ struct TVShellChecks {
         ))
         try expect(state.watchingHistory.count == 1, "watch history merges the same media id")
         try expect(state.watchingHistory.first?.resumeTimeLabel == "03:05", "watch history stores minutes and seconds")
+        guard let entry = state.watchingHistory.first else {
+            throw CheckFailure("missing watch history entry")
+        }
+        state.deleteWatchHistory(entry)
+        try expect(state.watchingHistory.isEmpty, "watch history entries can be deleted")
     }
 
     static func checkWallpaperPresetCyclingAndProvider() throws {
@@ -1178,6 +1186,14 @@ struct TVShellChecks {
         try expect(videoPlayRequest.url.absoluteString.contains("bvid=BV1xx411c7m9"), "bilibili general video playurl includes bvid")
         try expect(videoPlayRequest.url.absoluteString.contains("cid=987654"), "bilibili general video playurl includes cid")
         try expect(videoPlayRequest.headers["Cookie"] == "SESSDATA=abc; bili_jct=csrf;", "bilibili playurl request carries login cookie")
+        let danmakuRequest = BilibiliAPI.danmakuRequest(cid: 987654, credentials: cookieCredentials)
+        try expect(danmakuRequest.url.absoluteString.contains("/x/v1/dm/list.so"), "bilibili danmaku request uses cid xml endpoint")
+        try expect(danmakuRequest.url.absoluteString.contains("oid=987654"), "bilibili danmaku request includes cid")
+        let danmakuXML = #"<i><d p="1.5,1,25,16777215,0,0,0,0">第一條&amp;彈幕</d><d p="3.0,1,25,16777215,0,0,0,0">第二條</d></i>"#.data(using: .utf8)!
+        let bilibiliDanmaku = BilibiliAPI.decodeDanmaku(danmakuXML)
+        try expect(bilibiliDanmaku.count == 2, "bilibili danmaku parser reads xml comments")
+        try expect(bilibiliDanmaku.first?.time == 1.5, "bilibili danmaku parser reads comment time")
+        try expect(bilibiliDanmaku.first?.text == "第一條&彈幕", "bilibili danmaku parser decodes xml entities")
 
         let homeProvider = BilibiliBangumiProvider(
             transport: StaticAnimeHTTPTransport(routes: [
@@ -1211,6 +1227,10 @@ struct TVShellChecks {
         try expect(runtimeSource.contains("controller.bangumiItems"), "bilibili runtime renders a dedicated bangumi section")
         try expect(runtimeSource.contains("controller.videoItems"), "bilibili runtime renders a dedicated general video section")
         try expect(runtimeSource.contains("一般影片"), "bilibili runtime labels the general video section")
+        try expect(runtimeSource.contains("BilibiliModeSwitcher"), "bilibili runtime shows a mode switch button")
+        try expect(runtimeSource.contains("toggleContentMode"), "bilibili runtime can switch between bangumi and general video")
+        try expect(runtimeSource.contains("DanmakuOverlay("), "bilibili runtime renders danmaku overlay")
+        try expect(runtimeSource.contains("provider.danmaku"), "bilibili runtime loads bilibili danmaku")
     }
 
     static func checkYouTubeEmbedPageIncludesOriginAndFallback() throws {
@@ -1722,23 +1742,56 @@ struct TVShellChecks {
           <div><span class="episode-title">第 1 話</span><a class="play-link" href="/watch/frieren-1">播放</a></div>
           <div><span class="episode-title">第 2 話</span><a class="play-link" href="/watch/frieren-2">播放</a></div>
         </div>
+        <section class="module-card-item">
+          <span class="episode-title">第 522 話</span><a class="play-link" href="/watch/recommendation-522">推薦</a>
+        </section>
         """.data(using: .utf8)!
         let watchHTML = #"<iframe src="/player/frieren-1"></iframe>"#.data(using: .utf8)!
         let nestedHTML = #"var player = {"url":"https%3A%2F%2Fcdn.example%2Ffrieren-1.mkv%3Ftoken%3Dabc"};"#.data(using: .utf8)!
+        let bangumiRequest = try BangumiAPI.searchSubjectsRequest(keyword: "葬送的芙莉蓮")
+        let bangumiResponse = """
+        {
+          "data": [
+            {
+              "id": 424883,
+              "name": "Sousou no Frieren",
+              "name_cn": "葬送的芙莉蓮",
+              "summary": "勇者一行打倒魔王之後，精靈魔法使芙莉蓮踏上理解人類的旅程。",
+              "eps": 28,
+              "date": "2023-09-29",
+              "rank": 1,
+              "rating": { "score": 8.9, "total": 12000 },
+              "images": { "large": "https://example.com/frieren-cover.jpg" }
+            }
+          ]
+        }
+        """.data(using: .utf8)!
         let transport = StaticAnimeHTTPTransport(routes: [
             subscriptionURL.absoluteString: subscription,
             "https://web.example/search?wd=%E8%8A%99%E8%8E%89%E8%93%AE": searchHTML,
             "https://web.example/show/rezero": wrongDetailHTML,
             "https://web.example/show/frieren": detailHTML,
             "https://web.example/watch/frieren-1": watchHTML,
-            "https://web.example/player/frieren-1": nestedHTML
+            "https://web.example/player/frieren-1": nestedHTML,
+            bangumiRequest.url.absoluteString: bangumiResponse
         ])
-        let provider = AniSubsCSS1SubscriptionProvider(subscriptionURL: subscriptionURL, transport: transport)
+        let css1HealthURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("TVShellChecks-CSS1Primary-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: css1HealthURL) }
+        let provider = AniSubsCSS1SubscriptionProvider(
+            subscriptionURL: subscriptionURL,
+            transport: transport,
+            healthStore: AniSubsCSS1SourceHealthStore(fileURL: css1HealthURL)
+        )
         let results = try await provider.search(AnimeSearchQuery(keyword: "芙莉蓮"))
         try expect(results.first?.title == "葬送的芙莉蓮", "css1 provider parses web-selector search result")
         try expect(results.contains { $0.title.localizedCaseInsensitiveContains("Re:") } == false, "css1 provider filters unrelated search-page recommendations")
         try expect(results.contains { $0.title == "米粒米粒" } == false, "css1 provider does not treat source names as anime titles")
+        try expect(results.first?.coverURL?.absoluteString == "https://example.com/frieren-cover.jpg", "css1 provider enriches homepage cards with Bangumi covers")
+        try expect(results.first?.summaryText.localizedCaseInsensitiveContains("芙莉蓮踏上理解人類") == true, "css1 provider enriches detail page with Bangumi summary")
+        try expect(results.first?.score == 8.9, "css1 provider enriches detail page with Bangumi score")
         try expect(results.first?.episodes.count == 2, "css1 provider parses episode list")
+        try expect(results.first?.episodes.contains { $0.title.contains("522") } == false, "css1 provider ignores recommendation episodes outside the configured episode list")
         guard let episode = results.first?.episodes.first else {
             throw CheckFailure("missing css1 episode")
         }
@@ -2170,6 +2223,10 @@ struct TVShellChecks {
 
         let launcher = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Launcher/LauncherView.swift"))
         try expect(launcher.contains("ScrollView(.horizontal"), "launcher rows use horizontal scrolling instead of overflowing")
+        try expect(launcher.contains("TVStatusClockOverlay"), "root shell shows time on every interface")
+        try expect(launcher.contains("TimelineView(.periodic"), "time overlay refreshes automatically")
+        try expect(launcher.contains("deleteWatchHistory"), "launcher can delete recent watch entries")
+        try expect(launcher.contains("clearWatchingHistory"), "launcher can clear recent watch history")
         try expect(launcher.contains("ScrollViewReader"), "launcher keeps focused app rows visible after watch history appears")
         try expect(launcher.contains("launcher-section-\\(section.id)"), "launcher sections expose stable scroll ids")
         try expect(launcher.contains(".scrollIndicators(.hidden)"), "launcher hides TV-unfriendly scroll indicators")

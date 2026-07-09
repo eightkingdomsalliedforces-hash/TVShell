@@ -21,6 +21,7 @@ public protocol BilibiliBangumiProviding: Sendable {
     func detail(item: BilibiliSeason) async throws -> BilibiliSeasonDetail
     func detail(seasonID: Int) async throws -> BilibiliSeasonDetail
     func playback(episode: BilibiliEpisode) async throws -> BilibiliPlaybackStream
+    func danmaku(episode: BilibiliEpisode) async throws -> [DanmakuComment]
 }
 
 public struct BilibiliBangumiProvider: BilibiliBangumiProviding {
@@ -80,6 +81,14 @@ public struct BilibiliBangumiProvider: BilibiliBangumiProviding {
     public func playback(episode: BilibiliEpisode) async throws -> BilibiliPlaybackStream {
         let data = try await transport.data(for: BilibiliAPI.playURLRequest(episode: episode, credentials: credentials))
         return try BilibiliAPI.decodePlayback(data, credentials: credentials)
+    }
+
+    public func danmaku(episode: BilibiliEpisode) async throws -> [DanmakuComment] {
+        guard let cid = episode.cid else {
+            return []
+        }
+        let data = try await transport.data(for: BilibiliAPI.danmakuRequest(cid: cid, credentials: credentials))
+        return BilibiliAPI.decodeDanmaku(data)
     }
 }
 
@@ -199,6 +208,15 @@ public enum BilibiliAPI {
         return request(url, credentials: credentials)
     }
 
+    public static func danmakuRequest(
+        cid: Int,
+        credentials: BilibiliCredentials = .environment()
+    ) -> AnimeHTTPRequest {
+        let url = URL(string: "https://api.bilibili.com/x/v1/dm/list.so")!
+            .appending(queryItems: [URLQueryItem(name: "oid", value: "\(cid)")])
+        return request(url, credentials: credentials)
+    }
+
     public static func decodeHome(_ data: Data) throws -> [BilibiliSeason] {
         let response = try JSONDecoder().decode(BilibiliHomeResponse.self, from: data)
         try check(code: response.code, message: response.message)
@@ -262,6 +280,41 @@ public enum BilibiliAPI {
             headers: playbackHeaders(credentials: credentials),
             durationSeconds: result.duration.map { Double($0) / 1000 }
         )
+    }
+
+    public static func decodeDanmaku(_ data: Data) -> [DanmakuComment] {
+        let xml = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
+        guard let regex = try? NSRegularExpression(
+            pattern: #"<d\s+p="([^"]+)">(.*?)</d>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        ) else {
+            return []
+        }
+        let nsRange = NSRange(xml.startIndex..<xml.endIndex, in: xml)
+        return regex.matches(in: xml, range: nsRange).compactMap { match in
+            guard let parameterRange = Range(match.range(at: 1), in: xml),
+                  let textRange = Range(match.range(at: 2), in: xml)
+            else {
+                return nil
+            }
+            let parameters = String(xml[parameterRange]).split(separator: ",")
+            guard let first = parameters.first,
+                  let time = Double(first)
+            else {
+                return nil
+            }
+            let text = String(xml[textRange])
+                .replacingOccurrences(of: "&amp;", with: "&")
+                .replacingOccurrences(of: "&lt;", with: "<")
+                .replacingOccurrences(of: "&gt;", with: ">")
+                .replacingOccurrences(of: "&quot;", with: "\"")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard text.isEmpty == false else {
+                return nil
+            }
+            return DanmakuComment(time: time, text: text)
+        }
+        .sorted { $0.time < $1.time }
     }
 
     private static func playbackHeaders(credentials: BilibiliCredentials = .environment()) -> [String: String] {

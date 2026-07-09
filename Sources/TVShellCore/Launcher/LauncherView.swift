@@ -59,6 +59,9 @@ public struct LauncherView: View {
                     .transition(.opacity.combined(with: .scale(scale: 1.08)))
                     .zIndex(10)
             }
+
+            TVStatusClockOverlay()
+                .zIndex(30)
         }
         .animation(TVMotion.runtime, value: appState.activeRuntime)
         .animation(TVMotion.runtime, value: appState.openingAppName)
@@ -275,31 +278,60 @@ private extension Color {
 }
 
 private struct WatchHistoryRowView: View {
+    @EnvironmentObject private var appState: AppState
     let entries: [WatchHistoryEntry]
     let metrics: TVMetrics
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18 * metrics.scale) {
-            Text("最近觀看")
-                .font(.system(size: metrics.rowTitleSize, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.78))
+            HStack(spacing: 18 * metrics.scale) {
+                Text("最近觀看")
+                    .font(.system(size: metrics.rowTitleSize, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.78))
+                Button {
+                    appState.clearWatchingHistory()
+                } label: {
+                    Text("清除")
+                        .font(.system(size: 22 * metrics.scale, weight: .bold))
+                        .padding(.horizontal, 18 * metrics.scale)
+                        .padding(.vertical, 10 * metrics.scale)
+                        .background(.white.opacity(0.14), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                Text("Menu 也可清除最近觀看")
+                    .font(.system(size: 20 * metrics.scale, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.52))
+            }
 
             ScrollView(.horizontal) {
                 HStack(spacing: 20 * metrics.scale) {
                     ForEach(entries.prefix(8)) { entry in
-                        VStack(alignment: .leading, spacing: 10 * metrics.scale) {
-                            Text(entry.title)
-                                .font(.system(size: 28 * metrics.scale, weight: .bold))
-                                .lineLimit(2)
-                            Text(entry.progressSubtitle)
-                                .font(.system(size: 20 * metrics.scale, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.62))
-                                .lineLimit(1)
+                        ZStack(alignment: .topTrailing) {
+                            VStack(alignment: .leading, spacing: 10 * metrics.scale) {
+                                Text(entry.title)
+                                    .font(.system(size: 28 * metrics.scale, weight: .bold))
+                                    .lineLimit(2)
+                                Text(entry.progressSubtitle)
+                                    .font(.system(size: 20 * metrics.scale, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.62))
+                                    .lineLimit(1)
+                            }
+                            .frame(width: 340 * metrics.scale, alignment: .leading)
+                            .frame(minHeight: 116 * metrics.scale, alignment: .leading)
+                            .padding(22 * metrics.scale)
+                            .liquidGlassCard(isFocused: false, cornerRadius: 24 * metrics.scale)
+
+                            Button {
+                                appState.deleteWatchHistory(entry)
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 18 * metrics.scale, weight: .bold))
+                                    .frame(width: 42 * metrics.scale, height: 42 * metrics.scale)
+                                    .background(.black.opacity(0.36), in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .padding(10 * metrics.scale)
                         }
-                        .frame(width: 340 * metrics.scale, alignment: .leading)
-                        .frame(minHeight: 116 * metrics.scale, alignment: .leading)
-                        .padding(22 * metrics.scale)
-                        .liquidGlassCard(isFocused: false, cornerRadius: 24 * metrics.scale)
                     }
                 }
                 .padding(.horizontal, 12 * metrics.scale)
@@ -308,6 +340,34 @@ private struct WatchHistoryRowView: View {
             .scrollIndicators(.hidden)
         }
     }
+}
+
+private struct TVStatusClockOverlay: View {
+    var body: some View {
+        GeometryReader { proxy in
+            TimelineView(.periodic(from: Date(), by: 30)) { timeline in
+                Text(Self.formatter.string(from: timeline.date))
+                    .font(.system(size: max(22, min(proxy.size.width, proxy.size.height) * 0.028), weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 12)
+                    .background(.regularMaterial, in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.28), radius: 16, x: 0, y: 8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(.top, max(18, proxy.safeAreaInsets.top + 12))
+                    .padding(.trailing, max(24, proxy.safeAreaInsets.trailing + 28))
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private static let formatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_Hant_TW")
+        formatter.dateFormat = "M月d日 E HH:mm"
+        return formatter
+    }()
 }
 
 private struct LauncherRowView: View {

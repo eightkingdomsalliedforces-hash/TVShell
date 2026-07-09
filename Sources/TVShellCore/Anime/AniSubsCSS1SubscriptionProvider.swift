@@ -70,7 +70,8 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
             try? healthStore.recordSuccess(sourceName: source.name)
         }
 
-        return Array(mergeCSS1Results(allResults).prefix(60))
+        let merged = Array(mergeCSS1Results(allResults).prefix(60))
+        return await enrichWithBangumi(merged)
     }
 
     public func episodes(for result: AnimeSearchResult) async throws -> [AnimeEpisode] {
@@ -231,7 +232,7 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
             in: detailHTML,
             baseURL: detailURL
         )
-        let anchors = narrowedAnchors.count >= fullAnchors.count ? narrowedAnchors : fullAnchors
+        let anchors = narrowedAnchors.isEmpty ? fullAnchors : narrowedAnchors
 
         return anchors.enumerated().map { offset, anchor in
             let number = CSS1HTMLSelectorEngine.episodeNumber(
@@ -260,6 +261,60 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
             hash &*= 1_099_511_628_211
         }
         return String(format: "%016llx", hash)
+    }
+
+    private func enrichWithBangumi(_ results: [AnimeSearchResult]) async -> [AnimeSearchResult] {
+        var enriched: [AnimeSearchResult] = []
+        for result in results {
+            guard let subject = await bangumiSubject(keyword: result.title) else {
+                enriched.append(result)
+                continue
+            }
+            var item = result
+            item.title = subject.title
+            item.subtitle = subject.summary?.nilIfBlank ?? result.subtitle
+            item.coverURL = subject.coverURL ?? result.coverURL
+            item.originalTitle = subject.name.nilIfBlank ?? result.originalTitle
+            item.airDate = subject.date?.nilIfBlank ?? result.airDate
+            item.score = subject.rating?.score ?? result.score
+            item.rank = subject.rank ?? result.rank
+            item.episodeCount = subject.episodeCount ?? result.episodeCount
+            item.episodes = result.episodes.map { episode in
+                var copy = episode
+                copy.identity.subjectID = item.title
+                copy.identity.subjectAliases = uniqueNonEmpty([item.title, subject.name, result.title])
+                return copy
+            }
+            enriched.append(item)
+        }
+        return enriched
+    }
+
+    private func bangumiSubject(keyword: String) async -> BangumiSubject? {
+        do {
+            let request = try BangumiAPI.searchSubjectsRequest(keyword: keyword)
+            let data = try await transport.data(for: request)
+            let subjects = try BangumiAPI.decodeSubjectSearch(data)
+            return subjects.first { subject in
+                normalizedSearchKey(subject.title) == normalizedSearchKey(keyword)
+                    || normalizedSearchKey(subject.name) == normalizedSearchKey(keyword)
+            } ?? subjects.first
+        } catch {
+            return nil
+        }
+    }
+
+    private func uniqueNonEmpty(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return values.compactMap { value in
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.isEmpty == false,
+                  seen.insert(trimmed.lowercased()).inserted
+            else {
+                return nil
+            }
+            return trimmed
+        }
     }
 }
 
@@ -610,6 +665,10 @@ private enum CSS1HTMLSelectorEngine {
         }
         let nsRange = NSRange(html.startIndex..<html.endIndex, in: html)
         return regex.matches(in: html, range: nsRange).compactMap { match in
+            if let attrsRange = Range(match.range, in: html),
+               let balanced = balancedBlockBody(startingAt: attrsRange.lowerBound, in: html, requiredClass: firstClass) {
+                return balanced
+            }
             guard let range = Range(match.range(withName: "body"), in: html) else {
                 return nil
             }
@@ -769,6 +828,48 @@ private enum CSS1HTMLSelectorEngine {
             return nil
         }
         return String(tag[range])
+    }
+
+    private static func balancedBlockBody(startingAt start: String.Index, in html: String, requiredClass: String) -> String? {
+        guard let startMatch = firstTag(from: start, in: html),
+              startMatch.opening,
+              startMatch.attributes.contains(requiredClass),
+              let bodyStart = startMatch.end
+        else {
+            return nil
+        }
+
+        var depth = 1
+        var cursor = bodyStart
+        while cursor < html.endIndex,
+              let tag = firstTag(from: cursor, in: html) {
+            if tag.name == startMatch.name {
+                depth += tag.opening ? 1 : -1
+                if depth == 0 {
+                    return String(html[bodyStart..<tag.start])
+                }
+            }
+            cursor = tag.end ?? html.index(after: cursor)
+        }
+        return nil
+    }
+
+    private static func firstTag(from start: String.Index, in html: String) -> (name: String, attributes: String, opening: Bool, start: String.Index, end: String.Index?)? {
+        guard let open = html[start...].firstIndex(of: "<"),
+              let close = html[open...].firstIndex(of: ">") else {
+            return nil
+        }
+        let raw = String(html[html.index(after: open)..<close])
+        guard raw.hasPrefix("!") == false,
+              raw.hasPrefix("?") == false else {
+            return firstTag(from: html.index(after: close), in: html)
+        }
+        let opening = raw.hasPrefix("/") == false
+        let cleaned = raw.trimmingCharacters(in: CharacterSet(charactersIn: "/").union(.whitespacesAndNewlines))
+        guard let name = cleaned.split(whereSeparator: \.isWhitespace).first?.lowercased() else {
+            return firstTag(from: html.index(after: close), in: html)
+        }
+        return (name, cleaned, opening, open, html.index(after: close))
     }
 
     private static func stripHTML(_ value: String) -> String {

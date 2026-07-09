@@ -27,6 +27,7 @@ public final class HostingKeyView<Content: View>: NSHostingView<Content> {
     private let mapper = KeyCodeMapper.default
     private var localMonitor: Any?
     private var globalMonitor: Any?
+    private var longPressDispatchedKeys = Set<UInt16>()
 
     public override var acceptsFirstResponder: Bool { true }
 
@@ -47,6 +48,11 @@ public final class HostingKeyView<Content: View>: NSHostingView<Content> {
         super.keyDown(with: event)
     }
 
+    public override func keyUp(with event: NSEvent) {
+        longPressDispatchedKeys.remove(event.keyCode)
+        super.keyUp(with: event)
+    }
+
     @discardableResult
     private func handle(_ event: NSEvent) -> Bool {
         guard let raw = AppKitRemoteEventTranslator.rawInput(from: event),
@@ -55,7 +61,15 @@ public final class HostingKeyView<Content: View>: NSHostingView<Content> {
             return false
         }
 
-        dispatch(command)
+        if event.isARepeat, command == .menu {
+            guard longPressDispatchedKeys.contains(event.keyCode) == false else {
+                return true
+            }
+            longPressDispatchedKeys.insert(event.keyCode)
+            dispatch(.longPress(.menu))
+        } else {
+            dispatch(command)
+        }
         return true
     }
 
@@ -70,7 +84,11 @@ public final class HostingKeyView<Content: View>: NSHostingView<Content> {
             return
         }
 
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .systemDefined]) { [weak self] event in
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .systemDefined]) { [weak self] event in
+            if event.type == .keyUp {
+                self?.longPressDispatchedKeys.remove(event.keyCode)
+                return event
+            }
             guard self?.handle(event) == true else {
                 return event
             }
