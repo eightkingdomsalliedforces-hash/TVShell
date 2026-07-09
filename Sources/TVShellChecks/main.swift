@@ -76,6 +76,7 @@ struct TVShellChecks {
         try checkTVMetricsScaleWithWindowSize()
         try checkAppCatalogVisibilityAndOrdering()
         try checkSettingsPersistAcrossRelaunch()
+        try checkCredentialsPersistAndLoadFromFile()
         try checkSavedSettingsMigrateDefaultApps()
         try checkWatchHistoryMergesByMediaID()
         try checkWallpaperPresetCyclingAndProvider()
@@ -606,7 +607,8 @@ struct TVShellChecks {
         try expect(SettingsFocus.danmakuSpeed.next == .danmakuOpacity, "settings moves from danmaku speed to danmaku opacity")
         try expect(SettingsFocus.danmakuOpacity.next == .danmakuDensity, "settings moves from danmaku opacity to danmaku density")
         try expect(SettingsFocus.danmakuDensity.next == .videoSource, "settings moves from danmaku density to video source")
-        try expect(SettingsFocus.videoSource.next == .scale, "settings wraps to scale")
+        try expect(SettingsFocus.videoSource.next == .credentials, "settings moves from video source to credentials")
+        try expect(SettingsFocus.credentials.next == .scale, "settings wraps to scale")
         try expect(DanmakuDisplaySettings(sizeScale: 1.0).adjusted(previous: false).sizeScale == 1.1, "danmaku size setting grows in readable steps")
         try expect(DanmakuDisplaySettings(speedScale: 1.0).adjustedSpeed(previous: false).speedScale == 1.1, "danmaku speed setting grows in readable steps")
         try expect(DanmakuDisplaySettings(opacity: 0.8).adjustedOpacity(previous: true).opacity == 0.7, "danmaku opacity setting changes in readable steps")
@@ -907,6 +909,41 @@ struct TVShellChecks {
     }
 
     @MainActor
+    static func checkCredentialsPersistAndLoadFromFile() throws {
+        let file = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("TVShellChecks-Credentials-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        let store = AppCredentialsStore(fileURL: file)
+        try store.save(AppCredentialsSnapshot(
+            youtube: YouTubeCredentials(apiKey: "yt-file-key"),
+            dandanplay: DandanplayCredentials(appID: "dd-app", appSecret: "dd-secret"),
+            bilibili: BilibiliCredentials(cookie: "SESSDATA=abc; bili_jct=csrf;")
+        ))
+
+        let loaded = try store.load()
+        try expect(loaded?.youtube.apiKey == "yt-file-key", "credentials file stores youtube api key")
+        try expect(loaded?.dandanplay.appID == "dd-app", "credentials file stores dandanplay app id")
+        try expect(loaded?.bilibili.cookie.contains("SESSDATA=abc") == true, "credentials file stores bilibili login cookie")
+        try expect(loaded?.bilibili.isConfigured == true, "bilibili cookie marks login configured")
+        try expect(loaded?.bilibili.requestHeaders["Cookie"] == "SESSDATA=abc; bili_jct=csrf;", "bilibili credentials expose cookie header")
+
+        let templateURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("TVShellChecks-CredentialsTemplate-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: templateURL) }
+        let templateStore = AppCredentialsStore(fileURL: templateURL)
+        try templateStore.ensureTemplate()
+        let template = try String(contentsOf: templateURL)
+        try expect(template.contains("youtube"), "credentials template includes youtube section")
+        try expect(template.contains("bilibili"), "credentials template includes bilibili section")
+
+        let state = AppState(credentialsStore: store)
+        try expect(state.youtubeCredentials.apiKey == "yt-file-key", "app state loads youtube api key from credentials file")
+        try expect(state.dandanplayCredentials.appSecret == "dd-secret", "app state loads dandanplay secret from credentials file")
+        try expect(state.bilibiliCredentials.cookie.contains("SESSDATA=abc"), "app state loads bilibili cookie from credentials file")
+    }
+
+    @MainActor
     static func checkBilibiliBangumiRuntimeAndAPI() async throws {
         let bilibiliApp = SeedApps.defaultApps.first(where: { app in
             if case .bilibili = app.target { return true }
@@ -970,6 +1007,31 @@ struct TVShellChecks {
         try expect(search.first?.title == "间谍过家家", "bilibili search parser strips highlight html")
         try expect(search.first?.totalText == "全12话", "bilibili search parser reads episode count text")
 
+        let videoSearchJSON = """
+        {
+          "code": 0,
+          "message": "0",
+          "data": {
+            "result": [
+              {
+                "aid": 123456,
+                "bvid": "BV1xx411c7m9",
+                "title": "<em class=\\"keyword\\">測試</em>一般影片",
+                "pic": "//i0.hdslb.com/bfs/archive/test.jpg",
+                "author": "UP 主",
+                "duration": "12:34",
+                "play": 3456,
+                "danmaku": 78
+              }
+            ]
+          }
+        }
+        """.data(using: .utf8)!
+        let videos = try BilibiliAPI.decodeVideoSearch(videoSearchJSON)
+        try expect(videos.first?.itemKind == .video, "bilibili video search marks general video items")
+        try expect(videos.first?.bvid == "BV1xx411c7m9", "bilibili video search reads bvid")
+        try expect(videos.first?.title == "測試一般影片", "bilibili video search strips highlighted title")
+
         let detailJSON = """
         {
           "code": 0,
@@ -1002,6 +1064,31 @@ struct TVShellChecks {
         try expect(detail.episodes.first?.cid == 39_179_976_831, "bilibili detail parser reads cid")
         try expect(detail.ratingScore == 9.6, "bilibili detail parser reads rating")
 
+        let videoDetailJSON = """
+        {
+          "code": 0,
+          "message": "0",
+          "data": {
+            "aid": 123456,
+            "bvid": "BV1xx411c7m9",
+            "cid": 987654,
+            "title": "一般影片",
+            "pic": "https://example.com/video.jpg",
+            "desc": "UP 主影片描述",
+            "owner": { "name": "UP 主" },
+            "stat": { "view": 3456, "danmaku": 78 },
+            "pages": [
+              { "cid": 987654, "page": 1, "part": "P1 開場", "duration": 90 },
+              { "cid": 987655, "page": 2, "part": "P2 正片", "duration": 120 }
+            ]
+          }
+        }
+        """.data(using: .utf8)!
+        let videoDetail = try BilibiliAPI.decodeVideoDetail(videoDetailJSON)
+        try expect(videoDetail.title == "一般影片", "bilibili video detail reads title")
+        try expect(videoDetail.episodes.count == 2, "bilibili video detail maps pages to playable episodes")
+        try expect(videoDetail.episodes.first?.bvid == "BV1xx411c7m9", "bilibili video detail keeps bvid for playurl")
+
         let playJSON = """
         {
           "code": 0,
@@ -1024,6 +1111,16 @@ struct TVShellChecks {
         try expect(stream.url.absoluteString == "https://upos.example.com/video.mp4", "bilibili playurl parser reads progressive url")
         try expect(stream.headers["Referer"] == "https://www.bilibili.com/", "bilibili playback sets referer header")
         try expect(stream.durationSeconds == 60, "bilibili playurl parser reads duration")
+
+        let cookieCredentials = BilibiliCredentials(cookie: "SESSDATA=abc; bili_jct=csrf;")
+        guard let videoEpisode = videoDetail.episodes.first else {
+            throw CheckFailure("missing bilibili video episode")
+        }
+        let videoPlayRequest = BilibiliAPI.playURLRequest(episode: videoEpisode, credentials: cookieCredentials)
+        try expect(videoPlayRequest.url.absoluteString.contains("/x/player/playurl"), "bilibili general videos use archive playurl")
+        try expect(videoPlayRequest.url.absoluteString.contains("bvid=BV1xx411c7m9"), "bilibili general video playurl includes bvid")
+        try expect(videoPlayRequest.url.absoluteString.contains("cid=987654"), "bilibili general video playurl includes cid")
+        try expect(videoPlayRequest.headers["Cookie"] == "SESSDATA=abc; bili_jct=csrf;", "bilibili playurl request carries login cookie")
 
         var runtime = BilibiliRuntimeState(seasonCount: 8, episodeCount: 3)
         runtime.applyBrowsing(.right, columns: 4)

@@ -7,6 +7,7 @@ public enum SettingsFocus: String, Codable, Equatable, Sendable {
     case danmakuOpacity
     case danmakuDensity
     case videoSource
+    case credentials
 
     public var next: SettingsFocus {
         switch self {
@@ -17,7 +18,8 @@ public enum SettingsFocus: String, Codable, Equatable, Sendable {
         case .danmakuSpeed: .danmakuOpacity
         case .danmakuOpacity: .danmakuDensity
         case .danmakuDensity: .videoSource
-        case .videoSource: .scale
+        case .videoSource: .credentials
+        case .credentials: .scale
         }
     }
 
@@ -31,6 +33,7 @@ public enum SettingsFocus: String, Codable, Equatable, Sendable {
         case .danmakuOpacity: .danmakuSpeed
         case .danmakuDensity: .danmakuOpacity
         case .videoSource: .danmakuDensity
+        case .credentials: .videoSource
         }
     }
 }

@@ -1,7 +1,35 @@
 import Foundation
 
+public struct BilibiliCredentials: Codable, Equatable, Sendable {
+    public var cookie: String
+
+    public init(cookie: String = "") {
+        self.cookie = cookie
+    }
+
+    public static func environment(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> BilibiliCredentials {
+        BilibiliCredentials(cookie: environment["TVSHELL_BILIBILI_COOKIE"] ?? "")
+    }
+
+    public var isConfigured: Bool {
+        cookie.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+
+    public var requestHeaders: [String: String] {
+        isConfigured ? ["Cookie": cookie] : [:]
+    }
+}
+
+public enum BilibiliItemKind: String, Codable, Equatable, Sendable {
+    case bangumi
+    case video
+}
+
 public struct BilibiliSeason: Identifiable, Codable, Equatable, Sendable {
     public var id: Int
+    public var itemKind: BilibiliItemKind
+    public var aid: Int?
+    public var bvid: String?
     public var title: String
     public var subtitle: String?
     public var coverURL: URL?
@@ -10,6 +38,9 @@ public struct BilibiliSeason: Identifiable, Codable, Equatable, Sendable {
 
     public init(
         id: Int,
+        itemKind: BilibiliItemKind = .bangumi,
+        aid: Int? = nil,
+        bvid: String? = nil,
         title: String,
         subtitle: String? = nil,
         coverURL: URL? = nil,
@@ -17,6 +48,9 @@ public struct BilibiliSeason: Identifiable, Codable, Equatable, Sendable {
         totalText: String? = nil
     ) {
         self.id = id
+        self.itemKind = itemKind
+        self.aid = aid
+        self.bvid = bvid
         self.title = title
         self.subtitle = subtitle
         self.coverURL = coverURL

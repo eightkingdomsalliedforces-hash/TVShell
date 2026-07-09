@@ -81,7 +81,15 @@ public struct SettingsView: View {
                         )
                         .id(SettingsFocus.videoSource)
 
-                        Text("上下選擇設定，左右調整；在影片位置按 OK 選擇本機影片。Home 或返回鍵回主畫面。")
+                        SettingsOptionRow(
+                            title: "憑證檔案",
+                            value: credentialsSummary,
+                            isFocused: appState.settingsFocus == .credentials,
+                            metrics: metrics
+                        )
+                        .id(SettingsFocus.credentials)
+
+                        Text("上下選擇設定，左右調整；在影片位置按 OK 選擇本機影片；在憑證檔案按 OK 建立範例檔並重載。Home 或返回鍵回主畫面。")
                             .font(.system(size: 28 * metrics.scale, weight: .medium))
                             .foregroundStyle(.white.opacity(0.64))
                             .lineLimit(3)
@@ -89,7 +97,17 @@ public struct SettingsView: View {
 
                         DanmakuServiceStatusView(isConfigured: appState.dandanplayCredentials.isConfigured, metrics: metrics)
 
-                        YouTubeAPIStatusView(isConfigured: appState.youtubeCredentials.isConfigured, metrics: metrics)
+                        YouTubeAPIStatusView(
+                            isConfigured: appState.youtubeCredentials.isConfigured,
+                            path: appState.credentialsFilePath,
+                            metrics: metrics
+                        )
+
+                        BilibiliLoginStatusView(
+                            isConfigured: appState.bilibiliCredentials.isConfigured,
+                            path: appState.credentialsFilePath,
+                            metrics: metrics
+                        )
 
                         PermissionStatusView()
                     }
@@ -121,10 +139,20 @@ public struct SettingsView: View {
             "壁紙提供商"
         }
     }
+
+    private var credentialsSummary: String {
+        let configured = [
+            appState.youtubeCredentials.isConfigured ? "YouTube" : nil,
+            appState.dandanplayCredentials.isConfigured ? "彈幕" : nil,
+            appState.bilibiliCredentials.isConfigured ? "Bilibili" : nil
+        ].compactMap { $0 }
+        return configured.isEmpty ? "建立/重載 credentials.json" : "已配置 \(configured.joined(separator: "、"))"
+    }
 }
 
 private struct YouTubeAPIStatusView: View {
     let isConfigured: Bool
+    let path: String
     let metrics: TVMetrics
 
     var body: some View {
@@ -136,10 +164,36 @@ private struct YouTubeAPIStatusView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("YouTube API")
                     .font(.system(size: 32 * metrics.scale, weight: .bold))
-                Text(isConfigured ? "已配置 YouTube Data API，YouTube App 會解析真實影片列表。" : "尚未配置 YouTube Data API。可用環境變數 TVSHELL_YOUTUBE_API_KEY。")
+                Text(isConfigured ? "已配置 YouTube Data API，YouTube App 會解析真實影片列表。" : "尚未配置 YouTube Data API。可寫入 \(path)，或用環境變數 TVSHELL_YOUTUBE_API_KEY。")
                     .font(.system(size: 24 * metrics.scale, weight: .medium))
                     .foregroundStyle(.white.opacity(0.66))
                     .lineLimit(3)
+                    .minimumScaleFactor(0.72)
+            }
+        }
+        .padding(30 * metrics.scale)
+        .liquidGlassCard(isFocused: isConfigured == false, cornerRadius: 18 * metrics.scale)
+    }
+}
+
+private struct BilibiliLoginStatusView: View {
+    let isConfigured: Bool
+    let path: String
+    let metrics: TVMetrics
+
+    var body: some View {
+        HStack(spacing: 22 * metrics.scale) {
+            Circle()
+                .fill(isConfigured ? .green : .orange)
+                .frame(width: 22 * metrics.scale, height: 22 * metrics.scale)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Bilibili 登入")
+                    .font(.system(size: 32 * metrics.scale, weight: .bold))
+                Text(isConfigured ? "已載入 Bilibili Cookie，搜尋與播放會自動帶登入狀態。" : "尚未配置 Bilibili Cookie。可寫入 \(path) 的 bilibili.cookie，或用環境變數 TVSHELL_BILIBILI_COOKIE。")
+                    .font(.system(size: 24 * metrics.scale, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.66))
+                    .lineLimit(4)
                     .minimumScaleFactor(0.72)
             }
         }

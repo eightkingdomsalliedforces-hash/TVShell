@@ -19,6 +19,7 @@ public final class AppState: ObservableObject {
     @Published public var videoSourceLabel: String = "內建示範影片"
     @Published public var dandanplayCredentials: DandanplayCredentials = .environment()
     @Published public var youtubeCredentials: YouTubeCredentials = .environment()
+    @Published public var bilibiliCredentials: BilibiliCredentials = .environment()
     @Published public var openingAppName: String?
     @Published public var animeSourceCatalog: AnimeSourceCatalogState
     @Published public var focusedAnimeSourceID: String?
@@ -33,20 +34,29 @@ public final class AppState: ObservableObject {
     private let nativeRuntime = NativeAppRuntime()
     private let networkRemoteServer = NetworkRemoteControlServer.shared
     private let settingsStore: AppSettingsStore?
+    private let credentialsStore: AppCredentialsStore?
     private nonisolated(unsafe) var exitObserver: NSObjectProtocol?
     private nonisolated(unsafe) var historyObserver: NSObjectProtocol?
 
     public init(
         apps: [TVAppProfile] = SeedApps.defaultApps,
         settingsStore: AppSettingsStore? = nil,
+        credentialsStore: AppCredentialsStore? = nil,
         startNetworkRemote: Bool = false
     ) {
         self.settingsStore = settingsStore
+        self.credentialsStore = credentialsStore
         let loadedSnapshot: AppSettingsSnapshot?
         if let settingsStore {
             loadedSnapshot = try? settingsStore.load()
         } else {
             loadedSnapshot = nil
+        }
+        let loadedCredentials: AppCredentialsSnapshot?
+        if let credentialsStore {
+            loadedCredentials = try? credentialsStore.load()
+        } else {
+            loadedCredentials = nil
         }
         let restoredApps = loadedSnapshot?.apps.isEmpty == false ? loadedSnapshot?.apps : apps
         self.apps = SeedApps.includingMissingDefaults(in: restoredApps ?? apps, defaults: apps)
@@ -60,6 +70,9 @@ public final class AppState: ObservableObject {
         videoSourceLabel = loadedSnapshot?.videoSourceLabel ?? "內建示範影片"
         watchingHistory = loadedSnapshot?.watchingHistory ?? []
         danmakuDisplaySettings = loadedSnapshot?.danmakuDisplaySettings ?? DanmakuDisplaySettings()
+        youtubeCredentials = loadedCredentials?.youtube ?? .environment()
+        dandanplayCredentials = loadedCredentials?.dandanplay ?? .environment()
+        bilibiliCredentials = loadedCredentials?.bilibili ?? .environment()
         focusedAppID = self.apps.first?.id
         focusedAnimeSourceID = animeSourceCatalog.focusedID
         exitObserver = NotificationCenter.default.addObserver(
@@ -144,6 +157,28 @@ public final class AppState: ObservableObject {
             danmakuDisplaySettings: danmakuDisplaySettings
         )
         try? settingsStore.save(snapshot)
+    }
+
+    public var credentialsFilePath: String {
+        (credentialsStore ?? .applicationSupport()).fileURL.path
+    }
+
+    public func reloadCredentials() {
+        guard let credentialsStore else {
+            statusMessage = "此版本未設定 credentials store"
+            return
+        }
+        do {
+            try credentialsStore.ensureTemplate()
+            if let snapshot = try credentialsStore.load() {
+                youtubeCredentials = snapshot.youtube
+                dandanplayCredentials = snapshot.dandanplay
+                bilibiliCredentials = snapshot.bilibili
+            }
+            statusMessage = "已重載憑證：\(credentialsStore.fileURL.path)"
+        } catch {
+            statusMessage = "憑證讀取失敗：\(error.localizedDescription)"
+        }
     }
 
     public func handle(_ command: RemoteCommand) {
@@ -254,6 +289,9 @@ public final class AppState: ObservableObject {
             danmakuDisplaySettings = danmakuDisplaySettings.adjustedDensity(previous: previous)
         case .videoSource:
             chooseVideoFile()
+            return
+        case .credentials:
+            reloadCredentials()
             return
         }
         saveSettings()

@@ -50,11 +50,12 @@ public struct BilibiliRuntimeView: View {
                 }
             }
             .animation(TVMotion.runtime, value: controller.state.phase)
-            .foregroundStyle(.white)
-            .onAppear {
-                controller.updateSeasonColumns(Self.seasonColumns(metrics: metrics, size: proxy.size))
-                controller.updateEpisodeColumns(Self.episodeColumns(metrics: metrics, size: proxy.size))
-            }
+        .foregroundStyle(.white)
+        .onAppear {
+            controller.updateCredentials(appState.bilibiliCredentials)
+            controller.updateSeasonColumns(Self.seasonColumns(metrics: metrics, size: proxy.size))
+            controller.updateEpisodeColumns(Self.episodeColumns(metrics: metrics, size: proxy.size))
+        }
             .onChange(of: proxy.size) { _, size in
                 let nextMetrics = TVMetrics(size: size)
                 controller.updateSeasonColumns(Self.seasonColumns(metrics: nextMetrics, size: size))
@@ -62,8 +63,12 @@ public struct BilibiliRuntimeView: View {
             }
         }
         .task {
+            controller.updateCredentials(appState.bilibiliCredentials)
             controller.updateWatchHistory(appState.watchingHistory)
             await controller.loadHome()
+        }
+        .onChange(of: appState.bilibiliCredentials) { _, credentials in
+            controller.updateCredentials(credentials)
         }
         .onChange(of: appState.watchingHistory) { _, history in
             controller.updateWatchHistory(history)
@@ -111,7 +116,7 @@ public struct BilibiliRuntimeView: View {
                         }
                     }
 
-                    Text("方向鍵選番劇，OK 進入詳情，Menu 搜尋，Back 或 Home 返回。參考 blbl 的 PGC 番劇資料流：推薦/搜尋 → season detail → 選集 → playurl。")
+                    Text("方向鍵選內容，OK 進入詳情，Menu 搜尋番劇或一般影片，Back 或 Home 返回。登入 Cookie 可在設定的 credentials.json 保存。")
                         .font(.system(size: 22 * metrics.scale, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.62))
                 }
@@ -172,7 +177,7 @@ public struct BilibiliRuntimeView: View {
                         }
                     }
 
-                    Text("OK 播放目前集數，Back 回番劇列表，Menu 搜尋其他番劇。需要會員、登入或地區限制的集數會顯示 Bilibili 回傳錯誤。")
+                    Text("OK 播放目前項目，Back 回列表，Menu 搜尋其他內容。需要會員、登入、地區或版權限制的內容會顯示 Bilibili 回傳錯誤。")
                         .font(.system(size: 22 * metrics.scale, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.6))
                 }
@@ -233,13 +238,14 @@ final class BilibiliRuntimeController: ObservableObject {
     @Published private(set) var state = BilibiliRuntimeState()
     @Published private(set) var seasons: [BilibiliSeason] = []
     @Published private(set) var detail: BilibiliSeasonDetail?
-    @Published private(set) var statusText = "正在載入 Bilibili 番劇..."
+    @Published private(set) var statusText = "正在載入 Bilibili..."
     @Published private(set) var isKeyboardVisible = false
     @Published private(set) var isPlayerHUDVisible = false
     @Published private(set) var keyboardState = VirtualKeyboardState(text: "间谍过家家", layout: .zhuyin)
     let player = AVPlayer()
 
-    private let provider: any BilibiliBangumiProviding
+    private var provider: any BilibiliBangumiProviding
+    private var credentials: BilibiliCredentials = .environment()
     private var seasonColumns = 5
     private var episodeColumns = 6
     private var currentQuery = ""
@@ -252,6 +258,7 @@ final class BilibiliRuntimeController: ObservableObject {
     private var hidePlayerHUDTask: Task<Void, Never>?
     private nonisolated(unsafe) var timeObserver: Any?
     private nonisolated(unsafe) var observer: NSObjectProtocol?
+    private nonisolated(unsafe) var itemEndObserver: NSObjectProtocol?
     private nonisolated(unsafe) var itemObserver: NSKeyValueObservation?
 
     init(provider: any BilibiliBangumiProviding = BilibiliProviderFactory.defaultProvider()) {
@@ -270,9 +277,20 @@ final class BilibiliRuntimeController: ObservableObject {
         }
     }
 
+    func updateCredentials(_ credentials: BilibiliCredentials) {
+        guard self.credentials != credentials else {
+            return
+        }
+        self.credentials = credentials
+        provider = BilibiliProviderFactory.defaultProvider(credentials: credentials)
+    }
+
     deinit {
         if let observer {
             NotificationCenter.default.removeObserver(observer)
+        }
+        if let itemEndObserver {
+            NotificationCenter.default.removeObserver(itemEndObserver)
         }
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
@@ -334,7 +352,7 @@ final class BilibiliRuntimeController: ObservableObject {
         do {
             seasons = try await provider.home()
             state.updateSeasonCount(seasons.count)
-            statusText = seasons.isEmpty ? "Bilibili 沒有回傳番劇推薦。" : "Bilibili 番劇推薦 · 已載入 \(seasons.count) 部"
+            statusText = seasons.isEmpty ? "Bilibili 沒有回傳推薦。" : "Bilibili 推薦 · 已載入 \(seasons.count) 部"
         } catch {
             seasons = []
             state.updateSeasonCount(0)
@@ -359,7 +377,7 @@ final class BilibiliRuntimeController: ObservableObject {
         statusText = "正在載入：\(season.title)"
         Task {
             do {
-                detail = try await provider.detail(seasonID: season.id)
+            detail = try await provider.detail(item: season)
                 state.updateEpisodeCount(episodes.count)
                 state.openDetail()
                 statusText = "已載入 \(episodes.count) 集 · OK 播放"
@@ -401,7 +419,9 @@ final class BilibiliRuntimeController: ObservableObject {
                     self?.player.play()
                     self?.statusText = "播放/暫停控制播放，左右快轉倒退，Back 回選集。"
                 case .failed:
-                    self?.statusText = item.error?.localizedDescription ?? "Bilibili 影片載入失敗。"
+                    self?.player.pause()
+                    self?.state.closePlayer()
+                    self?.statusText = item.error?.localizedDescription ?? "Bilibili 影片載入失敗，可能需要登入、會員或地區權限。"
                 case .unknown:
                     self?.statusText = "正在載入 Bilibili 影片..."
                 @unknown default:
@@ -412,6 +432,7 @@ final class BilibiliRuntimeController: ObservableObject {
         player.replaceCurrentItem(with: item)
         mediaState = MediaControlState(isPlaying: true)
         installTimeObserverIfNeeded()
+        installItemEndObserver(for: item)
         recordPlaybackProgress(time: resume, force: true)
     }
 
@@ -496,7 +517,10 @@ final class BilibiliRuntimeController: ObservableObject {
     }
 
     private func watchMediaID(for episode: BilibiliEpisode) -> String {
-        "bilibili:ep:\(episode.id)"
+        if let bvid = episode.bvid, let cid = episode.cid {
+            return "bilibili:video:\(bvid):\(cid)"
+        }
+        return "bilibili:ep:\(episode.id)"
     }
 
     private func installTimeObserverIfNeeded() {
@@ -528,7 +552,7 @@ final class BilibiliRuntimeController: ObservableObject {
             userInfo: [
                 WatchHistoryNotification.entryKey: WatchHistoryEntry(
                     title: detail?.title ?? "Bilibili 番劇",
-                    subtitle: "第 \(currentEpisode.number) 話 · \(currentEpisode.longTitle.isEmpty ? currentEpisode.title : currentEpisode.longTitle)",
+                    subtitle: "\(currentEpisode.title) · \(currentEpisode.longTitle.isEmpty ? "Bilibili" : currentEpisode.longTitle)",
                     kind: .bilibili,
                     mediaID: mediaID,
                     resumeTimeSeconds: max(0, time),
@@ -544,6 +568,30 @@ final class BilibiliRuntimeController: ObservableObject {
         hidePlayerHUDTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             self?.isPlayerHUDVisible = false
+        }
+    }
+
+    private func installItemEndObserver(for item: AVPlayerItem) {
+        if let itemEndObserver {
+            NotificationCenter.default.removeObserver(itemEndObserver)
+        }
+        itemEndObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak self, weak item] _ in
+            Task { @MainActor in
+                guard let self, item === self.player.currentItem else {
+                    return
+                }
+                let played = self.player.currentTime().seconds
+                if played < 5 {
+                    self.player.pause()
+                    self.mediaState = MediaControlState(isPlaying: false)
+                    self.statusText = "Bilibili 播放很快結束，可能是登入、會員、地區限制，或此影片沒有可用直連。請在設定重載 Cookie 後再試。"
+                    self.state.closePlayer()
+                }
+            }
         }
     }
 }
