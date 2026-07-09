@@ -66,6 +66,9 @@ public struct BilibiliRuntimeView: View {
             controller.updateCredentials(appState.bilibiliCredentials)
             controller.updateWatchHistory(appState.watchingHistory)
             await controller.loadHome()
+            if let entry = appState.consumePendingWatchHistory(kind: .bilibili) {
+                controller.resume(from: entry)
+            }
         }
         .onChange(of: appState.bilibiliCredentials) { _, credentials in
             controller.updateCredentials(credentials)
@@ -401,6 +404,36 @@ final class BilibiliRuntimeController: ObservableObject {
         watchHistory = history
     }
 
+    func resume(from entry: WatchHistoryEntry) {
+        guard entry.kind == .bilibili,
+              let mediaID = entry.mediaID,
+              mediaID.hasPrefix("bilibili:video:")
+        else {
+            statusText = "這筆 Bilibili 紀錄缺少可恢復的影片識別碼。"
+            return
+        }
+        let components = mediaID.split(separator: ":")
+        guard components.count >= 4,
+              let cid = Int(components[3])
+        else {
+            statusText = "這筆 Bilibili 紀錄格式不完整。"
+            return
+        }
+        let episode = BilibiliEpisode(
+            id: cid,
+            cid: cid,
+            bvid: String(components[2]),
+            title: entry.subtitle ?? "續播",
+            longTitle: entry.subtitle ?? "",
+            number: 1
+        )
+        detail = BilibiliSeasonDetail(id: cid, title: entry.title, episodes: [episode])
+        state = BilibiliRuntimeState(seasonCount: 1, episodeCount: 1)
+        state.openDetail()
+        statusText = "已從 \(entry.resumeTimeLabel) 恢復 Bilibili 播放"
+        play(episode)
+    }
+
     func loadHome() async {
         do {
             seasons = try await provider.home()
@@ -723,7 +756,7 @@ private struct BilibiliSectionGrid: View {
                     .foregroundStyle(.white.opacity(0.88))
 
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 210 * metrics.scale), spacing: 28 * metrics.scale)],
+                    columns: [GridItem(.adaptive(minimum: gridMinimumWidth * metrics.scale), spacing: 28 * metrics.scale)],
                     alignment: .leading,
                     spacing: 34 * metrics.scale
                 ) {
@@ -740,6 +773,10 @@ private struct BilibiliSectionGrid: View {
             }
         }
     }
+
+    private var gridMinimumWidth: Double {
+        items.first?.itemKind == .video ? 340 : 210
+    }
 }
 
 private struct BilibiliSeasonCard: View {
@@ -748,8 +785,9 @@ private struct BilibiliSeasonCard: View {
     let metrics: TVMetrics
 
     var body: some View {
-        let width = 190 * metrics.scale
-        let height = 268 * metrics.scale
+        let isVideo = season.itemKind == .video
+        let width = (isVideo ? 330 : 190) * metrics.scale
+        let height = (isVideo ? 186 : 268) * metrics.scale
         VStack(alignment: .leading, spacing: 12 * metrics.scale) {
             BilibiliPosterImage(url: season.coverURL, title: season.title, width: width, height: height)
                 .overlay(alignment: .topLeading) {
@@ -817,20 +855,28 @@ private struct BilibiliPosterImage: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.white.opacity(0.08))
             if let url {
-                AsyncImage(url: url) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    ProgressView()
-                        .controlSize(.large)
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else if phase.error != nil {
+                        artworkFallback
+                    } else {
+                        ProgressView()
+                            .controlSize(.large)
+                    }
                 }
             } else {
-                Text(String(title.prefix(1)))
-                    .font(.system(size: 54, weight: .heavy))
-                    .foregroundStyle(.white.opacity(0.72))
+                artworkFallback
             }
         }
         .frame(width: width, height: height)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var artworkFallback: some View {
+        Text(String(title.prefix(1)))
+            .font(.system(size: 54, weight: .heavy))
+            .foregroundStyle(.white.opacity(0.72))
     }
 }
 

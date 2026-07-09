@@ -95,7 +95,12 @@ public struct LauncherView: View {
                             .scaleEffect(appState.displayScale.multiplier(), anchor: .leading)
 
                             if appState.watchingHistory.isEmpty == false {
-                                WatchHistoryRowView(entries: appState.watchingHistory, metrics: metrics)
+                                WatchHistoryRowView(
+                                    entries: appState.watchingHistory,
+                                    focusedEntryID: appState.focusedWatchHistoryID,
+                                    isFocused: appState.launcherFocus == .history,
+                                    metrics: metrics
+                                )
                                     .id("launcher-history")
                             }
 
@@ -127,6 +132,14 @@ public struct LauncherView: View {
                         }
                         withAnimation(TVMotion.focus) {
                             scrollProxy.scrollTo("tvos-dock-app-\(id.uuidString)", anchor: .center)
+                        }
+                    }
+                    .onChange(of: appState.focusedWatchHistoryID) { _, id in
+                        guard let id else {
+                            return
+                        }
+                        withAnimation(TVMotion.focus) {
+                            scrollProxy.scrollTo("launcher-history-entry-\(id.uuidString)", anchor: .center)
                         }
                     }
                 }
@@ -311,6 +324,8 @@ private extension Color {
 private struct WatchHistoryRowView: View {
     @EnvironmentObject private var appState: AppState
     let entries: [WatchHistoryEntry]
+    let focusedEntryID: UUID?
+    let isFocused: Bool
     let metrics: TVMetrics
 
     var body: some View {
@@ -329,7 +344,7 @@ private struct WatchHistoryRowView: View {
                         .background(.white.opacity(0.14), in: Capsule())
                 }
                 .buttonStyle(.plain)
-                Text("Menu 也可清除最近觀看")
+                Text(isFocused ? "OK 續播，Menu 刪除目前項目" : "可用方向鍵移到最近觀看")
                     .font(.system(size: 20 * metrics.scale, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.52))
             }
@@ -350,7 +365,8 @@ private struct WatchHistoryRowView: View {
                             .frame(width: 340 * metrics.scale, alignment: .leading)
                             .frame(minHeight: 116 * metrics.scale, alignment: .leading)
                             .padding(22 * metrics.scale)
-                            .liquidGlassCard(isFocused: false, cornerRadius: 24 * metrics.scale)
+                            .liquidGlassCard(isFocused: isFocused && entry.id == focusedEntryID, cornerRadius: 24 * metrics.scale)
+                            .scaleEffect(isFocused && entry.id == focusedEntryID ? 1.045 : 1)
 
                             Button {
                                 appState.deleteWatchHistory(entry)
@@ -363,6 +379,11 @@ private struct WatchHistoryRowView: View {
                             .buttonStyle(.plain)
                             .padding(10 * metrics.scale)
                         }
+                        .contentShape(RoundedRectangle(cornerRadius: 24 * metrics.scale, style: .continuous))
+                        .onTapGesture {
+                            appState.openWatchHistory(entry)
+                        }
+                        .id("launcher-history-entry-\(entry.id.uuidString)")
                     }
                 }
                 .padding(.horizontal, 12 * metrics.scale)

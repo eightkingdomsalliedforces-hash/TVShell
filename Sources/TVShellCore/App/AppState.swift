@@ -3,6 +3,11 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
+public enum LauncherFocus: Equatable, Sendable {
+    case apps
+    case history
+}
+
 @MainActor
 public final class AppState: ObservableObject {
     @Published public var activeRuntime: ActiveRuntime = .launcher
@@ -24,6 +29,10 @@ public final class AppState: ObservableObject {
     @Published public var animeSourceCatalog: AnimeSourceCatalogState
     @Published public var focusedAnimeSourceID: String?
     @Published public var watchingHistory: [WatchHistoryEntry] = []
+    @Published public var preferredAnimeStreams: [String: String] = [:]
+    @Published public private(set) var launcherFocus: LauncherFocus = .apps
+    @Published public var focusedWatchHistoryID: UUID?
+    @Published public private(set) var pendingWatchHistoryEntry: WatchHistoryEntry?
     @Published public var danmakuDisplaySettings = DanmakuDisplaySettings()
     @Published public var networkRemoteStatus = NetworkRemoteControlStatus(
         isRunning: false,
@@ -37,6 +46,7 @@ public final class AppState: ObservableObject {
     private let credentialsStore: AppCredentialsStore?
     private nonisolated(unsafe) var exitObserver: NSObjectProtocol?
     private nonisolated(unsafe) var historyObserver: NSObjectProtocol?
+    private nonisolated(unsafe) var animeStreamPreferenceObserver: NSObjectProtocol?
 
     public init(
         apps: [TVAppProfile] = SeedApps.defaultApps,
@@ -70,11 +80,13 @@ public final class AppState: ObservableObject {
         webZoom = loadedSnapshot?.webZoom ?? 1.25
         videoSourceLabel = loadedSnapshot?.videoSourceLabel ?? "內建示範影片"
         watchingHistory = loadedSnapshot?.watchingHistory ?? []
+        preferredAnimeStreams = loadedSnapshot?.preferredAnimeStreams ?? [:]
         danmakuDisplaySettings = loadedSnapshot?.danmakuDisplaySettings ?? DanmakuDisplaySettings()
         youtubeCredentials = Self.resolved(loadedCredentials?.youtube, fallback: .environment())
         dandanplayCredentials = Self.resolved(loadedCredentials?.dandanplay, fallback: .environment())
         bilibiliCredentials = Self.resolved(loadedCredentials?.bilibili, fallback: .environment())
         focusedAppID = self.apps.first?.id
+        focusedWatchHistoryID = watchingHistory.first?.id
         focusedAnimeSourceID = animeSourceCatalog.focusedID
         exitObserver = NotificationCenter.default.addObserver(
             forName: .tvShellRequestLauncher,
@@ -98,6 +110,21 @@ public final class AppState: ObservableObject {
                 self?.recordWatch(entry)
             }
         }
+        animeStreamPreferenceObserver = NotificationCenter.default.addObserver(
+            forName: .tvShellRememberAnimeStream,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let mediaID = notification.userInfo?[AnimeStreamPreferenceNotification.mediaIDKey] as? String,
+                  let streamURL = notification.userInfo?[AnimeStreamPreferenceNotification.streamURLKey] as? String
+            else {
+                return
+            }
+            Task { @MainActor in
+                self?.preferredAnimeStreams[mediaID] = streamURL
+                self?.saveSettings()
+            }
+        }
         if startNetworkRemote {
             startNetworkRemoteServer()
         }
@@ -109,6 +136,9 @@ public final class AppState: ObservableObject {
         }
         if let historyObserver {
             NotificationCenter.default.removeObserver(historyObserver)
+        }
+        if let animeStreamPreferenceObserver {
+            NotificationCenter.default.removeObserver(animeStreamPreferenceObserver)
         }
     }
 
@@ -127,12 +157,18 @@ public final class AppState: ObservableObject {
             }
             return existing.id == entry.id
         }
+        focusedWatchHistoryID = watchingHistory.first?.id
+        if watchingHistory.isEmpty {
+            launcherFocus = .apps
+        }
         saveSettings()
         statusMessage = "已刪除最近觀看：\(entry.title)"
     }
 
     public func clearWatchingHistory() {
         watchingHistory.removeAll()
+        focusedWatchHistoryID = nil
+        launcherFocus = .apps
         saveSettings()
         statusMessage = "已清除最近觀看"
     }
@@ -156,6 +192,9 @@ public final class AppState: ObservableObject {
         if watchingHistory.count > 24 {
             watchingHistory = Array(watchingHistory.prefix(24))
         }
+        if focusedWatchHistoryID == nil {
+            focusedWatchHistoryID = entry.id
+        }
         saveSettings()
     }
 
@@ -172,7 +211,8 @@ public final class AppState: ObservableObject {
             videoSourceLabel: videoSourceLabel,
             animeSourceCatalog: animeSourceCatalog,
             watchingHistory: watchingHistory,
-            danmakuDisplaySettings: danmakuDisplaySettings
+            danmakuDisplaySettings: danmakuDisplaySettings,
+            preferredAnimeStreams: preferredAnimeStreams
         )
         try? settingsStore.save(snapshot)
     }
@@ -237,21 +277,89 @@ public final class AppState: ObservableObject {
     private func handleLauncher(_ command: RemoteCommand) {
         switch command {
         case .left:
-            moveFocusedApp(command)
+            moveLauncherFocusHorizontally(command)
         case .right:
-            moveFocusedApp(command)
-        case .up, .down:
-            moveFocusedApp(command)
+            moveLauncherFocusHorizontally(command)
+        case .up:
+            if launcherFocus == .history {
+                launcherFocus = .apps
+            } else {
+                moveFocusedApp(command)
+            }
+        case .down:
+            if launcherFocus == .apps, watchingHistory.isEmpty == false {
+                launcherFocus = .history
+                focusedWatchHistoryID = focusedWatchHistoryID ?? watchingHistory.first?.id
+            } else if launcherFocus == .apps {
+                moveFocusedApp(command)
+            }
         case .select:
-            openFocusedApp()
+            if launcherFocus == .history, let entry = focusedWatchHistoryEntry {
+                openWatchHistory(entry)
+            } else {
+                openFocusedApp()
+            }
         case .menu:
-            if watchingHistory.isEmpty == false {
+            if launcherFocus == .history, let entry = focusedWatchHistoryEntry {
+                deleteWatchHistory(entry)
+            } else if watchingHistory.isEmpty == false {
                 clearWatchingHistory()
             }
         case .home:
             activeRuntime = .launcher
         default:
             break
+        }
+    }
+
+    private var focusedWatchHistoryEntry: WatchHistoryEntry? {
+        guard let focusedWatchHistoryID else {
+            return watchingHistory.first
+        }
+        return watchingHistory.first { $0.id == focusedWatchHistoryID } ?? watchingHistory.first
+    }
+
+    private func moveLauncherFocusHorizontally(_ command: RemoteCommand) {
+        guard launcherFocus == .history else {
+            moveFocusedApp(command)
+            return
+        }
+        guard watchingHistory.isEmpty == false else {
+            launcherFocus = .apps
+            return
+        }
+        let currentIndex = watchingHistory.firstIndex { $0.id == focusedWatchHistoryID } ?? 0
+        let delta = command == .left ? -1 : 1
+        let nextIndex = min(max(currentIndex + delta, 0), watchingHistory.count - 1)
+        focusedWatchHistoryID = watchingHistory[nextIndex].id
+    }
+
+    public func openWatchHistory(_ entry: WatchHistoryEntry) {
+        guard let app = appForWatchHistory(entry) else {
+            statusMessage = "找不到可用的續播 App。"
+            return
+        }
+        pendingWatchHistoryEntry = entry
+        focusedAppID = app.id
+        open(app)
+    }
+
+    public func consumePendingWatchHistory(kind: WatchHistoryKind) -> WatchHistoryEntry? {
+        guard pendingWatchHistoryEntry?.kind == kind else {
+            return nil
+        }
+        defer { pendingWatchHistoryEntry = nil }
+        return pendingWatchHistoryEntry
+    }
+
+    private func appForWatchHistory(_ entry: WatchHistoryEntry) -> TVAppProfile? {
+        apps.first { app in
+            switch (entry.kind, app.target) {
+            case (.anime, .anime), (.youtube, .youtube), (.bilibili, .bilibili), (.media, .media), (.web, .web):
+                true
+            default:
+                false
+            }
         }
     }
 
@@ -387,6 +495,10 @@ public final class AppState: ObservableObject {
             return
         }
 
+        open(app)
+    }
+
+    private func open(_ app: TVAppProfile) {
         showOpeningAnimation(for: app.name)
 
         switch app.target {

@@ -58,6 +58,9 @@ public struct YouTubeRuntimeView: View {
             controller.updateCredentials(appState.youtubeCredentials)
             controller.updateWatchHistory(appState.watchingHistory)
             await controller.load()
+            if let entry = appState.consumePendingWatchHistory(kind: .youtube) {
+                controller.resume(from: entry)
+            }
         }
         .onChange(of: appState.youtubeCredentials) { _, credentials in
             controller.updateCredentials(credentials)
@@ -236,6 +239,24 @@ final class YouTubeRuntimeController: ObservableObject {
 
     func resumeTime(for video: YouTubeVideo) -> Double {
         watchHistory.first { $0.mediaID == watchMediaID(for: video) }?.resumeTimeSeconds ?? 0
+    }
+
+    func resume(from entry: WatchHistoryEntry) {
+        guard entry.kind == .youtube,
+              let videoID = entry.mediaID?.replacingOccurrences(of: "youtube:", with: ""),
+              videoID.isEmpty == false
+        else {
+            return
+        }
+        let video = YouTubeVideo(
+            id: videoID,
+            title: entry.title,
+            channelTitle: entry.subtitle ?? "YouTube"
+        )
+        videos = [video]
+        state = YouTubeRuntimeState(itemCount: 1, focusedIndex: 0, phase: .playing)
+        statusText = "已從 \(entry.resumeTimeLabel) 繼續播放"
+        showPlayerHUD(allowRestart: true)
     }
 
     func load() async {

@@ -59,8 +59,16 @@ public struct BangumiYouTubeAnimeSourceProvider: AnimeMediaSourceAdapter {
             profile: .animeEpisode
         )
         let data = try await transport.data(for: request)
-        return try YouTubeDataAPI.decodeSearchResponse(data)
-            .filter { isPlayableEpisodeMatch(video: $0, episode: episode) }
+        let videos = try YouTubeDataAPI.decodeSearchResponse(data)
+            .filter { isExcludedClip($0.title) == false }
+        // Prefer exact title matches, but leave same-episode fallbacks for the
+        // remote candidate picker instead of incorrectly reporting no source.
+        let exactMatches = videos.filter { isPlayableEpisodeMatch(video: $0, episode: episode) }
+        let candidateVideos = exactMatches.isEmpty
+            ? videos.filter { matchesEpisodeNumber($0.title, episode: episode.number) }
+            : exactMatches
+
+        return candidateVideos
             .map { video in
                 AnimeStreamCandidate(
                     url: URL(string: "youtube://\(video.id)")!,
@@ -68,7 +76,8 @@ public struct BangumiYouTubeAnimeSourceProvider: AnimeMediaSourceAdapter {
                     priority: score(video: video, episode: episode),
                     headers: [
                         "title": video.title,
-                        "channel": video.channelTitle
+                        "channel": video.channelTitle,
+                        "match": hasSubjectMatch(title: video.title, episode: episode) ? "exact" : "fallback"
                     ]
                 )
             }

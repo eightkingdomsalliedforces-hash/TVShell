@@ -10,6 +10,7 @@ public struct AppSettingsSnapshot: Codable, Equatable, Sendable {
     public var animeSourceCatalog: AnimeSourceCatalogState
     public var watchingHistory: [WatchHistoryEntry]
     public var danmakuDisplaySettings: DanmakuDisplaySettings
+    public var preferredAnimeStreams: [String: String]
 
     public init(
         apps: [TVAppProfile],
@@ -20,7 +21,8 @@ public struct AppSettingsSnapshot: Codable, Equatable, Sendable {
         videoSourceLabel: String,
         animeSourceCatalog: AnimeSourceCatalogState,
         watchingHistory: [WatchHistoryEntry],
-        danmakuDisplaySettings: DanmakuDisplaySettings = DanmakuDisplaySettings()
+        danmakuDisplaySettings: DanmakuDisplaySettings = DanmakuDisplaySettings(),
+        preferredAnimeStreams: [String: String] = [:]
     ) {
         self.apps = apps
         self.displayScale = displayScale
@@ -31,6 +33,7 @@ public struct AppSettingsSnapshot: Codable, Equatable, Sendable {
         self.animeSourceCatalog = animeSourceCatalog
         self.watchingHistory = watchingHistory
         self.danmakuDisplaySettings = danmakuDisplaySettings
+        self.preferredAnimeStreams = preferredAnimeStreams
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -43,6 +46,7 @@ public struct AppSettingsSnapshot: Codable, Equatable, Sendable {
         case animeSourceCatalog
         case watchingHistory
         case danmakuDisplaySettings
+        case preferredAnimeStreams
     }
 
     public init(from decoder: Decoder) throws {
@@ -56,6 +60,7 @@ public struct AppSettingsSnapshot: Codable, Equatable, Sendable {
         animeSourceCatalog = try container.decode(AnimeSourceCatalogState.self, forKey: .animeSourceCatalog)
         watchingHistory = try container.decodeIfPresent([WatchHistoryEntry].self, forKey: .watchingHistory) ?? []
         danmakuDisplaySettings = try container.decodeIfPresent(DanmakuDisplaySettings.self, forKey: .danmakuDisplaySettings) ?? DanmakuDisplaySettings()
+        preferredAnimeStreams = try container.decodeIfPresent([String: String].self, forKey: .preferredAnimeStreams) ?? [:]
     }
 }
 

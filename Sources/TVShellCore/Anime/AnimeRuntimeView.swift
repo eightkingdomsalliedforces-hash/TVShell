@@ -53,6 +53,17 @@ public struct AnimeRuntimeView: View {
                     .zIndex(20)
                 }
 
+                if controller.isStreamPickerVisible {
+                    AnimeStreamPickerView(
+                        episodeTitle: controller.pendingStreamEpisodeTitle,
+                        choices: controller.streamChoices,
+                        focusedIndex: controller.focusedStreamChoiceIndex,
+                        metrics: metrics
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 1.02)))
+                    .zIndex(22)
+                }
+
                 if controller.isDownloadManagerVisible {
                     torrentDownloadManager(metrics: metrics)
                         .transition(.opacity.combined(with: .scale(scale: 1.02)))
@@ -72,6 +83,7 @@ public struct AnimeRuntimeView: View {
         }
         .task {
             controller.updateWatchHistory(appState.watchingHistory)
+            controller.updatePreferredStreams(appState.preferredAnimeStreams)
             await controller.load(
                 sourceProvider: AnimeSourceProviderFactory.provider(
                     catalog: appState.animeSourceCatalog,
@@ -79,9 +91,15 @@ public struct AnimeRuntimeView: View {
                 ),
                 danmakuProvider: DandanplayDanmakuProvider(credentials: appState.dandanplayCredentials)
             )
+            if let entry = appState.consumePendingWatchHistory(kind: .anime) {
+                await controller.resume(from: entry)
+            }
         }
         .onChange(of: appState.watchingHistory) { _, history in
             controller.updateWatchHistory(history)
+        }
+        .onChange(of: appState.preferredAnimeStreams) { _, preferences in
+            controller.updatePreferredStreams(preferences)
         }
         .onChange(of: appState.youtubeCredentials) { _, _ in
             reloadConfiguredSources()
@@ -436,6 +454,9 @@ final class AnimeRuntimeController: ObservableObject {
     @Published private(set) var isPlayerHUDVisible = false
     @Published private(set) var canRestartFromBeginningWithSelect = false
     @Published private(set) var isKeyboardVisible = false
+    @Published private(set) var isStreamPickerVisible = false
+    @Published private(set) var streamChoices: [AnimeStreamCandidate] = []
+    @Published private(set) var focusedStreamChoiceIndex = 0
     @Published private(set) var isDownloadManagerVisible = false
     @Published private(set) var torrentDownloads: [TorrentCachedDownload] = []
     @Published private(set) var focusedTorrentDownloadIndex = 0
@@ -448,6 +469,8 @@ final class AnimeRuntimeController: ObservableObject {
     private var episodeColumns = 4
     private var currentQuery = ""
     private var watchHistory: [WatchHistoryEntry] = []
+    private var preferredStreams: [String: String] = [:]
+    private var pendingStreamEpisode: AnimeEpisode?
     private var currentPlayingEpisode: AnimeEpisode?
     private var lastRecordedMediaID: String?
     private var lastRecordedTime: Double = -1
@@ -507,6 +530,10 @@ final class AnimeRuntimeController: ObservableObject {
         return titles[state.focusedTitleIndex]
     }
 
+    var pendingStreamEpisodeTitle: String {
+        pendingStreamEpisode?.title ?? "選擇播放來源"
+    }
+
     func load(
         sourceProvider provider: (any AnimeSourceProvider)? = nil,
         danmakuProvider: (any DanmakuProvider)? = nil
@@ -559,6 +586,10 @@ final class AnimeRuntimeController: ObservableObject {
         watchHistory = history
     }
 
+    func updatePreferredStreams(_ preferences: [String: String]) {
+        preferredStreams = preferences
+    }
+
     func updateEpisodeColumns(_ columns: Int) {
         episodeColumns = max(1, columns)
     }
@@ -570,6 +601,11 @@ final class AnimeRuntimeController: ObservableObject {
     private func handle(_ command: RemoteCommand) {
         if isKeyboardVisible {
             handleKeyboard(command)
+            return
+        }
+
+        if isStreamPickerVisible {
+            handleStreamPicker(command)
             return
         }
 
@@ -739,7 +775,7 @@ final class AnimeRuntimeController: ObservableObject {
         do {
             statusText = "正在解析 \(episode.title)..."
             let candidates = try await sourceProvider.streams(for: episode)
-            guard let stream = AnimeStreamSelector.bestCandidate(from: candidates) else {
+            guard candidates.isEmpty == false else {
                 statusText = "沒有可用播放源。"
                 state = AnimeRuntimeState(
                     episodeCount: episodes.count,
@@ -750,8 +786,20 @@ final class AnimeRuntimeController: ObservableObject {
                 return
             }
 
-            loadPlayer(stream, episode: episode)
-            await loadDanmaku(for: episode, stream: stream)
+            let mediaID = watchMediaID(for: episode)
+            if let preferredURL = preferredStreams[mediaID],
+               let preferredStream = candidates.first(where: { $0.url.absoluteString == preferredURL }) {
+                await startPlayback(preferredStream, episode: episode)
+                return
+            }
+
+            let needsExplicitConfirmation = candidates.contains { $0.headers["match"] == "fallback" }
+            if candidates.count == 1, let stream = candidates.first, needsExplicitConfirmation == false {
+                await startPlayback(stream, episode: episode)
+                return
+            }
+
+            presentStreamPicker(candidates, episode: episode)
         } catch {
             if error as? YouTubeAPIError == .missingAPIKey {
                 statusText = "需要設定 TVSHELL_YOUTUBE_API_KEY 才能搜尋並播放 YouTube 動漫來源。"
@@ -764,6 +812,104 @@ final class AnimeRuntimeController: ObservableObject {
                 phase: .episodes,
                 isDanmakuVisible: state.isDanmakuVisible
             )
+        }
+    }
+
+    private func presentStreamPicker(_ candidates: [AnimeStreamCandidate], episode: AnimeEpisode) {
+        streamChoices = candidates.sorted { left, right in
+            (left.priority, left.quality) > (right.priority, right.quality)
+        }
+        pendingStreamEpisode = episode
+        focusedStreamChoiceIndex = 0
+        isStreamPickerVisible = true
+        statusText = "找到 \(streamChoices.count) 個播放結果，請選擇正確影片；選過後會自動記住。"
+    }
+
+    private func handleStreamPicker(_ command: RemoteCommand) {
+        switch command {
+        case .up, .left:
+            focusedStreamChoiceIndex = max(0, focusedStreamChoiceIndex - 1)
+        case .down, .right:
+            focusedStreamChoiceIndex = min(max(streamChoices.count - 1, 0), focusedStreamChoiceIndex + 1)
+        case .select:
+            guard streamChoices.indices.contains(focusedStreamChoiceIndex),
+                  let episode = pendingStreamEpisode
+            else {
+                return
+            }
+            let stream = streamChoices[focusedStreamChoiceIndex]
+            NotificationCenter.default.post(
+                name: .tvShellRememberAnimeStream,
+                object: nil,
+                userInfo: [
+                    AnimeStreamPreferenceNotification.mediaIDKey: watchMediaID(for: episode),
+                    AnimeStreamPreferenceNotification.streamURLKey: stream.url.absoluteString
+                ]
+            )
+            dismissStreamPicker()
+            Task { await startPlayback(stream, episode: episode) }
+        case .back, .menu, .home:
+            dismissStreamPicker()
+            state = AnimeRuntimeState(
+                titleCount: titles.count,
+                episodeCount: episodes.count,
+                focusedTitleIndex: state.focusedTitleIndex,
+                focusedEpisodeIndex: state.focusedEpisodeIndex,
+                phase: .episodes,
+                isDanmakuVisible: state.isDanmakuVisible
+            )
+            statusText = "已取消選擇播放來源。"
+        default:
+            break
+        }
+    }
+
+    private func dismissStreamPicker() {
+        isStreamPickerVisible = false
+        streamChoices = []
+        pendingStreamEpisode = nil
+        focusedStreamChoiceIndex = 0
+    }
+
+    private func startPlayback(_ stream: AnimeStreamCandidate, episode: AnimeEpisode) async {
+        loadPlayer(stream, episode: episode)
+        await loadDanmaku(for: episode, stream: stream)
+    }
+
+    func resume(from entry: WatchHistoryEntry) async {
+        guard entry.kind == .anime,
+              let mediaID = entry.mediaID,
+              let episodeNumber = Int(mediaID.split(separator: ":").last ?? "")
+        else {
+            return
+        }
+
+        currentQuery = entry.title
+        await load()
+        guard let titleIndex = titles.firstIndex(where: { title in
+            title.title.localizedCaseInsensitiveContains(entry.title)
+                || entry.title.localizedCaseInsensitiveContains(title.title)
+        }) ?? titles.indices.first
+        else {
+            statusText = "找不到觀看紀錄對應的作品：\(entry.title)"
+            return
+        }
+
+        currentTitle = titles[titleIndex]
+        do {
+            episodes = try await sourceProvider?.episodes(for: titles[titleIndex]) ?? []
+            let episodeIndex = episodes.firstIndex { $0.number == episodeNumber } ?? 0
+            state = AnimeRuntimeState(
+                titleCount: titles.count,
+                episodeCount: episodes.count,
+                focusedTitleIndex: titleIndex,
+                focusedEpisodeIndex: episodeIndex,
+                phase: .playing,
+                isDanmakuVisible: state.isDanmakuVisible
+            )
+            await playFocusedEpisode()
+        } catch {
+            statusText = "無法恢復觀看紀錄：\(error.localizedDescription)"
         }
     }
 
@@ -1145,6 +1291,66 @@ final class AnimeRuntimeController: ObservableObject {
                 )
             ]
         )
+    }
+}
+
+private struct AnimeStreamPickerView: View {
+    let episodeTitle: String
+    let choices: [AnimeStreamCandidate]
+    let focusedIndex: Int
+    let metrics: TVMetrics
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.58)
+                .ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 24 * metrics.scale) {
+                Text("選擇播放影片")
+                    .font(.system(size: 52 * metrics.scale, weight: .bold))
+                Text(episodeTitle)
+                    .font(.system(size: 28 * metrics.scale, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                Text("上下選擇，OK 確認並記住，Back 取消")
+                    .font(.system(size: 22 * metrics.scale, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+
+                ScrollViewReader { scrollProxy in
+                    ScrollView(.vertical) {
+                        LazyVStack(alignment: .leading, spacing: 14 * metrics.scale) {
+                            ForEach(Array(choices.enumerated()), id: \.element.url.absoluteString) { index, stream in
+                                VStack(alignment: .leading, spacing: 8 * metrics.scale) {
+                                    Text(stream.headers["title"] ?? stream.quality)
+                                        .font(.system(size: 28 * metrics.scale, weight: .bold))
+                                        .lineLimit(2)
+                                    Text([stream.headers["channel"], stream.quality]
+                                        .compactMap { $0 }
+                                        .joined(separator: " · "))
+                                        .font(.system(size: 21 * metrics.scale, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.66))
+                                        .lineLimit(1)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(22 * metrics.scale)
+                                .liquidGlassCard(isFocused: index == focusedIndex, cornerRadius: 22 * metrics.scale)
+                                .scaleEffect(index == focusedIndex ? 1.02 : 1)
+                                .id("anime-stream-choice-\(index)")
+                            }
+                        }
+                        .padding(8 * metrics.scale)
+                    }
+                    .scrollIndicators(.hidden)
+                    .onChange(of: focusedIndex) { _, index in
+                        withAnimation(TVMotion.focus) {
+                            scrollProxy.scrollTo("anime-stream-choice-\(index)", anchor: .center)
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: 1_120 * metrics.scale, maxHeight: 760 * metrics.scale, alignment: .topLeading)
+            .padding(38 * metrics.scale)
+            .liquidGlassCard(isFocused: true, cornerRadius: 34 * metrics.scale)
+        }
     }
 }
 

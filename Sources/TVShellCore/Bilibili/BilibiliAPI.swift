@@ -405,7 +405,7 @@ private struct BilibiliHomeItem: Decodable {
             id: id,
             title: title,
             subtitle: desc?.cleanBilibiliHTML,
-            coverURL: cover.flatMap(URL.init(string:)),
+            coverURL: cover.flatMap(BilibiliURL.normalizeImageURL),
             badge: badgeInfo?.text?.cleanBilibiliHTML,
             totalText: bottomRightBadge?.text?.cleanBilibiliHTML
         )
@@ -450,7 +450,7 @@ private struct BilibiliSearchItem: Decodable {
             id: seasonID,
             title: title,
             subtitle: seasonTypeName,
-            coverURL: cover.flatMap(URL.init(string:)),
+            coverURL: cover.flatMap(BilibiliURL.normalizeImageURL),
             badge: badge?.cleanBilibiliHTML,
             totalText: indexShow?.cleanBilibiliHTML
         )
@@ -681,7 +681,7 @@ private struct BilibiliSeasonDetailPayload: Decodable {
         return BilibiliSeasonDetail(
             id: seasonID ?? 0,
             title: (title ?? seasonTitle ?? "Bilibili 番劇").cleanBilibiliHTML,
-            coverURL: cover.flatMap(URL.init(string:)),
+            coverURL: cover.flatMap(BilibiliURL.normalizeImageURL),
             subtitle: subtitle?.cleanBilibiliHTML,
             evaluate: evaluate?.cleanBilibiliHTML,
             ratingScore: rating?.score,
@@ -731,7 +731,7 @@ private struct BilibiliEpisodePayload: Decodable {
             bvid: bvid,
             title: rawTitle,
             longTitle: longTitle?.cleanBilibiliHTML ?? "",
-            coverURL: cover.flatMap(URL.init(string:)),
+            coverURL: cover.flatMap(BilibiliURL.normalizeImageURL),
             badge: badgeInfo?.text?.cleanBilibiliHTML ?? badge?.cleanBilibiliHTML,
             number: Int(rawTitle.filter(\.isNumber)) ?? defaultNumber
         )
@@ -847,10 +847,22 @@ private extension String {
 
 private enum BilibiliURL {
     static func normalizeImageURL(_ rawValue: String) -> URL? {
-        if rawValue.hasPrefix("//") {
-            return URL(string: "https:\(rawValue)")
+        var value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.isEmpty == false else {
+            return nil
         }
-        return URL(string: rawValue)
+        if value.hasPrefix("//") {
+            value = "https:\(value)"
+        } else if value.hasPrefix("http://") {
+            value = "https://" + value.dropFirst("http://".count)
+        }
+        // Bilibili frequently returns an image-transform suffix such as
+        // "@672w_378h_1c.avif". The original JPG/PNG is more broadly decoded
+        // by macOS AsyncImage and avoids a blank artwork tile.
+        if let transformStart = value.lastIndex(of: "@") {
+            value = String(value[..<transformStart])
+        }
+        return URL(string: value)
     }
 
     static func durationLabel(seconds: Int) -> String {

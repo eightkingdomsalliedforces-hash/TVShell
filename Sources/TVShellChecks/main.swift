@@ -481,6 +481,7 @@ struct TVShellChecks {
                 resumeTimeSeconds: 125
             )
         ]
+        state.preferredAnimeStreams = ["anime:bangumi-youtube:葬送的芙莉蓮:1": "youtube://frieren01"]
         state.saveSettings()
 
         let restored = AppState(apps: SeedApps.defaultApps, settingsStore: store)
@@ -492,6 +493,7 @@ struct TVShellChecks {
         try expect(restored.watchingHistory.first?.title == "葬送的芙莉蓮", "watch history persists")
         try expect(restored.watchingHistory.first?.resumeTimeLabel == "02:05", "watch history persists exact playback time")
         try expect(restored.resumeTime(for: "anime:frieren:1") == 125, "app state can look up resume time by media id")
+        try expect(restored.preferredAnimeStreams["anime:bangumi-youtube:葬送的芙莉蓮:1"] == "youtube://frieren01", "chosen anime youtube stream persists")
     }
 
     @MainActor
@@ -573,6 +575,18 @@ struct TVShellChecks {
         }
         state.deleteWatchHistory(entry)
         try expect(state.watchingHistory.isEmpty, "watch history entries can be deleted")
+
+        state.recordWatchForTesting(WatchHistoryEntry(
+            title: "葬送的芙莉蓮",
+            subtitle: "第 1 話",
+            kind: .anime,
+            mediaID: "anime:bangumi-youtube:葬送的芙莉蓮:1",
+            resumeTimeSeconds: 185
+        ))
+        state.handle(.down)
+        try expect(state.launcherFocus == .history, "down moves launcher focus to watch history")
+        state.handle(.select)
+        try expect(state.pendingWatchHistoryEntry?.title == "葬送的芙莉蓮", "selecting watch history prepares resumable entry")
     }
 
     static func checkWallpaperPresetCyclingAndProvider() throws {
@@ -1091,7 +1105,7 @@ struct TVShellChecks {
                 "aid": 123456,
                 "bvid": "BV1xx411c7m9",
                 "title": "<em class=\\"keyword\\">測試</em>一般影片",
-                "pic": "//i0.hdslb.com/bfs/archive/test.jpg",
+                "pic": "//i0.hdslb.com/bfs/archive/test.jpg@672w_378h_1c.avif",
                 "author": "UP 主",
                 "duration": "12:34",
                 "play": 3456,
@@ -1105,6 +1119,7 @@ struct TVShellChecks {
         try expect(videos.first?.itemKind == .video, "bilibili video search marks general video items")
         try expect(videos.first?.bvid == "BV1xx411c7m9", "bilibili video search reads bvid")
         try expect(videos.first?.title == "測試一般影片", "bilibili video search strips highlighted title")
+        try expect(videos.first?.coverURL?.absoluteString == "https://i0.hdslb.com/bfs/archive/test.jpg", "bilibili image url removes unsupported transform suffix")
 
         let detailJSON = """
         {
@@ -1237,6 +1252,7 @@ struct TVShellChecks {
         try expect(runtimeSource.contains("controller.videoItems"), "bilibili runtime renders a dedicated general video section")
         try expect(runtimeSource.contains("一般影片"), "bilibili runtime labels the general video section")
         try expect(runtimeSource.contains("BilibiliModeSwitcher"), "bilibili runtime shows a mode switch button")
+        try expect(runtimeSource.contains("let isVideo = season.itemKind == .video"), "bilibili general videos use a dedicated landscape card")
         try expect(runtimeSource.contains("toggleContentMode"), "bilibili runtime can switch between bangumi and general video")
         try expect(runtimeSource.contains("DanmakuOverlay("), "bilibili runtime renders danmaku overlay")
         try expect(runtimeSource.contains("provider.danmaku"), "bilibili runtime loads bilibili danmaku")
@@ -1406,7 +1422,7 @@ struct TVShellChecks {
             throw CheckFailure("missing wrong-only bangumi youtube episode")
         }
         let wrongOnlyStreams = try await wrongOnlyProvider.streams(for: wrongOnlyEpisode)
-        try expect(wrongOnlyStreams.isEmpty, "bangumi youtube provider refuses to play a different anime when no matching episode exists")
+        try expect(wrongOnlyStreams.first?.url.absoluteString == "youtube://jjk01", "bangumi youtube provider exposes a same-episode fallback for explicit user selection")
 
         let aliasOnlyYouTubeResponse = """
         {
@@ -2241,6 +2257,7 @@ struct TVShellChecks {
         try expect(launcher.contains("deleteWatchHistory"), "launcher can delete recent watch entries")
         try expect(launcher.contains("clearWatchingHistory"), "launcher can clear recent watch history")
         try expect(launcher.contains("ScrollViewReader"), "launcher keeps focused app rows visible after watch history appears")
+        try expect(launcher.contains("launcherFocus == .history"), "launcher gives watch history a remote focus section")
         try expect(launcher.contains("tvos-dock-app-\\(app.id.uuidString)"), "launcher dock exposes stable scroll ids")
         try expect(launcher.contains(".scrollIndicators(.hidden)"), "launcher hides TV-unfriendly scroll indicators")
         try expect(launcher.contains("quickActionBar") == false, "launcher removes oversized quick action chips from the home screen")
