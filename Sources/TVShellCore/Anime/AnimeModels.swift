@@ -47,17 +47,33 @@ public struct AnimeEpisodeIdentity: Codable, Equatable, Hashable, Sendable {
     }
 }
 
+public struct AnimeEpisodePlaybackLine: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var title: String
+    public var sourceName: String
+    public var playbackURL: URL
+
+    public init(id: String, title: String, sourceName: String, playbackURL: URL) {
+        self.id = id
+        self.title = title
+        self.sourceName = sourceName
+        self.playbackURL = playbackURL
+    }
+}
+
 public struct AnimeEpisode: Identifiable, Codable, Equatable, Sendable {
     public var id: String
     public var title: String
     public var number: Int
     public var identity: AnimeEpisodeIdentity
+    public var playbackLines: [AnimeEpisodePlaybackLine]?
 
-    public init(id: String, title: String, number: Int, identity: AnimeEpisodeIdentity) {
+    public init(id: String, title: String, number: Int, identity: AnimeEpisodeIdentity, playbackLines: [AnimeEpisodePlaybackLine]? = nil) {
         self.id = id
         self.title = title
         self.number = number
         self.identity = identity
+        self.playbackLines = playbackLines
     }
 }
 
