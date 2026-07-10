@@ -1836,6 +1836,7 @@ struct TVShellChecks {
         try expect(results.first?.summaryText.localizedCaseInsensitiveContains("芙莉蓮踏上理解人類") == true, "css1 provider enriches detail page with Bangumi summary")
         try expect(results.first?.score == 8.9, "css1 provider enriches detail page with Bangumi score")
         try expect(results.first?.episodes.count == 2, "css1 provider parses episode list")
+        try expect(results.first?.episodes.first?.playbackLines?.count == 2, "css1 provider preserves duplicate episode numbers as selectable playback lines")
         try expect(results.first?.episodes.first?.identity.providerID == "ani-subs-css1", "css1 episodes route through the built-in web selector adapter")
         try expect(results.first?.episodes.contains { $0.title == "葬送的芙莉蓮" } == false, "css1 provider excludes the anime title from episode choices")
         try expect(results.first?.episodes.contains { $0.title.contains("522") } == false, "css1 provider ignores recommendation episodes outside the configured episode list")

@@ -297,16 +297,26 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
                 )
             }
 
-        var seenEpisodeNumbers = Set<Int>()
-        return anchors.enumerated().compactMap { offset, anchor in
+        var episodesByNumber: [Int: AnimeEpisode] = [:]
+        var orderedNumbers: [Int] = []
+        for (offset, anchor) in anchors.enumerated() {
             let number = CSS1HTMLSelectorEngine.episodeNumber(
                 from: anchor.title,
                 pattern: source.episodeSortPattern
             ) ?? offset + 1
-            guard seenEpisodeNumbers.insert(number).inserted else {
-                return nil
+            let line = AnimeEpisodePlaybackLine(
+                id: "\(id)-\(stableID(anchor.url.absoluteString))",
+                title: "播放線 \((episodesByNumber[number]?.playbackLines?.count ?? 0) + 1)",
+                sourceName: source.name,
+                playbackURL: anchor.url
+            )
+            if var existing = episodesByNumber[number] {
+                existing.playbackLines = (existing.playbackLines ?? []) + [line]
+                episodesByNumber[number] = existing
+                continue
             }
-            return AnimeEpisode(
+            orderedNumbers.append(number)
+            episodesByNumber[number] = AnimeEpisode(
                 id: "\(id)-\(stableID(source.name))-\(stableID(anchor.url.absoluteString))",
                 title: anchor.title,
                 number: number,
@@ -316,9 +326,11 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
                     episodeID: anchor.url.absoluteString,
                     subjectAliases: [subjectTitle, css1SourceMarker(source.name)],
                     playbackURL: anchor.url
-                )
+                ),
+                playbackLines: [line]
             )
         }
+        return orderedNumbers.compactMap { episodesByNumber[$0] }
     }
 
     private func css1SourceMarker(_ sourceName: String) -> String {
