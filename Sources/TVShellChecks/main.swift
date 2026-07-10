@@ -587,6 +587,14 @@ struct TVShellChecks {
         try expect(state.launcherFocus == .history, "down moves launcher focus to watch history")
         state.handle(.select)
         try expect(state.pendingWatchHistoryEntry?.title == "葬送的芙莉蓮", "selecting watch history prepares resumable entry")
+
+        let launcherState = AppState(apps: SeedApps.defaultApps)
+        let visibleApps = launcherState.apps.filter(\.isVisibleOnHome)
+        launcherState.focusedAppID = visibleApps.first?.id
+        for expected in visibleApps.dropFirst() {
+            launcherState.handle(.right)
+            try expect(launcherState.focusedAppID == expected.id, "tvOS dock focus reaches every visible app")
+        }
     }
 
     static func checkWallpaperPresetCyclingAndProvider() throws {
@@ -2259,6 +2267,7 @@ struct TVShellChecks {
         try expect(launcher.contains("ScrollViewReader"), "launcher keeps focused app rows visible after watch history appears")
         try expect(launcher.contains("launcherFocus == .history"), "launcher gives watch history a remote focus section")
         try expect(launcher.contains("tvos-dock-app-\\(app.id.uuidString)"), "launcher dock exposes stable scroll ids")
+        try expect(launcher.contains("onChange(of: appState.launcherFocus)"), "launcher scrolls vertically when remote focus enters history")
         try expect(launcher.contains(".scrollIndicators(.hidden)"), "launcher hides TV-unfriendly scroll indicators")
         try expect(launcher.contains("quickActionBar") == false, "launcher removes oversized quick action chips from the home screen")
         try expect(launcher.contains("34 * metrics.scale"), "launcher rows keep enough vertical padding for focus rings")

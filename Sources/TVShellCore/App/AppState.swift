@@ -483,11 +483,28 @@ public final class AppState: ObservableObject {
     }
 
     private func moveFocusedApp(_ command: RemoteCommand) {
-        focusedAppID = LauncherLayout.focusedApp(
-            after: command,
-            currentID: focusedAppID,
-            sections: LauncherLayout.sections(for: apps)
-        )
+        // The tvOS home uses one horizontal dock, so focus must follow the
+        // same visible sequence rather than the legacy grouped launcher rows.
+        let visibleApps = apps.filter(\.isVisibleOnHome)
+        guard visibleApps.isEmpty == false else {
+            focusedAppID = nil
+            return
+        }
+        guard let focusedAppID,
+              let currentIndex = visibleApps.firstIndex(where: { $0.id == focusedAppID })
+        else {
+            self.focusedAppID = visibleApps.first?.id
+            return
+        }
+
+        switch command {
+        case .left:
+            self.focusedAppID = visibleApps[max(0, currentIndex - 1)].id
+        case .right:
+            self.focusedAppID = visibleApps[min(visibleApps.count - 1, currentIndex + 1)].id
+        default:
+            break
+        }
     }
 
     private func openFocusedApp() {

@@ -142,6 +142,18 @@ public struct LauncherView: View {
                             scrollProxy.scrollTo("launcher-history-entry-\(id.uuidString)", anchor: .center)
                         }
                     }
+                    .onChange(of: appState.launcherFocus) { _, focus in
+                        withAnimation(TVMotion.focus) {
+                            switch focus {
+                            case .apps:
+                                if let id = appState.focusedAppID {
+                                    scrollProxy.scrollTo("tvos-dock-app-\(id.uuidString)", anchor: .center)
+                                }
+                            case .history:
+                                scrollProxy.scrollTo("launcher-history", anchor: .center)
+                            }
+                        }
+                    }
                 }
             }
         }
