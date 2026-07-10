@@ -348,10 +348,15 @@ public struct Aria2TorrentPlaybackEngine: TorrentPlaybackEngine {
             if let file = readyPlayableFile(in: directory, episodeNumber: episodeNumber) {
                 return file
             }
-            if TorrentProcessRegistry.shared.hasTerminated(id: processID),
-               progress.downloadedBytes == 0 {
+            if TorrentProcessRegistry.shared.hasTerminated(id: processID) {
                 let output = TorrentProcessRegistry.shared.lastErrorOutput(id: processID)
-                throw TorrentPlaybackError.launchFailed(output.isEmpty ? "aria2c 已結束但沒有下載任何資料。" : output)
+                onProgress?(TorrentDownloadProgress(
+                    downloadedBytes: progress.downloadedBytes,
+                    selectedFileBytes: progress.selectedFileBytes,
+                    largestPlayableFileName: progress.largestPlayableFileName,
+                    failureMessage: output.isEmpty ? "aria2c 已結束，沒有可播放的緩衝檔。" : output
+                ))
+                throw TorrentPlaybackError.launchFailed(output.isEmpty ? "aria2c 已結束但沒有可播放的緩衝檔。" : output)
             }
             try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
         }
