@@ -301,7 +301,7 @@ public struct Aria2TorrentPlaybackEngine: TorrentPlaybackEngine {
 
     private func launchAria2(executable: String, stream: AnimeStreamCandidate, directory: URL) throws {
         let processID = stableIdentifier(for: stream.url.absoluteString)
-        if TorrentProcessRegistry.shared.isRunning(id: processID) {
+        if TorrentProcessRegistry.shared.isRunning(id: processID) || isAria2AlreadyRunning(in: directory) {
             return
         }
 
@@ -370,9 +370,30 @@ public struct Aria2TorrentPlaybackEngine: TorrentPlaybackEngine {
             else {
                 return partial
             }
-            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            return partial + UInt64(max(0, size))
+            return partial + fileBufferedBytes(url)
         }
+    }
+
+    private func isAria2AlreadyRunning(in directory: URL) -> Bool {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-axo", "command="]
+        process.standardOutput = output
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return false
+        }
+
+        let commands = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        return commands
+            .split(whereSeparator: \.isNewline)
+            .contains { command in
+                command.contains("aria2c") && command.contains("--dir=\(directory.path)")
+            }
     }
 
     private func readyPlayableFile(in directory: URL, episodeNumber: Int?) -> URL? {
