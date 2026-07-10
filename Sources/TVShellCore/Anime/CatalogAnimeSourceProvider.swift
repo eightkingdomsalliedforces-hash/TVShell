@@ -3,6 +3,7 @@ import Foundation
 public enum AnimeSourceCatalogError: Error, Equatable, LocalizedError, Sendable {
     case noPlayableAdapter
     case missingAdapter(String)
+    case sourceResolutionFailed([String])
 
     public var errorDescription: String? {
         switch self {
@@ -10,6 +11,8 @@ public enum AnimeSourceCatalogError: Error, Equatable, LocalizedError, Sendable 
             "沒有已啟用且可播放的動漫來源。請在動漫來源頁啟用來源。"
         case let .missingAdapter(id):
             "來源尚未接入解析 adapter：\(id)"
+        case let .sourceResolutionFailed(reasons):
+            "選集來源解析失敗：\(reasons.joined(separator: "；"))"
         }
     }
 }
@@ -96,7 +99,7 @@ public struct CatalogAnimeSourceProvider: AnimeSourceProvider {
     }
 
     public func episodes(for result: AnimeSearchResult) async throws -> [AnimeEpisode] {
-        let resolved = await withTaskGroup(of: [CatalogEpisodeEntry].self) { group in
+        let resolutions = await withTaskGroup(of: CatalogEpisodeResolution.self) { group in
             for entry in playableAdapters {
                 group.addTask {
                     await resolveEpisodes(
@@ -107,13 +110,18 @@ public struct CatalogAnimeSourceProvider: AnimeSourceProvider {
                 }
             }
 
-            var entries: [CatalogEpisodeEntry] = []
-            for await sourceEntries in group {
-                entries.append(contentsOf: sourceEntries)
+            var results: [CatalogEpisodeResolution] = []
+            for await resolution in group {
+                results.append(resolution)
             }
-            return entries
+            return results
         }
+        let resolved = resolutions.flatMap(\.entries)
         guard resolved.isEmpty == false else {
+            let reasons = resolutions.compactMap(\.failureReason)
+            if reasons.isEmpty == false {
+                throw AnimeSourceCatalogError.sourceResolutionFailed(reasons)
+            }
             throw AnimeSourceCatalogError.noPlayableAdapter
         }
 
@@ -169,6 +177,11 @@ private struct CatalogEpisodeEntry: Sendable {
     var episode: AnimeEpisode
 }
 
+private struct CatalogEpisodeResolution: Sendable {
+    var entries: [CatalogEpisodeEntry]
+    var failureReason: String?
+}
+
 private struct SourceSearchResults: Sendable {
     var sourceIndex: Int
     var results: [AnimeSearchResult]
@@ -195,30 +208,43 @@ private func resolveEpisodes(
     for entry: (instance: AnimeSourceInstance, adapter: any AnimeMediaSourceAdapter),
     matching result: AnimeSearchResult,
     timeoutNanoseconds: UInt64
-) async -> [CatalogEpisodeEntry] {
-    await withTaskGroup(of: [AnimeEpisode].self) { group in
+) async -> CatalogEpisodeResolution {
+    await withTaskGroup(of: CatalogEpisodeResolution.self) { group in
         group.addTask {
             do {
                 let candidates = try await entry.adapter.search(AnimeSearchQuery(keyword: result.title))
                 guard let match = bestMatchingResult(for: result, in: candidates) else {
-                    return []
+                    return CatalogEpisodeResolution(entries: [], failureReason: nil)
                 }
-                return try await entry.adapter.episodes(for: match)
+                let episodes = try await entry.adapter.episodes(for: match)
+                return CatalogEpisodeResolution(
+                    entries: episodes.map { episode in
+                        CatalogEpisodeEntry(adapterID: entry.adapter.id, resolverKind: entry.adapter.resolverKind, episode: episode)
+                    },
+                    failureReason: nil
+                )
             } catch {
-                return []
+                return CatalogEpisodeResolution(entries: [], failureReason: "\(entry.adapter.displayName)：\(sourceFailureDescription(error))")
             }
         }
         group.addTask {
             try? await Task.sleep(nanoseconds: timeoutNanoseconds)
-            return []
+            return CatalogEpisodeResolution(entries: [], failureReason: "\(entry.adapter.displayName)：解析逾時")
         }
 
-        let episodes = await group.next() ?? []
+        let resolution = await group.next() ?? CatalogEpisodeResolution(entries: [], failureReason: nil)
         group.cancelAll()
-        return episodes.map { episode in
-            CatalogEpisodeEntry(adapterID: entry.adapter.id, resolverKind: entry.adapter.resolverKind, episode: episode)
-        }
+        return resolution
     }
+}
+
+private func sourceFailureDescription(_ error: Error) -> String {
+    if let localized = error as? LocalizedError,
+       let description = localized.errorDescription?.trimmingCharacters(in: .whitespacesAndNewlines),
+       description.isEmpty == false {
+        return description
+    }
+    return String(describing: error)
 }
 
 private func resolveSearch(

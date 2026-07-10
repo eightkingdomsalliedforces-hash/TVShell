@@ -2096,6 +2096,18 @@ struct TVShellChecks {
         )
         let nextRunResults = try await nextRunProvider.search(AnimeSearchQuery(keyword: "86"))
         try expect(nextRunResults.first?.subtitle == "fast", "css1 provider skips disabled sources on the next run")
+
+        let failingProvider = AniSubsCSS1SubscriptionProvider(
+            subscriptionURL: subscriptionURL,
+            transport: StaticAnimeHTTPTransport(routes: [subscriptionURL.absoluteString: timeoutSubscription]),
+            healthStore: AniSubsCSS1SourceHealthStore(fileURL: healthURL)
+        )
+        do {
+            _ = try await failingProvider.search(AnimeSearchQuery(keyword: "86"))
+            throw CheckFailure("css1 should report the failed source when no source resolves")
+        } catch let error as AniSubsCSS1ProviderError {
+            try expect(error.errorDescription?.contains("fast") == true, "css1 failure explains which source failed")
+        }
     }
 
     static func checkAniSubsCSS1PrefersMatchingAnimeOverSameTitleDrama() async throws {

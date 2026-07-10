@@ -1,5 +1,16 @@
 import Foundation
 
+public enum AniSubsCSS1ProviderError: LocalizedError, Equatable, Sendable {
+    case allSourcesFailed([String])
+
+    public var errorDescription: String? {
+        switch self {
+        case let .allSourcesFailed(reasons):
+            "CSS1 來源解析失敗：\(reasons.joined(separator: "；"))"
+        }
+    }
+}
+
 public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
     public let id = "ani-subs-css1"
     public let displayName = "ani-subs CSS1"
@@ -27,6 +38,7 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
         let sources = try await webSelectorSources()
             .filter { healthState.skippedSourceNames.contains($0.name) == false }
         var allResults: [AnimeSearchResult] = []
+        var failureReasons: [String] = []
 
         for source in sources {
             let subjects: [CSS1HTMLSelectorEngine.Anchor]
@@ -40,7 +52,9 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
                     baseURL: searchURL
                 )
             } catch {
-                try? healthStore.recordFailure(sourceName: source.name, reason: String(describing: error))
+                let reason = css1FailureReason(error)
+                failureReasons.append("\(source.name)：\(reason)")
+                try? healthStore.recordFailure(sourceName: source.name, reason: reason)
                 continue
             }
 
@@ -71,6 +85,10 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
                         episodes: episodes
                     ))
                 } catch {
+                    let reason = css1FailureReason(error)
+                    if failureReasons.contains(where: { $0.hasPrefix("\(source.name)：") }) == false {
+                        failureReasons.append("\(source.name)：\(reason)")
+                    }
                     continue
                 }
             }
@@ -80,7 +98,11 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
         // Enrich before deduplicating so same-title live-action pages cannot
         // win merely because they expose more episodes than the animation.
         let enriched = await enrichWithBangumi(allResults)
-        return Array(mergeCSS1Results(enriched).prefix(60))
+        let merged = Array(mergeCSS1Results(enriched).prefix(60))
+        if merged.isEmpty, failureReasons.isEmpty == false {
+            throw AniSubsCSS1ProviderError.allSourcesFailed(failureReasons)
+        }
+        return merged
     }
 
     public func episodes(for result: AnimeSearchResult) async throws -> [AnimeEpisode] {
@@ -419,6 +441,15 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
             return trimmed
         }
     }
+}
+
+private func css1FailureReason(_ error: Error) -> String {
+    if let localized = error as? LocalizedError,
+       let description = localized.errorDescription?.trimmingCharacters(in: .whitespacesAndNewlines),
+       description.isEmpty == false {
+        return description
+    }
+    return String(describing: error)
 }
 
 public struct AniSubsCSS1Source: Equatable, Sendable {
