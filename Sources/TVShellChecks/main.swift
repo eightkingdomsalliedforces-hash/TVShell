@@ -1961,20 +1961,21 @@ struct TVShellChecks {
         }
         """.data(using: .utf8)!
         let searchHTML = """
-        <div class="module-card-item"><div class="module-card-item-info"><div class="module-card-item-title"><a href="/show/oshi-anime">我推的孩子</a></div></div></div>
         <div class="module-card-item"><div class="module-card-item-info"><div class="module-card-item-title"><a href="/show/oshi-drama">我推的孩子</a></div></div></div>
+        <div class="module-card-item"><div class="module-card-item-info"><div class="module-card-item-title"><a href="/show/oshi-anime">我推的孩子</a></div></div></div>
         """.data(using: .utf8)!
         let animeDetail = """
+        <div class="module-info-tag-link"><a href="/vod/show/class/anime">日本動漫</a></div>
         <div class="module-play-list-content">
           <div><span class="episode-title">第 1 話</span><a class="play-link" href="/watch/oshi-anime-1">播放</a></div>
           <div><span class="episode-title">第 2 話</span><a class="play-link" href="/watch/oshi-anime-2">播放</a></div>
         </div>
         """.data(using: .utf8)!
         let dramaDetail = """
+        <div class="module-info-tag-link"><a href="/vod/show/class/drama">日劇</a></div>
         <div class="module-play-list-content">
           <div><span class="episode-title">第 1 話</span><a class="play-link" href="/watch/oshi-drama-1">播放</a></div>
           <div><span class="episode-title">第 2 話</span><a class="play-link" href="/watch/oshi-drama-2">播放</a></div>
-          <div><span class="episode-title">第 3 話</span><a class="play-link" href="/watch/oshi-drama-3">播放</a></div>
         </div>
         """.data(using: .utf8)!
         let bangumiResponse = """

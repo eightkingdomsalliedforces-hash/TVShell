@@ -6,127 +6,151 @@ public struct SettingsView: View {
     public init() {}
 
     public var body: some View {
-        GeometryReader { proxy in
-            let metrics = TVMetrics(size: proxy.size)
+        ZStack {
+            TVControlBackdrop(accent: Color(red: 0.14, green: 0.40, blue: 0.54))
 
-            ScrollViewReader { scrollProxy in
-                ScrollView(.vertical) {
-                    VStack(alignment: .leading, spacing: 34 * metrics.scale) {
-                        Text("設定")
-                            .font(.system(size: 76 * metrics.scale, weight: .bold))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.76)
+            GeometryReader { proxy in
+                let metrics = TVMetrics(size: proxy.size)
 
-                        SettingsOptionRow(
-                            title: "介面縮放",
-                            value: appState.displayScale.label,
-                            isFocused: appState.settingsFocus == .scale,
-                            metrics: metrics
-                        )
-                        .id(SettingsFocus.scale)
+                ScrollViewReader { scrollProxy in
+                    ScrollView(.vertical) {
+                        VStack(alignment: .leading, spacing: 34 * metrics.scale) {
+                            SettingsHero(metrics: metrics)
+                                .padding(.top, metrics.topPadding)
 
-                        SettingsOptionRow(
-                            title: "壁紙",
-                            value: wallpaperLabel,
-                            isFocused: appState.settingsFocus == .wallpaper,
-                            metrics: metrics
-                        )
-                        .id(SettingsFocus.wallpaper)
+                            SettingsSectionHeader(title: "外觀", metrics: metrics)
+                            settingRow(
+                                focus: .scale,
+                                symbolName: "rectangle.3.group.fill",
+                                title: "介面縮放",
+                                value: appState.displayScale.label,
+                                metrics: metrics
+                            )
+                            settingRow(
+                                focus: .wallpaper,
+                                symbolName: "photo.on.rectangle.angled",
+                                title: "壁紙",
+                                value: wallpaperLabel,
+                                metrics: metrics
+                            )
 
-                        SettingsOptionRow(
-                            title: "網頁放大",
-                            value: "\(Int(appState.webZoom * 100))%",
-                            isFocused: appState.settingsFocus == .webZoom,
-                            metrics: metrics
-                        )
-                        .id(SettingsFocus.webZoom)
+                            SettingsSectionHeader(title: "播放與網頁", metrics: metrics)
+                            settingRow(
+                                focus: .webZoom,
+                                symbolName: "safari.fill",
+                                title: "網頁放大",
+                                value: "\(Int(appState.webZoom * 100))%",
+                                metrics: metrics
+                            )
+                            settingRow(
+                                focus: .videoSource,
+                                symbolName: "play.rectangle.fill",
+                                title: "影片位置",
+                                value: appState.videoSourceLabel,
+                                actionStyle: .command,
+                                metrics: metrics
+                            )
 
-                        SettingsOptionRow(
-                            title: "彈幕大小",
-                            value: appState.danmakuDisplaySettings.sizeLabel,
-                            isFocused: appState.settingsFocus == .danmakuSize,
-                            metrics: metrics
-                        )
-                        .id(SettingsFocus.danmakuSize)
+                            SettingsSectionHeader(title: "彈幕", metrics: metrics)
+                            settingRow(
+                                focus: .danmakuSize,
+                                symbolName: "textformat.size",
+                                title: "彈幕大小",
+                                value: appState.danmakuDisplaySettings.sizeLabel,
+                                metrics: metrics
+                            )
+                            settingRow(
+                                focus: .danmakuSpeed,
+                                symbolName: "gauge.with.dots.needle.50percent",
+                                title: "彈幕速度",
+                                value: appState.danmakuDisplaySettings.speedLabel,
+                                metrics: metrics
+                            )
+                            settingRow(
+                                focus: .danmakuOpacity,
+                                symbolName: "circle.lefthalf.filled",
+                                title: "彈幕透明度",
+                                value: appState.danmakuDisplaySettings.opacityLabel,
+                                metrics: metrics
+                            )
+                            settingRow(
+                                focus: .danmakuDensity,
+                                symbolName: "rectangle.3.group.bubble.left.fill",
+                                title: "彈幕密度",
+                                value: appState.danmakuDisplaySettings.densityLabel,
+                                metrics: metrics
+                            )
 
-                        SettingsOptionRow(
-                            title: "彈幕速度",
-                            value: appState.danmakuDisplaySettings.speedLabel,
-                            isFocused: appState.settingsFocus == .danmakuSpeed,
-                            metrics: metrics
-                        )
-                        .id(SettingsFocus.danmakuSpeed)
+                            SettingsSectionHeader(title: "服務與帳戶", metrics: metrics)
+                            settingRow(
+                                focus: .credentials,
+                                symbolName: "key.fill",
+                                title: "憑證與服務",
+                                value: credentialsSummary,
+                                actionStyle: .command,
+                                metrics: metrics
+                            )
 
-                        SettingsOptionRow(
-                            title: "彈幕透明度",
-                            value: appState.danmakuDisplaySettings.opacityLabel,
-                            isFocused: appState.settingsFocus == .danmakuOpacity,
-                            metrics: metrics
-                        )
-                        .id(SettingsFocus.danmakuOpacity)
+                            ServiceStatusRow(
+                                symbolName: "play.rectangle.fill",
+                                title: "YouTube",
+                                isConfigured: appState.youtubeCredentials.isConfigured,
+                                metrics: metrics
+                            )
+                            ServiceStatusRow(
+                                symbolName: "bubble.left.and.bubble.right.fill",
+                                title: "彈幕",
+                                isConfigured: appState.dandanplayCredentials.isConfigured,
+                                metrics: metrics
+                            )
+                            ServiceStatusRow(
+                                symbolName: "play.square.stack.fill",
+                                title: "Bilibili",
+                                isConfigured: appState.bilibiliCredentials.isConfigured,
+                                metrics: metrics
+                            )
 
-                        SettingsOptionRow(
-                            title: "彈幕密度",
-                            value: appState.danmakuDisplaySettings.densityLabel,
-                            isFocused: appState.settingsFocus == .danmakuDensity,
-                            metrics: metrics
-                        )
-                        .id(SettingsFocus.danmakuDensity)
-
-                        SettingsOptionRow(
-                            title: "影片位置",
-                            value: appState.videoSourceLabel,
-                            isFocused: appState.settingsFocus == .videoSource,
-                            metrics: metrics
-                        )
-                        .id(SettingsFocus.videoSource)
-
-                        SettingsOptionRow(
-                            title: "憑證檔案",
-                            value: credentialsSummary,
-                            isFocused: appState.settingsFocus == .credentials,
-                            metrics: metrics
-                        )
-                        .id(SettingsFocus.credentials)
-
-                        Text("上下選擇設定，左右調整；在影片位置按 OK 選擇本機影片；在憑證檔案按 OK 建立範例檔並重載。Home 或返回鍵回主畫面。")
-                            .font(.system(size: 28 * metrics.scale, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.64))
-                            .lineLimit(3)
-                            .minimumScaleFactor(0.72)
-
-                        DanmakuServiceStatusView(isConfigured: appState.dandanplayCredentials.isConfigured, metrics: metrics)
-
-                        YouTubeAPIStatusView(
-                            isConfigured: appState.youtubeCredentials.isConfigured,
-                            path: appState.credentialsFilePath,
-                            metrics: metrics
-                        )
-
-                        BilibiliLoginStatusView(
-                            isConfigured: appState.bilibiliCredentials.isConfigured,
-                            path: appState.credentialsFilePath,
-                            metrics: metrics
-                        )
-
-                        PermissionStatusView()
+                            PermissionStatusView()
+                                .padding(.top, 12 * metrics.scale)
+                                .padding(.bottom, 48 * metrics.scale)
+                        }
+                        .frame(maxWidth: min(1_620 * metrics.scale, proxy.size.width - metrics.horizontalPadding * 2), minHeight: proxy.size.height, alignment: .topLeading)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.horizontal, metrics.horizontalPadding)
                     }
-                    .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .topLeading)
-                    .padding(.horizontal, metrics.horizontalPadding)
-                    .padding(.vertical, max(34, metrics.topPadding))
-                }
-                .scrollIndicators(.hidden)
-                .onChange(of: appState.settingsFocus) { _, focus in
-                    withAnimation(TVMotion.focus) {
-                        scrollProxy.scrollTo(focus, anchor: .center)
+                    .scrollIndicators(.hidden)
+                    .onChange(of: appState.settingsFocus) { _, focus in
+                        withAnimation(TVMotion.focus) {
+                            scrollProxy.scrollTo(focus, anchor: .center)
+                        }
                     }
-                }
-                .onAppear {
-                    scrollProxy.scrollTo(appState.settingsFocus, anchor: .center)
+                    .onAppear {
+                        scrollProxy.scrollTo(appState.settingsFocus, anchor: .center)
+                    }
                 }
             }
         }
         .foregroundStyle(.white)
+    }
+
+    @ViewBuilder
+    private func settingRow(
+        focus: SettingsFocus,
+        symbolName: String,
+        title: String,
+        value: String,
+        actionStyle: SettingsOptionActionStyle = .adjustment,
+        metrics: TVMetrics
+    ) -> some View {
+        SettingsOptionRow(
+            symbolName: symbolName,
+            title: title,
+            value: value,
+            actionStyle: actionStyle,
+            isFocused: appState.settingsFocus == focus,
+            metrics: metrics
+        )
+        .id(focus)
     }
 
     private var wallpaperLabel: String {
@@ -146,113 +170,142 @@ public struct SettingsView: View {
             appState.dandanplayCredentials.isConfigured ? "彈幕" : nil,
             appState.bilibiliCredentials.isConfigured ? "Bilibili" : nil
         ].compactMap { $0 }
-        return configured.isEmpty ? "建立/重載 credentials.json" : "已配置 \(configured.joined(separator: "、"))"
+        return configured.isEmpty ? "尚未配置" : configured.joined(separator: "、")
     }
 }
 
-private struct YouTubeAPIStatusView: View {
-    let isConfigured: Bool
-    let path: String
-    let metrics: TVMetrics
-
-    var body: some View {
-        HStack(spacing: 22 * metrics.scale) {
-            Circle()
-                .fill(isConfigured ? .green : .orange)
-                .frame(width: 22 * metrics.scale, height: 22 * metrics.scale)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("YouTube API")
-                    .font(.system(size: 32 * metrics.scale, weight: .bold))
-                Text(isConfigured ? "已配置 YouTube Data API，YouTube App 會解析真實影片列表。" : "尚未配置 YouTube Data API。可寫入 \(path)，或用環境變數 TVSHELL_YOUTUBE_API_KEY。")
-                    .font(.system(size: 24 * metrics.scale, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.66))
-                    .lineLimit(3)
-                    .minimumScaleFactor(0.72)
-            }
-        }
-        .padding(30 * metrics.scale)
-        .liquidGlassCard(isFocused: isConfigured == false, cornerRadius: 18 * metrics.scale)
-    }
-}
-
-private struct BilibiliLoginStatusView: View {
-    let isConfigured: Bool
-    let path: String
-    let metrics: TVMetrics
-
-    var body: some View {
-        HStack(spacing: 22 * metrics.scale) {
-            Circle()
-                .fill(isConfigured ? .green : .orange)
-                .frame(width: 22 * metrics.scale, height: 22 * metrics.scale)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Bilibili 登入")
-                    .font(.system(size: 32 * metrics.scale, weight: .bold))
-                Text(isConfigured ? "已載入 Bilibili Cookie，搜尋與播放會自動帶登入狀態。" : "尚未配置 Bilibili Cookie。可寫入 \(path) 的 bilibili.cookie，或用環境變數 TVSHELL_BILIBILI_COOKIE。")
-                    .font(.system(size: 24 * metrics.scale, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.66))
-                    .lineLimit(4)
-                    .minimumScaleFactor(0.72)
-            }
-        }
-        .padding(30 * metrics.scale)
-        .liquidGlassCard(isFocused: isConfigured == false, cornerRadius: 18 * metrics.scale)
-    }
-}
-
-private struct DanmakuServiceStatusView: View {
-    let isConfigured: Bool
-    let metrics: TVMetrics
-
-    var body: some View {
-        HStack(spacing: 22 * metrics.scale) {
-            Circle()
-                .fill(isConfigured ? .green : .orange)
-                .frame(width: 22 * metrics.scale, height: 22 * metrics.scale)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("彈幕服務")
-                    .font(.system(size: 32 * metrics.scale, weight: .bold))
-                Text(isConfigured ? "Dandanplay 已配置，可以接入遠端彈幕。" : "尚未配置 Dandanplay。可用環境變數 TVSHELL_DANDANPLAY_APP_ID / TVSHELL_DANDANPLAY_APP_SECRET。")
-                    .font(.system(size: 24 * metrics.scale, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.66))
-                    .lineLimit(3)
-                    .minimumScaleFactor(0.72)
-            }
-        }
-        .padding(30 * metrics.scale)
-        .liquidGlassCard(isFocused: isConfigured == false, cornerRadius: 18 * metrics.scale)
-    }
-}
-
-private struct SettingsOptionRow: View {
-    let title: String
-    let value: String
-    let isFocused: Bool
+private struct SettingsHero: View {
     let metrics: TVMetrics
 
     var body: some View {
         HStack(spacing: 28 * metrics.scale) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(title)
-                    .font(.system(size: 32 * metrics.scale, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.72))
-                Text(value)
-                    .font(.system(size: 58 * metrics.scale, weight: .bold))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.58)
+            Image(systemName: "gearshape.fill")
+                .font(.system(size: 76 * metrics.scale, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.white)
+                .frame(width: 132 * metrics.scale, height: 132 * metrics.scale)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 30 * metrics.scale, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 30 * metrics.scale, style: .continuous)
+                        .strokeBorder(.white.opacity(0.26), lineWidth: 1)
+                }
+
+            VStack(alignment: .leading, spacing: 8 * metrics.scale) {
+                Text("設定")
+                    .font(.system(size: 76 * metrics.scale, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.76)
+                Text("系統、播放與服務")
+                    .font(.system(size: 30 * metrics.scale, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.66))
             }
 
-            Spacer()
-
-            Text("<  >")
-                .font(.system(size: 42 * metrics.scale, weight: .bold))
-                .foregroundStyle(.white.opacity(0.58))
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 34 * metrics.scale)
-        .padding(.vertical, 26 * metrics.scale)
-        .liquidGlassCard(isFocused: isFocused, cornerRadius: 26 * metrics.scale)
+    }
+}
+
+private struct SettingsSectionHeader: View {
+    let title: String
+    let metrics: TVMetrics
+
+    var body: some View {
+        Text(title)
+            .font(.system(size: 29 * metrics.scale, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.64))
+            .padding(.top, 14 * metrics.scale)
+    }
+}
+
+private enum SettingsOptionActionStyle {
+    case adjustment
+    case command
+}
+
+private struct SettingsOptionRow: View {
+    let symbolName: String
+    let title: String
+    let value: String
+    let actionStyle: SettingsOptionActionStyle
+    let isFocused: Bool
+    let metrics: TVMetrics
+
+    var body: some View {
+        HStack(spacing: 26 * metrics.scale) {
+            Image(systemName: symbolName)
+                .font(.system(size: 36 * metrics.scale, weight: .semibold))
+                .frame(width: 78 * metrics.scale, height: 78 * metrics.scale)
+                .background(.white.opacity(isFocused ? 0.23 : 0.12), in: RoundedRectangle(cornerRadius: 20 * metrics.scale, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 6 * metrics.scale) {
+                Text(title)
+                    .font(.system(size: 34 * metrics.scale, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                Text(value)
+                    .font(.system(size: 26 * metrics.scale, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.64))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.66)
+            }
+
+            Spacer(minLength: 20 * metrics.scale)
+
+            controlIndicator
+                .foregroundStyle(.white.opacity(isFocused ? 0.96 : 0.54))
+        }
+        .padding(.horizontal, 28 * metrics.scale)
+        .padding(.vertical, 20 * metrics.scale)
+        .frame(minHeight: 124 * metrics.scale)
+        .liquidGlassCard(isFocused: isFocused, cornerRadius: 24 * metrics.scale)
+        .scaleEffect(isFocused ? 1.012 : 1)
+        .animation(TVMotion.focus, value: isFocused)
+    }
+
+    @ViewBuilder
+    private var controlIndicator: some View {
+        switch actionStyle {
+        case .adjustment:
+            HStack(spacing: 16 * metrics.scale) {
+                Image(systemName: "chevron.left")
+                Image(systemName: "chevron.right")
+            }
+            .font(.system(size: 27 * metrics.scale, weight: .bold))
+        case .command:
+            Image(systemName: "chevron.right.circle.fill")
+                .font(.system(size: 36 * metrics.scale, weight: .semibold))
+        }
+    }
+}
+
+private struct ServiceStatusRow: View {
+    let symbolName: String
+    let title: String
+    let isConfigured: Bool
+    let metrics: TVMetrics
+
+    var body: some View {
+        HStack(spacing: 18 * metrics.scale) {
+            Image(systemName: symbolName)
+                .font(.system(size: 26 * metrics.scale, weight: .semibold))
+                .frame(width: 44 * metrics.scale, height: 44 * metrics.scale)
+                .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12 * metrics.scale, style: .continuous))
+            Text(title)
+                .font(.system(size: 25 * metrics.scale, weight: .semibold))
+            Spacer()
+            Circle()
+                .fill(isConfigured ? .green : .orange)
+                .frame(width: 14 * metrics.scale, height: 14 * metrics.scale)
+            Text(isConfigured ? "已連線" : "需要設定")
+                .font(.system(size: 22 * metrics.scale, weight: .medium))
+                .foregroundStyle(.white.opacity(0.62))
+        }
+        .padding(.horizontal, 28 * metrics.scale)
+        .padding(.vertical, 18 * metrics.scale)
+        .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 20 * metrics.scale, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20 * metrics.scale, style: .continuous)
+                .strokeBorder(.white.opacity(0.13), lineWidth: 1)
+        }
     }
 }

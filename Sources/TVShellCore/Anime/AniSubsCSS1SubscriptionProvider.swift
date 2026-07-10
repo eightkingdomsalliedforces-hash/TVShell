@@ -47,6 +47,9 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
             for subject in matchedSubjects.prefix(20) {
                 do {
                     let detailHTML = try await html(for: subject.url, source: source)
+                    guard isAnimeDetailPage(detailHTML) else {
+                        continue
+                    }
                     let episodes = parseEpisodes(
                         source: source,
                         subjectTitle: subject.title,
@@ -190,6 +193,23 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
         let lowercased = title.lowercased()
         return ["真人", "日劇", "韩剧", "韓劇", "偶像劇", "电视剧", "電視劇", "ドラマ", "live action", "drama"]
             .contains { lowercased.contains($0.lowercased()) }
+    }
+
+    private func isAnimeDetailPage(_ html: String) -> Bool {
+        let categoryBlocks = CSS1HTMLSelectorEngine.blocks(matching: ".module-info-tag-link", in: html)
+        let categories = categoryBlocks.flatMap { block in
+            CSS1HTMLSelectorEngine.texts(matching: "a", in: block)
+        }
+        let categoryText = categories.joined(separator: " ").lowercased()
+        guard categoryText.isEmpty == false else {
+            return true
+        }
+
+        let nonAnimeCategories = [
+            "連續劇", "连续剧", "日劇", "日剧", "韓劇", "韩剧", "電視劇", "电视剧",
+            "真人", "電影", "电影", "綜藝", "综艺", "紀錄片", "纪录片"
+        ]
+        return nonAnimeCategories.contains { categoryText.contains($0.lowercased()) } == false
     }
 
     private func normalizedSearchKey(_ value: String) -> String {
