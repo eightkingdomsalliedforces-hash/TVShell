@@ -30,9 +30,10 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
 
         for source in sources {
             let subjects: [CSS1HTMLSelectorEngine.Anchor]
+            let searchHTML: String
             do {
                 let searchURL = try source.searchURL(keyword: query.keyword)
-                let searchHTML = try await html(for: searchURL, source: source)
+                searchHTML = try await html(for: searchURL, source: source)
                 subjects = CSS1HTMLSelectorEngine.anchors(
                     matching: source.searchSelector,
                     in: searchHTML,
@@ -46,6 +47,9 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
             let matchedSubjects = filteredSubjects(subjects, keyword: query.keyword)
             for subject in matchedSubjects.prefix(20) {
                 do {
+                    guard isAnimeSearchCard(subject, in: searchHTML) else {
+                        continue
+                    }
                     let detailHTML = try await html(for: subject.url, source: source)
                     guard isAnimeDetailPage(detailHTML) else {
                         continue
@@ -200,7 +204,20 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
         let categories = categoryBlocks.flatMap { block in
             CSS1HTMLSelectorEngine.texts(matching: "a", in: block)
         }
-        let categoryText = categories.joined(separator: " ").lowercased()
+        return isAnimeCategoryText(categories.joined(separator: " "))
+    }
+
+    private func isAnimeSearchCard(_ subject: CSS1HTMLSelectorEngine.Anchor, in html: String) -> Bool {
+        let card = CSS1HTMLSelectorEngine.blocks(matching: ".module-card-item", in: html)
+            .first { $0.contains(subject.url.path) }
+        guard let card else {
+            return true
+        }
+        return isAnimeCategoryText(card)
+    }
+
+    private func isAnimeCategoryText(_ value: String) -> Bool {
+        let categoryText = value.lowercased()
         guard categoryText.isEmpty == false else {
             return true
         }
