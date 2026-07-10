@@ -21,11 +21,13 @@ public struct TorrentDownloadProgress: Equatable, Sendable {
     public var downloadedBytes: UInt64
     public var selectedFileBytes: UInt64?
     public var largestPlayableFileName: String?
+    public var failureMessage: String?
 
-    public init(downloadedBytes: UInt64, selectedFileBytes: UInt64? = nil, largestPlayableFileName: String? = nil) {
+    public init(downloadedBytes: UInt64, selectedFileBytes: UInt64? = nil, largestPlayableFileName: String? = nil, failureMessage: String? = nil) {
         self.downloadedBytes = downloadedBytes
         self.selectedFileBytes = selectedFileBytes
         self.largestPlayableFileName = largestPlayableFileName
+        self.failureMessage = failureMessage
     }
 
     public var megabytesText: String {
@@ -37,6 +39,7 @@ public struct TorrentDownloadProgress: Equatable, Sendable {
     }
 
     public var statusText: String {
+        if let failureMessage, failureMessage.isEmpty == false { return "BT 任務錯誤：\(failureMessage)" }
         if let largestPlayableFileName {
             let selectedText = selectedFileBytes.map { TorrentDownloadProgress.megabytesText(for: $0) } ?? "0.0 MB"
             return "總下載 \(megabytesText) · 目前檔案緩衝 \(selectedText) · \(largestPlayableFileName)"
