@@ -19,10 +19,10 @@ public struct PermissionStatusView: View {
 
             Text("開啟遙控器設定後按 OK，即可跳出 macOS 權限提示。")
                 .font(.system(size: 24, weight: .medium))
-                .foregroundStyle(.white.opacity(0.62))
+                .foregroundStyle(AccessibilityScanner.isTrusted ? .white.opacity(0.62) : .black.opacity(0.58))
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(AccessibilityScanner.isTrusted ? .white : .black)
         .padding(30)
-        .liquidGlassCard(isFocused: AccessibilityScanner.isTrusted == false, cornerRadius: 18)
+        .tvOS18Surface(role: .row, isFocused: AccessibilityScanner.isTrusted == false, cornerRadius: 10)
     }
 }

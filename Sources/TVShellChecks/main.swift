@@ -120,6 +120,7 @@ struct TVShellChecks {
         try checkAppStateOpensFocusedApps()
         try checkTVMetricsScaleWithWindowSize()
         try checkTVOS18VisualSystem()
+        try checkTVOS18SettingsLayout()
         try checkAppCatalogVisibilityAndOrdering()
         try checkSettingsPersistAcrossRelaunch()
         try checkCredentialsPersistAndLoadFromFile()
@@ -178,6 +179,27 @@ struct TVShellChecks {
         let metrics = TVMetrics(size: CGSize(width: 1_920, height: 1_080))
         try expect(abs(metrics.appTileWidth / metrics.appTileHeight - 1.55) < 0.02, "launcher app tiles use the approved 1.55:1 ratio")
         try expect(metrics.horizontalPadding >= 80, "tvOS layout keeps the horizontal safe area")
+    }
+
+    static func checkTVOS18SettingsLayout() throws {
+        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        let components = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Settings/TVOS18SettingsComponents.swift"))
+        let settings = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Settings/SettingsView.swift"))
+        try expect(settings.contains("TVOS18SettingsSplitView"), "settings uses the tvOS 18 split layout")
+        try expect(components.contains("struct TVOS18SettingsRow"), "settings shares a system row component")
+        try expect(components.contains("isFocused ? Color.black : Color.white"), "focused settings rows use dark content")
+
+        let managementPaths = [
+            "Sources/TVShellCore/Settings/SettingsView.swift",
+            "Sources/TVShellCore/Settings/AppManagementView.swift",
+            "Sources/TVShellCore/Settings/AnimeSourceManagementView.swift",
+            "Sources/TVShellCore/Settings/PermissionStatusView.swift",
+            "Sources/TVShellCore/Settings/RemoteLearningView.swift"
+        ]
+        for path in managementPaths {
+            let source = try String(contentsOf: root.appending(path: path))
+            try expect(source.contains("liquidGlassCard") == false, "tvOS 18 settings screen removes Liquid Glass: \(path)")
+        }
     }
 
     static func checkDanmakuMotionCompletesOffscreenTravel() throws {

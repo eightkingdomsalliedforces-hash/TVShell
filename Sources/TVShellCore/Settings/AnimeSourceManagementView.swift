@@ -7,46 +7,56 @@ public struct AnimeSourceManagementView: View {
 
     public var body: some View {
         GeometryReader { proxy in
+            let metrics = TVMetrics(size: proxy.size)
             let scale = max(0.82, min(proxy.size.width / 1920, 1.45))
 
             ZStack {
-                TVControlBackdrop()
+                TVOS18Backdrop(accent: Color(red: 0.16, green: 0.18, blue: 0.20))
 
-                VStack(alignment: .leading, spacing: 28 * scale) {
-                    header(scale: scale)
+                TVOS18SettingsSplitView(metrics: metrics) {
+                    TVOS18SettingsSidebar(
+                        symbolName: "square.stack.3d.up.fill",
+                        title: "動漫來源",
+                        subtitle: "管理 Animeko 風格解析來源、線路、啟用狀態與排序。",
+                        metrics: metrics
+                    )
+                } content: {
+                    VStack(alignment: .leading, spacing: 18 * scale) {
+                        HStack {
+                            Spacer()
+                            AnimeSourceModePill(mode: appState.animeSourceCatalog.displayMode, scale: scale)
+                        }
 
-                    ScrollViewReader { scrollProxy in
-                        ScrollView(.vertical, showsIndicators: false) {
-                            LazyVStack(alignment: .leading, spacing: 16 * scale) {
-                                ForEach(appState.animeSourceCatalog.instances) { source in
-                                    AnimeSourceRow(
-                                        source: source,
-                                        isFocused: source.id == appState.focusedAnimeSourceID,
-                                        mode: appState.animeSourceCatalog.displayMode,
-                                        scale: scale
-                                    )
-                                    .id(source.id)
+                        ScrollViewReader { scrollProxy in
+                            ScrollView(.vertical, showsIndicators: false) {
+                                LazyVStack(alignment: .leading, spacing: 12 * scale) {
+                                    ForEach(appState.animeSourceCatalog.instances) { source in
+                                        AnimeSourceRow(
+                                            source: source,
+                                            isFocused: source.id == appState.focusedAnimeSourceID,
+                                            mode: appState.animeSourceCatalog.displayMode,
+                                            scale: scale
+                                        )
+                                        .id(source.id)
+                                    }
+                                }
+                                .padding(.horizontal, 10 * scale)
+                                .padding(.vertical, 8 * scale)
+                            }
+                            .onChange(of: appState.focusedAnimeSourceID) { _, id in
+                                guard let id else { return }
+                                withAnimation(TVMotion.focus) {
+                                    scrollProxy.scrollTo(id, anchor: .center)
                                 }
                             }
-                            .padding(.vertical, 8 * scale)
                         }
-                        .onChange(of: appState.focusedAnimeSourceID) { _, id in
-                            guard let id else {
-                                return
-                            }
-                            withAnimation(TVMotion.focus) {
-                                scrollProxy.scrollTo(id, anchor: .center)
-                            }
-                        }
-                    }
 
-                    Text("上下選來源，左右切線路，OK 啟用或停用，Menu 切換模式，上一首/下一首調整排序。")
-                        .font(.system(size: 25 * scale, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.62))
+                        Text("上下選來源，左右切線路，OK 啟用或停用，Menu 切換模式。")
+                            .font(.system(size: 21 * scale, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.58))
+                    }
                 }
                 .foregroundStyle(.white)
-                .padding(.horizontal, 72 * scale)
-                .padding(.vertical, 54 * scale)
             }
         }
     }
@@ -119,26 +129,26 @@ private struct AnimeSourceRow: View {
                 HStack(spacing: 16 * scale) {
                     Text(source.definition.title)
                         .font(.system(size: 32 * scale, weight: .bold))
-                        .foregroundStyle(source.isEnabled ? .white : .white.opacity(0.46))
+                        .foregroundStyle(isFocused ? .black.opacity(source.isEnabled ? 0.94 : 0.46) : .white.opacity(source.isEnabled ? 1 : 0.46))
                     AnimeSourceHealthBadge(health: source.definition.health, isEnabled: source.isEnabled, scale: scale)
                 }
 
                 if mode == .detailed {
                     Text(detailText)
                         .font(.system(size: 21 * scale, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.56))
+                        .foregroundStyle(isFocused ? .black.opacity(0.58) : .white.opacity(0.56))
                 }
             }
             .frame(minWidth: 280 * scale, alignment: .leading)
 
             Spacer(minLength: 20 * scale)
 
-            FlowLineChips(source: source, scale: scale)
+            FlowLineChips(source: source, isFocused: isFocused, scale: scale)
         }
         .padding(.horizontal, 26 * scale)
         .padding(.vertical, 18 * scale)
         .scaleEffect(isFocused ? 1.022 : 1.0)
-        .liquidGlassCard(isFocused: isFocused, cornerRadius: 28 * scale)
+        .tvOS18Surface(role: .row, isFocused: isFocused, cornerRadius: 10 * scale)
         .opacity(source.isEnabled ? 1 : 0.62)
         .animation(TVMotion.focus, value: isFocused)
         .animation(TVMotion.focus, value: source.selectedLineID)
@@ -229,6 +239,7 @@ private struct AnimeSourceHealthBadge: View {
 
 private struct FlowLineChips: View {
     let source: AnimeSourceInstance
+    let isFocused: Bool
     let scale: CGFloat
 
     var body: some View {
@@ -238,6 +249,7 @@ private struct FlowLineChips: View {
                     title: line.title,
                     isSelected: line.id == source.selectedLine?.id,
                     isDeprecated: line.isDeprecated,
+                    isParentFocused: isFocused,
                     scale: scale
                 )
             }
@@ -250,6 +262,7 @@ private struct LineChip: View {
     let title: String
     let isSelected: Bool
     let isDeprecated: Bool
+    let isParentFocused: Bool
     let scale: CGFloat
 
     var body: some View {
@@ -261,17 +274,20 @@ private struct LineChip: View {
             .padding(.vertical, 10 * scale)
             .background(
                 Capsule()
-                    .fill(isSelected ? .white.opacity(0.22) : .white.opacity(0.06))
+                    .fill(isParentFocused ? .black.opacity(isSelected ? 0.14 : 0.06) : .white.opacity(isSelected ? 0.22 : 0.06))
             )
             .overlay(
                 Capsule()
-                    .stroke(isSelected ? .white.opacity(0.56) : .white.opacity(0.18), lineWidth: isSelected ? 2 : 1)
+                    .stroke(isParentFocused ? .black.opacity(isSelected ? 0.46 : 0.18) : .white.opacity(isSelected ? 0.56 : 0.18), lineWidth: isSelected ? 2 : 1)
             )
     }
 
     private var foreground: Color {
         if isDeprecated {
-            return .white.opacity(0.38)
+            return isParentFocused ? .black.opacity(0.38) : .white.opacity(0.38)
+        }
+        if isParentFocused {
+            return isSelected ? .black : .black.opacity(0.66)
         }
         return isSelected ? .white : .white.opacity(0.66)
     }

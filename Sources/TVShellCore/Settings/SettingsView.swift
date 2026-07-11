@@ -7,17 +7,17 @@ public struct SettingsView: View {
 
     public var body: some View {
         ZStack {
-            TVControlBackdrop(accent: Color(red: 0.14, green: 0.40, blue: 0.54))
+            TVOS18Backdrop(accent: Color(red: 0.14, green: 0.24, blue: 0.28))
 
             GeometryReader { proxy in
                 let metrics = TVMetrics(size: proxy.size)
 
-                ScrollViewReader { scrollProxy in
-                    ScrollView(.vertical) {
-                        VStack(alignment: .leading, spacing: 34 * metrics.scale) {
-                            SettingsHero(metrics: metrics)
-                                .padding(.top, metrics.topPadding)
-
+                TVOS18SettingsSplitView(metrics: metrics) {
+                    SettingsHero(metrics: metrics)
+                } content: {
+                    ScrollViewReader { scrollProxy in
+                        ScrollView(.vertical) {
+                            VStack(alignment: .leading, spacing: 12 * metrics.scale) {
                             SettingsSectionHeader(title: "外觀", metrics: metrics)
                             settingRow(
                                 focus: .scale,
@@ -113,19 +113,20 @@ public struct SettingsView: View {
                             PermissionStatusView()
                                 .padding(.top, 12 * metrics.scale)
                                 .padding(.bottom, 48 * metrics.scale)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: proxy.size.height - 120 * metrics.scale, alignment: .topLeading)
+                            .padding(.horizontal, 10 * metrics.scale)
+                            .padding(.bottom, 48 * metrics.scale)
                         }
-                        .frame(maxWidth: min(1_620 * metrics.scale, proxy.size.width - metrics.horizontalPadding * 2), minHeight: proxy.size.height, alignment: .topLeading)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.horizontal, metrics.horizontalPadding)
-                    }
-                    .scrollIndicators(.hidden)
-                    .onChange(of: appState.settingsFocus) { _, focus in
-                        withAnimation(TVMotion.focus) {
-                            scrollProxy.scrollTo(focus, anchor: .center)
+                        .scrollIndicators(.hidden)
+                        .onChange(of: appState.settingsFocus) { _, focus in
+                            withAnimation(TVMotion.focus) {
+                                scrollProxy.scrollTo(focus, anchor: .center)
+                            }
                         }
-                    }
-                    .onAppear {
-                        scrollProxy.scrollTo(appState.settingsFocus, anchor: .center)
+                        .onAppear {
+                            scrollProxy.scrollTo(appState.settingsFocus, anchor: .center)
+                        }
                     }
                 }
             }
@@ -178,30 +179,12 @@ private struct SettingsHero: View {
     let metrics: TVMetrics
 
     var body: some View {
-        HStack(spacing: 28 * metrics.scale) {
-            Image(systemName: "gearshape.fill")
-                .font(.system(size: 76 * metrics.scale, weight: .semibold))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.white)
-                .frame(width: 132 * metrics.scale, height: 132 * metrics.scale)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 30 * metrics.scale, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 30 * metrics.scale, style: .continuous)
-                        .strokeBorder(.white.opacity(0.26), lineWidth: 1)
-                }
-
-            VStack(alignment: .leading, spacing: 8 * metrics.scale) {
-                Text("設定")
-                    .font(.system(size: 76 * metrics.scale, weight: .bold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.76)
-                Text("系統、播放與服務")
-                    .font(.system(size: 30 * metrics.scale, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.66))
-            }
-
-            Spacer(minLength: 0)
-        }
+        TVOS18SettingsSidebar(
+            symbolName: "gearshape.fill",
+            title: "設定",
+            subtitle: "系統、播放、彈幕與服務設定",
+            metrics: metrics
+        )
     }
 }
 
@@ -231,35 +214,15 @@ private struct SettingsOptionRow: View {
     let metrics: TVMetrics
 
     var body: some View {
-        HStack(spacing: 26 * metrics.scale) {
-            Image(systemName: symbolName)
-                .font(.system(size: 36 * metrics.scale, weight: .semibold))
-                .frame(width: 78 * metrics.scale, height: 78 * metrics.scale)
-                .background(.white.opacity(isFocused ? 0.23 : 0.12), in: RoundedRectangle(cornerRadius: 20 * metrics.scale, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 6 * metrics.scale) {
-                Text(title)
-                    .font(.system(size: 34 * metrics.scale, weight: .semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-                Text(value)
-                    .font(.system(size: 26 * metrics.scale, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.64))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.66)
-            }
-
-            Spacer(minLength: 20 * metrics.scale)
-
-            controlIndicator
-                .foregroundStyle(.white.opacity(isFocused ? 0.96 : 0.54))
-        }
-        .padding(.horizontal, 28 * metrics.scale)
-        .padding(.vertical, 20 * metrics.scale)
-        .frame(minHeight: 124 * metrics.scale)
-        .liquidGlassCard(isFocused: isFocused, cornerRadius: 24 * metrics.scale)
-        .scaleEffect(isFocused ? 1.012 : 1)
-        .animation(TVMotion.focus, value: isFocused)
+        TVOS18SettingsRow(
+            symbolName: symbolName,
+            title: title,
+            value: value,
+            isFocused: isFocused,
+            showsChevron: actionStyle == .command,
+            showsAdjustment: actionStyle == .adjustment,
+            metrics: metrics
+        )
     }
 
     @ViewBuilder
