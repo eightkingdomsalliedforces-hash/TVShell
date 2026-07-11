@@ -158,18 +158,30 @@ private struct TVOSAppDock: View {
     let metrics: TVMetrics
 
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(alignment: .bottom, spacing: 24 * metrics.scale) {
-                ForEach(apps) { app in
-                    AppCardView(app: app, isFocused: app.id == focusedAppID, metrics: metrics)
-                        .id("tvos-dock-app-\(app.id.uuidString)")
+        ScrollViewReader { dockScrollProxy in
+            ScrollView(.horizontal) {
+                HStack(alignment: .bottom, spacing: 24 * metrics.scale) {
+                    ForEach(apps) { app in
+                        AppCardView(app: app, isFocused: app.id == focusedAppID, metrics: metrics)
+                            .id("tvos-dock-app-\(app.id.uuidString)")
+                    }
+                }
+                .padding(.horizontal, 34 * metrics.scale)
+                .padding(.top, 26 * metrics.scale)
+                .padding(.bottom, 14 * metrics.scale)
+            }
+            .scrollIndicators(.hidden)
+            .onChange(of: focusedAppID) { _, id in
+                guard let id else { return }
+                withAnimation(TVMotion.focus) {
+                    dockScrollProxy.scrollTo("tvos-dock-app-\(id.uuidString)", anchor: .center)
                 }
             }
-            .padding(.horizontal, 34 * metrics.scale)
-            .padding(.top, 26 * metrics.scale)
-            .padding(.bottom, 14 * metrics.scale)
+            .onAppear {
+                guard let focusedAppID else { return }
+                dockScrollProxy.scrollTo("tvos-dock-app-\(focusedAppID.uuidString)", anchor: .center)
+            }
         }
-        .scrollIndicators(.hidden)
         .tvOS18Surface(role: .panel, cornerRadius: 28 * metrics.scale)
     }
 }
