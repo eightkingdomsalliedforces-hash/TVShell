@@ -188,13 +188,17 @@ public enum DandanplayAPI {
             .sorted { $0.time < $1.time }
     }
 
-    public static func decodeEpisodeSearch(_ data: Data, preferredEpisode: Int) throws -> String? {
+    public static func decodeEpisodeSearch(
+        _ data: Data,
+        preferredEpisode: Int,
+        exactOnly: Bool = false
+    ) throws -> String? {
         let response = try JSONDecoder().decode(DandanplayEpisodeSearchResponse.self, from: data)
         let candidates = response.allEpisodes
         if let exact = candidates.first(where: { $0.matches(episode: preferredEpisode) }) {
             return exact.episodeIDString
         }
-        return candidates.first?.episodeIDString
+        return exactOnly ? nil : candidates.first?.episodeIDString
     }
 }
 

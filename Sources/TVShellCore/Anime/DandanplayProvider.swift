@@ -120,18 +120,41 @@ public struct DandanplayDanmakuProvider: DanmakuProvider {
             return episode.episodeID
         }
 
-        let preferredEpisode = Int(episode.episodeID.filter(\.isNumber)) ?? 1
-        let request = DandanplayAPI.searchEpisodesRequest(
-            anime: episode.subjectID,
-            episode: preferredEpisode,
-            appID: credentials.appID,
-            appSecret: credentials.appSecret,
-            timestamp: timestamp
-        )
-        let data = try await transport.data(for: request)
-        guard let matchedID = try DandanplayAPI.decodeEpisodeSearch(data, preferredEpisode: preferredEpisode) else {
-            throw AnimeHTTPError.missingRoute("dandanplay episode id: \(episode.subjectID) #\(preferredEpisode)")
+        let preferredEpisode = Int(episode.episodeID) ?? Int(episode.episodeID.filter(\.isNumber)) ?? 1
+        var seenTitles = Set<String>()
+        let titles = ([episode.subjectID] + episode.subjectAliases).filter { title in
+            let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.isEmpty == false,
+                  trimmed.hasPrefix("css1-source:") == false,
+                  seenTitles.contains(trimmed) == false
+            else {
+                return false
+            }
+            seenTitles.insert(trimmed)
+            return true
         }
-        return matchedID
+
+        for title in titles {
+            do {
+                let request = DandanplayAPI.searchEpisodesRequest(
+                    anime: title,
+                    episode: preferredEpisode,
+                    appID: credentials.appID,
+                    appSecret: credentials.appSecret,
+                    timestamp: timestamp
+                )
+                let data = try await transport.data(for: request)
+                if let matchedID = try DandanplayAPI.decodeEpisodeSearch(
+                    data,
+                    preferredEpisode: preferredEpisode,
+                    exactOnly: true
+                ) {
+                    return matchedID
+                }
+            } catch {
+                continue
+            }
+        }
+        throw AnimeHTTPError.missingRoute("dandanplay episode id: \(episode.subjectID) #\(preferredEpisode)")
     }
 }

@@ -921,6 +921,70 @@ struct TVShellChecks {
             episodeID: "1"
         ))
         try expect(comments.first?.text == "Dandanplay 彈幕", "dandanplay provider searches episode id before loading comments")
+
+        let primaryRequest = DandanplayAPI.searchEpisodesRequest(
+            anime: "魔法禁書目錄",
+            episode: 1,
+            appID: credentials.appID,
+            appSecret: credentials.appSecret,
+            timestamp: 1_735_660_800
+        )
+        let aliasRequest = DandanplayAPI.searchEpisodesRequest(
+            anime: "とある魔術の禁書目録",
+            episode: 1,
+            appID: credentials.appID,
+            appSecret: credentials.appSecret,
+            timestamp: 1_735_660_800
+        )
+        let wrongEpisodeJSON = """
+        {
+          "animes": [{
+            "animeId": 999,
+            "animeTitle": "魔法禁書目錄",
+            "episodes": [
+              { "episodeId": 999000002, "episodeTitle": "第 2 話", "episodeNumber": "2" }
+            ]
+          }]
+        }
+        """.data(using: .utf8)!
+        let aliasEpisodeJSON = """
+        {
+          "animes": [{
+            "animeId": 12345,
+            "animeTitle": "とある魔術の禁書目録",
+            "episodes": [
+              { "episodeId": 123450001, "episodeTitle": "第 1 話", "episodeNumber": "1" }
+            ]
+          }]
+        }
+        """.data(using: .utf8)!
+        let relatedCommentsJSON = """
+        {
+          "comments": [
+            { "p": "1.000,1,25,16777215,0", "m": "第一條" },
+            { "p": "2.000,1,25,16777215,0", "m": "第二條" },
+            { "p": "3.000,1,25,16777215,0", "m": "第三條" }
+          ]
+        }
+        """.data(using: .utf8)!
+        let aliasTransport = StaticAnimeHTTPTransport(routes: [
+            primaryRequest.url.absoluteString: wrongEpisodeJSON,
+            aliasRequest.url.absoluteString: aliasEpisodeJSON,
+            "https://api.dandanplay.net/api/v2/comment/123450001?withRelated=true": relatedCommentsJSON
+        ])
+        let aliasProvider = DandanplayDanmakuProvider(
+            credentials: credentials,
+            timestamp: 1_735_660_800,
+            transport: aliasTransport
+        )
+        let relatedComments = try await aliasProvider.comments(for: AnimeEpisodeIdentity(
+            providerID: "ani-subs-css1",
+            subjectID: "魔法禁書目錄",
+            episodeID: "1",
+            subjectAliases: ["魔法禁书目录", "とある魔術の禁書目録", "css1-source:畫質站"]
+        ))
+        try expect(relatedComments.count == 3, "dandanplay keeps the full related comment response after alias matching")
+        try expect(aliasTransport.requests.contains { $0.url == aliasRequest.url }, "dandanplay retries canonical aliases when the primary title has no exact episode")
     }
 
     @MainActor
@@ -2024,6 +2088,74 @@ struct TVShellChecks {
         try expect(streams.first?.url.absoluteString == "https://cdn.example/frieren-1.mkv?token=abc", "css1 provider parses nested encoded video url")
         try expect(streams.first?.headers["resolver"] == "web-selector", "css1 stream marks web selector resolver")
         try expect(streams.first?.headers["Referer"] == "https://web.example/", "css1 stream carries video headers from subscription")
+
+        let qualitySubscription = """
+        {
+          "exportedMediaSourceDataList": {
+            "mediaSources": [
+              {
+                "factoryId": "web-selector",
+                "arguments": {
+                  "name": "畫質站[480p]",
+                  "searchConfig": {
+                    "searchUrl": "https://quality-low.example/search?wd={keyword}",
+                    "selectorSubjectFormatA": { "selectLists": ".anime>a" },
+                    "selectorChannelFormatFlattened": {
+                      "selectEpisodeLists": ".episodes",
+                      "selectEpisodesFromList": "a",
+                      "matchEpisodeSortFromName": "第\\\\s*(?<ep>.+)\\\\s*[话集]"
+                    },
+                    "matchVideo": { "matchVideoUrl": "(?<v>https?://.+\\\\.mp4)" }
+                  }
+                }
+              },
+              {
+                "factoryId": "web-selector",
+                "arguments": {
+                  "name": "畫質站[1080p]",
+                  "searchConfig": {
+                    "searchUrl": "https://quality-high.example/search?wd={keyword}",
+                    "selectorSubjectFormatA": { "selectLists": ".anime>a" },
+                    "selectorChannelFormatFlattened": {
+                      "selectEpisodeLists": ".episodes",
+                      "selectEpisodesFromList": "a",
+                      "matchEpisodeSortFromName": "第\\\\s*(?<ep>.+)\\\\s*[话集]"
+                    },
+                    "matchVideo": { "matchVideoUrl": "(?<v>https?://.+\\\\.mp4)" }
+                  }
+                }
+              }
+            ]
+          }
+        }
+        """.data(using: .utf8)!
+        let qualitySearch = #"<div class="anime"><a href="/show/quality">畫質動畫</a></div>"#.data(using: .utf8)!
+        let qualityDetail = #"<div class="episodes"><a href="/watch/series-9876-1">第 1 話</a></div>"#.data(using: .utf8)!
+        let qualityHealthURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("TVShellChecks-CSS1Quality-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: qualityHealthURL) }
+        let qualityProvider = AniSubsCSS1SubscriptionProvider(
+            subscriptionURL: subscriptionURL,
+            transport: StaticAnimeHTTPTransport(routes: [
+                subscriptionURL.absoluteString: qualitySubscription,
+                "https://quality-low.example/search?wd=%E7%95%AB%E8%B3%AA": qualitySearch,
+                "https://quality-high.example/search?wd=%E7%95%AB%E8%B3%AA": qualitySearch,
+                "https://quality-low.example/show/quality": qualityDetail,
+                "https://quality-high.example/show/quality": qualityDetail,
+                "https://quality-low.example/watch/series-9876-1": #"https://cdn.example/quality-480p.mp4"#.data(using: .utf8)!,
+                "https://quality-high.example/watch/series-9876-1": #"https://cdn.example/quality-1080p.mp4"#.data(using: .utf8)!
+            ]),
+            healthStore: AniSubsCSS1SourceHealthStore(fileURL: qualityHealthURL)
+        )
+        let qualityResults = try await qualityProvider.search(AnimeSearchQuery(keyword: "畫質"))
+        guard let qualityEpisode = qualityResults.first?.episodes.first else {
+            throw CheckFailure("missing merged CSS1 quality episode")
+        }
+        try expect(qualityEpisode.playbackLines?.count == 2, "css1 merges same-title playback lines from every source")
+        try expect(qualityEpisode.identity.episodeID == "1", "css1 stores the parsed episode number instead of URL digits for danmaku matching")
+        let qualityStreams = try await qualityProvider.streams(for: qualityEpisode)
+        try expect(qualityStreams.first?.url.absoluteString == "https://cdn.example/quality-1080p.mp4", "css1 puts the highest-quality stream first")
+        try expect(qualityStreams.first?.quality == "1080p", "css1 exposes the inferred stream resolution")
 
         let timeoutSubscription = """
         {

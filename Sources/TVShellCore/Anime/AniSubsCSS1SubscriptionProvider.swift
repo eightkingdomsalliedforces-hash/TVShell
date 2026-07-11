@@ -194,10 +194,19 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
         guard lines.isEmpty == false else {
             throw AnimeHTTPError.missingRoute("ani-subs css1 playback url: \(episode.identity.episodeID)")
         }
-        let source = try await source(named: css1SourceName(for: episode))
+        let healthState = (try? healthStore.load()) ?? AniSubsCSS1SourceHealthState()
+        let sources = try await webSelectorSources()
+            .filter { healthState.skippedSourceNames.contains($0.name) == false }
+        let fallbackSourceName = css1SourceName(for: episode)
         var candidates: [AnimeStreamCandidate] = []
         for (index, line) in lines.enumerated() {
             do {
+            guard let source = sources.first(where: { $0.name == line.sourceName })
+                ?? sources.first(where: { $0.name == fallbackSourceName })
+                ?? sources.first
+            else {
+                continue
+            }
             let watchHTML = try await html(for: line.playbackURL, source: source)
         let playbackHTML: String
         let playbackBaseURL: URL
@@ -221,10 +230,11 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
             throw AnimeHTTPError.missingRoute("ani-subs css1 video url: \(line.playbackURL.absoluteString)")
         }
 
+            let quality = css1QualityLabel(sourceName: source.name, streamURL: streamURL)
             candidates.append(AnimeStreamCandidate(
                 url: streamURL,
-                quality: "CSS1",
-                priority: 64 - index,
+                quality: quality,
+                priority: css1QualityPriority(quality) + max(0, 64 - index),
                 headers: [
                     "resolver": "web-selector",
                     "source": source.name,
@@ -240,17 +250,33 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
         guard candidates.isEmpty == false else {
             throw AnimeHTTPError.missingRoute("ani-subs css1 video url: \(episode.identity.episodeID)")
         }
-        return candidates
+        return candidates.sorted { left, right in
+            if left.priority == right.priority {
+                return left.quality.localizedStandardCompare(right.quality) == .orderedDescending
+            }
+            return left.priority > right.priority
+        }
     }
 
-    private func source(named name: String) async throws -> AniSubsCSS1Source {
-        let healthState = (try? healthStore.load()) ?? AniSubsCSS1SourceHealthState()
-        let sources = try await webSelectorSources()
-            .filter { healthState.skippedSourceNames.contains($0.name) == false }
-        guard let source = sources.first(where: { $0.name == name }) ?? sources.first else {
-            throw AnimeHTTPError.missingRoute("ani-subs css1 source")
+    private func css1QualityLabel(sourceName: String, streamURL: URL) -> String {
+        let value = "\(sourceName) \(streamURL.absoluteString)".lowercased()
+        if value.contains("2160") || value.contains("4k") || value.contains("uhd") { return "2160p" }
+        if value.contains("1080") || value.contains("fhd") { return "1080p" }
+        if value.contains("720") { return "720p" }
+        if value.contains("480") { return "480p" }
+        if value.contains("360") { return "360p" }
+        return "CSS1"
+    }
+
+    private func css1QualityPriority(_ quality: String) -> Int {
+        switch quality {
+        case "2160p": return 400
+        case "1080p": return 300
+        case "720p": return 200
+        case "480p": return 100
+        case "360p": return 50
+        default: return 0
         }
-        return source
     }
 
     private func webSelectorSources() async throws -> [AniSubsCSS1Source] {
@@ -432,7 +458,7 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
                 identity: AnimeEpisodeIdentity(
                     providerID: id,
                     subjectID: subjectTitle,
-                    episodeID: anchor.url.absoluteString,
+                    episodeID: "\(number)",
                     subjectAliases: [subjectTitle, css1SourceMarker(source.name)],
                     playbackURL: anchor.url
                 ),
@@ -1185,7 +1211,7 @@ private func mergeCSS1Results(_ results: [AnimeSearchResult]) -> [AnimeSearchRes
             .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
             .replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
         if let existing = byTitle[key] {
-            byTitle[key] = preferredCSS1Result(existing, result)
+            byTitle[key] = mergedCSS1Result(existing, result)
         } else {
             byTitle[key] = result
             order.append(key)
@@ -1194,7 +1220,13 @@ private func mergeCSS1Results(_ results: [AnimeSearchResult]) -> [AnimeSearchRes
     return order.compactMap { byTitle[$0] }
 }
 
-private func preferredCSS1Result(_ left: AnimeSearchResult, _ right: AnimeSearchResult) -> AnimeSearchResult {
+private func mergedCSS1Result(_ left: AnimeSearchResult, _ right: AnimeSearchResult) -> AnimeSearchResult {
+    var preferred = preferredCSS1MetadataResult(left, right)
+    preferred.episodes = mergeCSS1Episodes(left.episodes + right.episodes)
+    return preferred
+}
+
+private func preferredCSS1MetadataResult(_ left: AnimeSearchResult, _ right: AnimeSearchResult) -> AnimeSearchResult {
     let leftDistance = episodeCountDistance(for: left)
     let rightDistance = episodeCountDistance(for: right)
     if leftDistance != rightDistance {
@@ -1204,6 +1236,32 @@ private func preferredCSS1Result(_ left: AnimeSearchResult, _ right: AnimeSearch
         return left.coverURL != nil ? left : right
     }
     return left
+}
+
+private func mergeCSS1Episodes(_ episodes: [AnimeEpisode]) -> [AnimeEpisode] {
+    var episodesByNumber: [Int: AnimeEpisode] = [:]
+    for episode in episodes {
+        guard var existing = episodesByNumber[episode.number] else {
+            episodesByNumber[episode.number] = episode
+            continue
+        }
+        var seenURLs = Set<String>()
+        let lines = ((existing.playbackLines ?? []) + (episode.playbackLines ?? [])).filter { line in
+            seenURLs.insert(line.playbackURL.absoluteString).inserted
+        }
+        existing.playbackLines = lines
+        if existing.identity.playbackURL == nil {
+            existing.identity.playbackURL = episode.identity.playbackURL
+        }
+        var seenAliases = Set<String>()
+        existing.identity.subjectAliases = (existing.identity.subjectAliases + episode.identity.subjectAliases)
+            .filter { alias in
+                let trimmed = alias.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty == false && seenAliases.insert(trimmed).inserted
+            }
+        episodesByNumber[episode.number] = existing
+    }
+    return episodesByNumber.keys.sorted().compactMap { episodesByNumber[$0] }
 }
 
 private func episodeCountDistance(for result: AnimeSearchResult) -> Int {
