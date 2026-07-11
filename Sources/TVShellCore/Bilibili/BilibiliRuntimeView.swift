@@ -227,21 +227,16 @@ public struct BilibiliRuntimeView: View {
             )
             .zIndex(3)
 
-            if controller.isPlayerHUDVisible {
-                VStack(alignment: .leading, spacing: 12 * metrics.scale) {
-                    Text(controller.playingTitle)
-                        .font(.system(size: 38 * metrics.scale, weight: .bold))
-                        .lineLimit(2)
-                    Text(controller.statusText)
-                        .font(.system(size: 22 * metrics.scale, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.72))
-                        .lineLimit(2)
-                }
-                .padding(28 * metrics.scale)
-                .tvOS18Surface(role: .panel, cornerRadius: 14 * metrics.scale)
-                .padding(50 * metrics.scale)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
+            TVOS18PlayerHUD(
+                title: controller.playingTitle,
+                eyebrow: controller.statusText,
+                currentTime: controller.danmakuPlaybackTime,
+                duration: 0,
+                isPlaying: controller.isDanmakuClockRunning,
+                isVisible: controller.isPlayerHUDVisible,
+                tools: [TVOS18PlayerTool(id: "danmaku", symbolName: "text.bubble", label: "Bilibili 彈幕", isSelected: true)]
+            )
+            .zIndex(4)
         }
         .background(.black)
     }

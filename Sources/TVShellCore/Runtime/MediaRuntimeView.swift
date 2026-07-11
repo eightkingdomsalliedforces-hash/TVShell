@@ -23,16 +23,15 @@ public struct MediaRuntimeView: View {
                     setStatusClockHidden(false)
                 }
 
-            VStack(alignment: .leading, spacing: 14) {
-                Text(app.name)
-                    .font(.system(size: 42, weight: .bold))
-                Text(controller.statusText)
-                    .font(.system(size: 24, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.72))
-            }
-            .padding(30)
-            .liquidGlassCard(isFocused: true, cornerRadius: 22)
-            .padding(56)
+            TVOS18PlayerHUD(
+                title: app.name,
+                eyebrow: controller.statusText,
+                currentTime: controller.player.currentTime().seconds,
+                duration: controller.player.currentItem?.duration.seconds ?? 0,
+                isPlaying: controller.isPlaying,
+                isVisible: true,
+                tools: [TVOS18PlayerTool(id: "media", symbolName: "film.fill", label: "影片")]
+            )
         }
         .background(.black)
     }
@@ -50,6 +49,7 @@ private func setStatusClockHidden(_ hidden: Bool) {
 final class MediaRuntimeController: ObservableObject {
     let player = AVPlayer()
     @Published private(set) var statusText = "正在載入影片..."
+    @Published private(set) var isPlaying = false
     private nonisolated(unsafe) var observer: NSObjectProtocol?
     private nonisolated(unsafe) var itemObserver: NSKeyValueObservation?
     private var state = MediaControlState()
@@ -103,11 +103,13 @@ final class MediaRuntimeController: ObservableObject {
         player.replaceCurrentItem(with: item)
         player.play()
         state = MediaControlState(isPlaying: true)
+        isPlaying = true
     }
 
     func stop() {
         player.pause()
         player.replaceCurrentItem(with: nil)
+        isPlaying = false
     }
 
     private func handle(_ command: RemoteCommand) {
@@ -135,6 +137,7 @@ final class MediaRuntimeController: ObservableObject {
         } else {
             player.pause()
         }
+        isPlaying = state.isPlaying
     }
 }
 

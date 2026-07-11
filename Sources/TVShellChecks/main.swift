@@ -123,6 +123,7 @@ struct TVShellChecks {
         try checkTVOS18SettingsLayout()
         try checkTVOS18SystemOverlays()
         try checkTVOS18MediaBrowsers()
+        try checkTVOS18PlayerHUD()
         try checkAppCatalogVisibilityAndOrdering()
         try checkSettingsPersistAcrossRelaunch()
         try checkCredentialsPersistAndLoadFromFile()
@@ -231,6 +232,27 @@ struct TVShellChecks {
             try expect(source.contains("TVOS18Backdrop"), "media browser uses the tvOS 18 backdrop: \(path)")
             try expect(source.contains("tvOS18ContentFocus"), "media browser uses image-based tvOS focus: \(path)")
             try expect(source.contains("liquidGlassCard") == false, "media browser removes Liquid Glass: \(path)")
+        }
+    }
+
+    static func checkTVOS18PlayerHUD() throws {
+        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        let hud = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Runtime/TVOS18PlayerHUD.swift"))
+        try expect(hud.contains("struct TVOS18PlayerHUD") && hud.contains("ProgressView"), "tvOS 18 player HUD exposes a shared progress overlay")
+        try expect(hud.contains("LinearGradient") && hud.contains("alignment: .bottom"), "player HUD uses a bottom-aligned dark gradient")
+        try expect(hud.contains("struct TVOS18PlayerMenu") && hud.contains("checkmark"), "player HUD exposes checked compact menus")
+        try expect(hud.contains("if isVisible"), "player HUD renders nothing after its visibility timeout")
+
+        let playerPaths = [
+            "Sources/TVShellCore/Anime/AnimeRuntimeView.swift",
+            "Sources/TVShellCore/YouTube/YouTubeRuntimeView.swift",
+            "Sources/TVShellCore/Bilibili/BilibiliRuntimeView.swift",
+            "Sources/TVShellCore/Runtime/MediaRuntimeView.swift"
+        ]
+        for path in playerPaths {
+            let source = try String(contentsOf: root.appending(path: path))
+            try expect(source.contains("TVOS18PlayerHUD("), "player uses the shared tvOS 18 HUD: \(path)")
+            try expect(source.contains("liquidGlassCard") == false, "player controls remove Liquid Glass: \(path)")
         }
     }
 

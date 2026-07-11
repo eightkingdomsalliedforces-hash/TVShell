@@ -400,19 +400,19 @@ public struct AnimeRuntimeView: View {
                     .zIndex(3)
             }
 
-            if controller.isPlayerHUDVisible {
-                VStack(alignment: .leading, spacing: 12 * metrics.scale) {
-                    Text(controller.playingTitle)
-                        .font(.system(size: 38 * metrics.scale, weight: .bold))
-                    Text("播放/暫停控制播放，HUD 顯示時 OK 從 0:00 重播，HUD 消失後 OK 播放暫停。")
-                        .font(.system(size: 22 * metrics.scale, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.72))
-                }
-                .padding(28 * metrics.scale)
-                .tvOS18Surface(role: .panel, cornerRadius: 14 * metrics.scale)
-                .padding(50 * metrics.scale)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
+            TVOS18PlayerHUD(
+                title: controller.playingTitle,
+                eyebrow: controller.subtitleStatusText,
+                currentTime: controller.danmakuPlaybackTime,
+                duration: 0,
+                isPlaying: controller.isDanmakuClockRunning,
+                isVisible: controller.isPlayerHUDVisible,
+                tools: [
+                    TVOS18PlayerTool(id: "danmaku", symbolName: "text.bubble", label: controller.danmakuStatusText, isSelected: controller.state.isDanmakuVisible),
+                    TVOS18PlayerTool(id: "subtitle", symbolName: "captions.bubble", label: controller.subtitleStatusText)
+                ]
+            )
+            .zIndex(4)
 
             HStack(spacing: 12 * metrics.scale) {
                 Text(controller.state.isDanmakuVisible ? "彈幕 ON" : "彈幕 OFF")

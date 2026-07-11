@@ -145,24 +145,15 @@ public struct YouTubeRuntimeView: View {
                     .ignoresSafeArea()
             }
 
-            if controller.isPlayerHUDVisible {
-                VStack(alignment: .leading, spacing: 12 * metrics.scale) {
-                    Text(controller.focusedVideo?.title ?? "YouTube")
-                        .font(.system(size: 38 * metrics.scale, weight: .bold))
-                        .lineLimit(2)
-                    Text("播放/暫停控制播放，HUD 顯示時 OK 從 0:00 重播，HUD 消失後 OK 播放暫停。")
-                        .font(.system(size: 22 * metrics.scale, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.72))
-                }
-                .padding(28 * metrics.scale)
-                .tvOS18Surface(role: .panel, cornerRadius: 14 * metrics.scale)
-                .padding(50 * metrics.scale)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
-
-            MacTVYouTubeControls(metrics: metrics)
-                .padding(.horizontal, 50 * metrics.scale)
-                .padding(.bottom, 38 * metrics.scale)
+            TVOS18PlayerHUD(
+                title: controller.focusedVideo?.title ?? "YouTube",
+                eyebrow: controller.focusedVideo?.channelTitle ?? "YouTube",
+                currentTime: 0,
+                duration: 0,
+                isPlaying: true,
+                isVisible: controller.isPlayerHUDVisible,
+                tools: [TVOS18PlayerTool(id: "youtube", symbolName: "play.rectangle.fill", label: "YouTube")]
+            )
         }
         .background(.black)
     }
