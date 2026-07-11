@@ -63,6 +63,7 @@ private final class DelayedAnimeHTTPTransport: AnimeHTTPTransport, @unchecked Se
     private let routes: [String: Data]
     private let delayedURLs: Set<String>
     private let delayNanoseconds: UInt64
+    private let probe = DelayedRequestProbe()
 
     init(routes: [String: Data], delayedURLs: Set<String>, delayNanoseconds: UInt64) {
         self.routes = routes
@@ -72,12 +73,37 @@ private final class DelayedAnimeHTTPTransport: AnimeHTTPTransport, @unchecked Se
 
     func data(for request: AnimeHTTPRequest) async throws -> Data {
         if delayedURLs.contains(request.url.absoluteString) {
-            try await Task.sleep(nanoseconds: delayNanoseconds)
+            await probe.requestStarted()
+            do {
+                try await Task.sleep(nanoseconds: delayNanoseconds)
+                await probe.requestFinished()
+            } catch {
+                await probe.requestFinished()
+                throw error
+            }
         }
         guard let data = routes[request.url.absoluteString] else {
             throw AnimeHTTPError.missingRoute(request.url.absoluteString)
         }
         return data
+    }
+
+    func maximumConcurrentDelayedRequests() async -> Int {
+        await probe.maximumConcurrentRequests
+    }
+}
+
+private actor DelayedRequestProbe {
+    private var activeRequests = 0
+    private(set) var maximumConcurrentRequests = 0
+
+    func requestStarted() {
+        activeRequests += 1
+        maximumConcurrentRequests = max(maximumConcurrentRequests, activeRequests)
+    }
+
+    func requestFinished() {
+        activeRequests = max(0, activeRequests - 1)
     }
 }
 
@@ -2300,24 +2326,25 @@ struct TVShellChecks {
         let qualityHealthURL = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("TVShellChecks-CSS1Quality-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: qualityHealthURL) }
+        let qualityTransport = DelayedAnimeHTTPTransport(
+            routes: [
+                subscriptionURL.absoluteString: qualitySubscription,
+                "https://quality-low.example/search?wd=%E7%95%AB%E8%B3%AA": qualitySearch,
+                "https://quality-high.example/search?wd=%E7%95%AB%E8%B3%AA": qualitySearch,
+                "https://quality-low.example/show/quality": qualityDetail,
+                "https://quality-high.example/show/quality": qualityDetail,
+                "https://quality-low.example/watch/series-9876-1": #"https://cdn.example/quality-480p.mp4"#.data(using: .utf8)!,
+                "https://quality-high.example/watch/series-9876-1": #"https://cdn.example/quality-1080p.mp4"#.data(using: .utf8)!
+            ],
+            delayedURLs: [
+                "https://quality-low.example/watch/series-9876-1",
+                "https://quality-high.example/watch/series-9876-1"
+            ],
+            delayNanoseconds: 150_000_000
+        )
         let qualityProvider = AniSubsCSS1SubscriptionProvider(
             subscriptionURL: subscriptionURL,
-            transport: DelayedAnimeHTTPTransport(
-                routes: [
-                    subscriptionURL.absoluteString: qualitySubscription,
-                    "https://quality-low.example/search?wd=%E7%95%AB%E8%B3%AA": qualitySearch,
-                    "https://quality-high.example/search?wd=%E7%95%AB%E8%B3%AA": qualitySearch,
-                    "https://quality-low.example/show/quality": qualityDetail,
-                    "https://quality-high.example/show/quality": qualityDetail,
-                    "https://quality-low.example/watch/series-9876-1": #"https://cdn.example/quality-480p.mp4"#.data(using: .utf8)!,
-                    "https://quality-high.example/watch/series-9876-1": #"https://cdn.example/quality-1080p.mp4"#.data(using: .utf8)!
-                ],
-                delayedURLs: [
-                    "https://quality-low.example/watch/series-9876-1",
-                    "https://quality-high.example/watch/series-9876-1"
-                ],
-                delayNanoseconds: 150_000_000
-            ),
+            transport: qualityTransport,
             healthStore: AniSubsCSS1SourceHealthStore(fileURL: qualityHealthURL)
         )
         let qualityResults = try await qualityProvider.search(AnimeSearchQuery(keyword: "畫質"))
@@ -2327,13 +2354,12 @@ struct TVShellChecks {
         }
         try expect(qualityEpisode.playbackLines?.count == 2, "css1 merges same-title playback lines from every source")
         try expect(qualityEpisode.identity.episodeID == "1", "css1 stores the parsed episode number instead of URL digits for danmaku matching")
-        let qualityStreamsStarted = Date()
         let qualityStreams = try await qualityProvider.streams(for: qualityEpisode)
-        let qualityStreamsElapsed = Date().timeIntervalSince(qualityStreamsStarted)
         try expect(qualityStreams.first?.url.absoluteString == "https://cdn.example/quality-1080p.mp4", "css1 puts the highest-quality stream first")
         try expect(qualityStreams.first?.quality == "1080p", "css1 exposes the inferred stream resolution")
         try expect(qualityStreams.count == 2, "css1 concurrent stream resolution preserves every playable line")
-        try expect(qualityStreamsElapsed < 0.26, "css1 playback lines resolve concurrently instead of accumulating delays: \(qualityStreamsElapsed)")
+        let qualityMaximumConcurrency = await qualityTransport.maximumConcurrentDelayedRequests()
+        try expect(qualityMaximumConcurrency >= 2, "css1 playback lines resolve concurrently instead of accumulating delays")
 
         let timeoutSubscription = """
         {
@@ -2441,30 +2467,30 @@ struct TVShellChecks {
         let parallelHealthURL = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("TVShellChecks-CSS1Parallel-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: parallelHealthURL) }
+        let parallelTransport = DelayedAnimeHTTPTransport(
+            routes: [
+                subscriptionURL.absoluteString: parallelSubscription,
+                "https://parallel-a.example/search?wd=%E4%B8%A6%E8%A1%8C": parallelSearchA,
+                "https://parallel-b.example/search?wd=%E4%B8%A6%E8%A1%8C": parallelSearchB,
+                "https://parallel-a.example/show/a": parallelDetail,
+                "https://parallel-b.example/show/b": parallelDetail
+            ],
+            delayedURLs: [
+                "https://parallel-a.example/search?wd=%E4%B8%A6%E8%A1%8C",
+                "https://parallel-b.example/search?wd=%E4%B8%A6%E8%A1%8C"
+            ],
+            delayNanoseconds: 150_000_000
+        )
         let parallelProvider = AniSubsCSS1SubscriptionProvider(
             subscriptionURL: subscriptionURL,
-            transport: DelayedAnimeHTTPTransport(
-                routes: [
-                    subscriptionURL.absoluteString: parallelSubscription,
-                    "https://parallel-a.example/search?wd=%E4%B8%A6%E8%A1%8C": parallelSearchA,
-                    "https://parallel-b.example/search?wd=%E4%B8%A6%E8%A1%8C": parallelSearchB,
-                    "https://parallel-a.example/show/a": parallelDetail,
-                    "https://parallel-b.example/show/b": parallelDetail
-                ],
-                delayedURLs: [
-                    "https://parallel-a.example/search?wd=%E4%B8%A6%E8%A1%8C",
-                    "https://parallel-b.example/search?wd=%E4%B8%A6%E8%A1%8C"
-                ],
-                delayNanoseconds: 150_000_000
-            ),
+            transport: parallelTransport,
             requestTimeoutNanoseconds: 1_000_000_000,
             healthStore: AniSubsCSS1SourceHealthStore(fileURL: parallelHealthURL)
         )
-        let parallelStarted = Date()
         let parallelResults = try await parallelProvider.search(AnimeSearchQuery(keyword: "並行"))
-        let parallelElapsed = Date().timeIntervalSince(parallelStarted)
         try expect(parallelResults.count == 2, "css1 concurrent search preserves results from every source")
-        try expect(parallelElapsed < 0.26, "css1 source searches run concurrently instead of accumulating delays: \(parallelElapsed)")
+        let searchMaximumConcurrency = await parallelTransport.maximumConcurrentDelayedRequests()
+        try expect(searchMaximumConcurrency >= 2, "css1 source searches run concurrently instead of accumulating delays")
 
         let healthURL = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("TVShellChecks-CSS1Health-\(UUID().uuidString).json")
