@@ -106,14 +106,8 @@ public struct LauncherView: View {
                             }
 
                             if let statusMessage = appState.statusMessage {
-                                Text(statusMessage)
-                                    .font(.system(size: 24 * metrics.scale, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.82))
-                                    .lineLimit(2)
-                                    .minimumScaleFactor(0.74)
-                                    .padding(.horizontal, 24 * metrics.scale)
-                                    .padding(.vertical, 16 * metrics.scale)
-                                    .liquidGlassCard(isFocused: true, cornerRadius: 20)
+                                TVOS18StatusNotification(message: statusMessage)
+                                    .frame(height: 80 * metrics.scale)
                             }
 
                             Text("方向鍵移動，OK 開啟，長按 Menu 開啟快捷設定。")
@@ -184,28 +178,7 @@ private struct OpeningAppOverlay: View {
     let appName: String
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.34)
-                .ignoresSafeArea()
-
-            VStack(spacing: 22) {
-                Text(String(appName.prefix(1)))
-                    .font(.system(size: 78, weight: .bold, design: .rounded))
-                    .frame(width: 152, height: 152)
-                    .liquidGlassCard(isFocused: true, cornerRadius: 38)
-
-                Text(appName)
-                    .font(.system(size: 66, weight: .bold))
-
-                Text("正在開啟")
-                    .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.68))
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 72)
-            .padding(.vertical, 58)
-            .liquidGlassCard(isFocused: true, cornerRadius: 34)
-        }
+        TVOS18StatusNotification(message: "正在開啟 \(appName)")
     }
 }
 

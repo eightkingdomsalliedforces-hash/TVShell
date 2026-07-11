@@ -25,7 +25,7 @@ public struct VirtualKeyboardView: View {
                         .font(.system(size: 24 * metrics.scale, weight: .bold))
                         .padding(.horizontal, 18 * metrics.scale)
                         .padding(.vertical, 10 * metrics.scale)
-                        .liquidGlassCard(isFocused: false, cornerRadius: 16 * metrics.scale)
+                        .tvOS18Surface(role: .row, cornerRadius: 10 * metrics.scale)
                 }
 
                 VStack(alignment: .leading, spacing: 12 * metrics.scale) {
@@ -46,10 +46,8 @@ public struct VirtualKeyboardView: View {
                                     .font(.system(size: 25 * metrics.scale, weight: .heavy, design: .rounded))
                                     .padding(.horizontal, 16 * metrics.scale)
                                     .padding(.vertical, 8 * metrics.scale)
-                                    .liquidGlassCard(
-                                        isFocused: state.focusedCandidateIndex == index,
-                                        cornerRadius: 14 * metrics.scale
-                                    )
+                                    .foregroundStyle(state.focusedCandidateIndex == index ? .black : .white)
+                                    .tvOS18Surface(role: .row, isFocused: state.focusedCandidateIndex == index, cornerRadius: 10 * metrics.scale)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -57,7 +55,7 @@ public struct VirtualKeyboardView: View {
                 }
                 .padding(.horizontal, 28 * metrics.scale)
                 .padding(.vertical, 18 * metrics.scale)
-                .liquidGlassCard(isFocused: true, cornerRadius: 24 * metrics.scale)
+                .tvOS18Surface(role: .panel, cornerRadius: 12 * metrics.scale)
 
                 VStack(alignment: .leading, spacing: 14 * metrics.scale) {
                     ForEach(Array(state.rows.enumerated()), id: \.offset) { rowIndex, row in
@@ -68,9 +66,11 @@ public struct VirtualKeyboardView: View {
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.62)
                                     .frame(width: keyWidth(for: key), height: 62 * metrics.scale)
-                                    .liquidGlassCard(
+                                    .foregroundStyle(rowIndex == state.focusedRow && columnIndex == state.focusedColumn ? .black : .white)
+                                    .tvOS18Surface(
+                                        role: .row,
                                         isFocused: rowIndex == state.focusedRow && columnIndex == state.focusedColumn,
-                                        cornerRadius: 20 * metrics.scale
+                                        cornerRadius: 10 * metrics.scale
                                     )
                             }
                         }
@@ -87,7 +87,7 @@ public struct VirtualKeyboardView: View {
             .foregroundStyle(.white)
             .padding(36 * metrics.scale)
                     .frame(maxWidth: 1120 * metrics.scale)
-            .liquidGlassCard(isFocused: true, cornerRadius: 34 * metrics.scale)
+            .tvOS18Surface(role: .panel, cornerRadius: 20 * metrics.scale)
             .padding(.horizontal, 56 * metrics.scale)
         }
     }

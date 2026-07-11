@@ -121,6 +121,7 @@ struct TVShellChecks {
         try checkTVMetricsScaleWithWindowSize()
         try checkTVOS18VisualSystem()
         try checkTVOS18SettingsLayout()
+        try checkTVOS18SystemOverlays()
         try checkAppCatalogVisibilityAndOrdering()
         try checkSettingsPersistAcrossRelaunch()
         try checkCredentialsPersistAndLoadFromFile()
@@ -200,6 +201,21 @@ struct TVShellChecks {
             let source = try String(contentsOf: root.appending(path: path))
             try expect(source.contains("liquidGlassCard") == false, "tvOS 18 settings screen removes Liquid Glass: \(path)")
         }
+    }
+
+    static func checkTVOS18SystemOverlays() throws {
+        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        let alert = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Design/TVOS18SystemAlert.swift"))
+        let controlCenter = try String(contentsOf: root.appending(path: "Sources/TVShellCore/ControlCenter/ControlCenterView.swift"))
+        let keyboard = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Input/VirtualKeyboardView.swift"))
+        let launcher = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Launcher/LauncherView.swift"))
+
+        try expect(alert.contains("struct TVOS18SystemAlert") && alert.contains("HStack"), "tvOS 18 system alerts center horizontal actions")
+        try expect(alert.contains("TVOS18StatusNotification"), "tvOS 18 exposes compact status notifications")
+        try expect(controlCenter.contains("min(560"), "control center stays compact on a 1920-point screen")
+        try expect(controlCenter.contains("liquidGlassCard") == false && controlCenter.contains(".ultraThinMaterial") == false, "control center removes Liquid Glass")
+        try expect(keyboard.contains("liquidGlassCard") == false && keyboard.contains(".ultraThinMaterial") == false, "virtual keyboard removes Liquid Glass")
+        try expect(launcher.contains("TVOS18StatusNotification"), "launcher shows status as a compact system notification")
     }
 
     static func checkDanmakuMotionCompletesOffscreenTravel() throws {
@@ -2956,7 +2972,7 @@ struct TVShellChecks {
 
         let controlCenter = try String(contentsOf: root.appending(path: "Sources/TVShellCore/ControlCenter/ControlCenterView.swift"))
         try expect(controlCenter.contains("控制中心"), "control center uses a dedicated tvOS-style panel")
-        try expect(controlCenter.contains(".ultraThinMaterial"), "control center uses frosted glass material")
+        try expect(controlCenter.contains("tvOS18Surface(role: .panel"), "control center uses the tvOS 18 dark system panel")
         try expect(controlCenter.contains("ControlCenterTile"), "control center exposes large remote-focusable tiles")
 
         let glass = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Design/LiquidGlass.swift"))

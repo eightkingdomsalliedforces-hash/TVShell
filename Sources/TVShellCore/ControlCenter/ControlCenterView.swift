@@ -88,13 +88,8 @@ public struct ControlCenterView: View {
                         .lineLimit(2)
                 }
                 .padding(28)
-                .frame(width: min(720, max(500, proxy.size.width * 0.46)), alignment: .topLeading)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 30, style: .continuous)
-                        .stroke(.white.opacity(0.22), lineWidth: 1)
-                }
-                .shadow(color: .black.opacity(0.46), radius: 34, x: -10, y: 18)
+                .frame(width: min(560, max(420, proxy.size.width * 0.34)), alignment: .topLeading)
+                .tvOS18Surface(role: .panel, cornerRadius: 24)
                 .padding(.top, max(26, proxy.safeAreaInsets.top + 18))
                 .padding(.trailing, max(26, proxy.safeAreaInsets.trailing + 24))
             }
@@ -148,16 +143,10 @@ private struct ControlCenterTile: View {
                 .foregroundStyle(.white.opacity(0.68))
                 .lineLimit(1)
         }
-        .foregroundStyle(isEnabled ? .white : .white.opacity(0.9))
+        .foregroundStyle(isFocused ? .black : .white.opacity(0.92))
         .frame(maxWidth: .infinity, minHeight: 128, alignment: .leading)
         .padding(18)
-        .background(isEnabled ? Color.accentColor.opacity(0.48) : .white.opacity(0.12), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(isFocused ? .white.opacity(0.96) : .white.opacity(0.1), lineWidth: isFocused ? 3 : 1)
-        }
-        .scaleEffect(isFocused ? 1.035 : 1)
-        .shadow(color: .black.opacity(isFocused ? 0.36 : 0.12), radius: isFocused ? 16 : 6, x: 0, y: isFocused ? 10 : 4)
+        .tvOS18Surface(role: .row, isFocused: isFocused, cornerRadius: 12)
         .animation(TVMotion.focus, value: isFocused)
         .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .onTapGesture {
