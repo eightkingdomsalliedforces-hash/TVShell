@@ -1972,6 +1972,7 @@ struct TVShellChecks {
         let transport = StaticAnimeHTTPTransport(routes: [
             subscriptionURL.absoluteString: subscription,
             "https://web.example/search?wd=%E8%8A%99%E8%8E%89%E8%93%AE": searchHTML,
+            "https://web.example/search?wd=%E8%8A%99%E8%8E%89%E8%8E%B2": searchHTML,
             "https://web.example/show/rezero": wrongDetailHTML,
             "https://web.example/show/frieren": detailHTML,
             "https://web.example/watch/frieren-1": watchHTML,
@@ -1987,6 +1988,8 @@ struct TVShellChecks {
             healthStore: AniSubsCSS1SourceHealthStore(fileURL: css1HealthURL)
         )
         let results = try await provider.search(AnimeSearchQuery(keyword: "芙莉蓮"))
+        let simplifiedResults = try await provider.search(AnimeSearchQuery(keyword: "芙莉莲"))
+        try expect(simplifiedResults.first?.title == "葬送的芙莉蓮", "css1 matches Traditional titles for Simplified searches")
         try expect(results.first?.title == "葬送的芙莉蓮", "css1 provider parses web-selector search result")
         try expect(results.contains { $0.title.localizedCaseInsensitiveContains("Re:") } == false, "css1 provider filters unrelated search-page recommendations")
         try expect(results.contains { $0.title == "米粒米粒" } == false, "css1 provider does not treat source names as anime titles")

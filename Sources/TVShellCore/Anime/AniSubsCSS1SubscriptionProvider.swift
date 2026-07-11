@@ -282,7 +282,9 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
     }
 
     private func normalizedSearchKey(_ value: String) -> String {
-        value
+        let mutable = NSMutableString(string: value)
+        CFStringTransform(mutable, nil, "Traditional-Simplified" as CFString, false)
+        return (mutable as String)
             .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
             .replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"[\s\p{P}\p{S}_]+"#, with: "", options: .regularExpression)
