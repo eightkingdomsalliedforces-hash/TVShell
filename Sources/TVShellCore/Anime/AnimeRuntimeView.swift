@@ -1314,8 +1314,7 @@ final class AnimeRuntimeController: ObservableObject {
         danmakuPlaybackTime = time
         danmakuPlaybackDate = Date()
         visibleDanmaku = comments
-            .filter { time >= $0.time && time - $0.time < 8.0 }
-            .suffix(12)
+            .filter { time >= $0.time && time - $0.time < DanmakuMotion.retentionWindow }
         recordPlaybackProgress(time: time)
     }
 
@@ -1540,6 +1539,54 @@ private struct TorrentDownloadRow: View {
     }
 }
 
+public enum DanmakuMotion {
+    public static let retentionWindow = 120.0
+    private static let pointsPerSecond = 600.0
+    // NSCache serializes access internally; the unchecked isolation avoids repeating font measurement every frame.
+    nonisolated(unsafe) private static let textWidthCache: NSCache<NSString, NSNumber> = {
+        let cache = NSCache<NSString, NSNumber>()
+        cache.countLimit = 4_000
+        return cache
+    }()
+
+    public static func textWidth(_ text: String, fontSize: Double, horizontalPadding: Double) -> Double {
+        let cacheKey = "\(fontSize)|\(horizontalPadding)|\(text)" as NSString
+        if let cached = textWidthCache.object(forKey: cacheKey) {
+            return cached.doubleValue
+        }
+        let font = NSFont.systemFont(ofSize: fontSize, weight: .bold)
+        let measuredWidth = (text as NSString).size(withAttributes: [.font: font]).width
+        let width = ceil(Double(measuredWidth) + horizontalPadding)
+        textWidthCache.setObject(NSNumber(value: width), forKey: cacheKey)
+        return width
+    }
+
+    public static func lifetime(viewportWidth: Double, textWidth: Double, speedScale: Double) -> Double {
+        (max(viewportWidth, 0) + max(textWidth, 0)) / (pointsPerSecond * max(speedScale, 0.1))
+    }
+
+    public static func horizontalOffset(
+        age: Double,
+        viewportWidth: Double,
+        textWidth: Double,
+        speedScale: Double
+    ) -> Double {
+        let travel = max(viewportWidth, 0) + max(textWidth, 0)
+        let duration = lifetime(viewportWidth: viewportWidth, textWidth: textWidth, speedScale: speedScale)
+        let progress = min(max(age / max(duration, 0.001), 0), 1)
+        return viewportWidth - progress * travel
+    }
+
+    public static func laneIndex(for identity: String, laneCount: Int) -> Int {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in identity.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return Int(hash % UInt64(max(laneCount, 1)))
+    }
+}
+
 struct DanmakuOverlay: View {
     let comments: [DanmakuComment]
     let currentTime: Double
@@ -1552,12 +1599,29 @@ struct DanmakuOverlay: View {
         GeometryReader { proxy in
             TimelineView(.animation) { timeline in
                 let interpolatedTime = currentTime + (isClockRunning ? timeline.date.timeIntervalSince(sampleDate) : 0)
-                let visibleComments = Array(comments.suffix(settings.density))
-                ForEach(Array(visibleComments.enumerated()), id: \.element.stableIdentity) { index, comment in
+                let viewportWidth = Double(proxy.size.width)
+                let fontSize = 31 * metrics.scale * settings.sizeScale
+                let horizontalPadding = 40 * metrics.scale
+                let visibleComments = comments.filter { comment in
+                    let textWidth = DanmakuMotion.textWidth(
+                        comment.text,
+                        fontSize: fontSize,
+                        horizontalPadding: horizontalPadding
+                    )
+                    let age = interpolatedTime - comment.time
+                    return age >= 0 && age <= DanmakuMotion.lifetime(
+                        viewportWidth: viewportWidth,
+                        textWidth: textWidth,
+                        speedScale: settings.speedScale
+                    )
+                }
+                ForEach(visibleComments, id: \.stableIdentity) { comment in
                     let age = max(0, interpolatedTime - comment.time)
-                    let lifetime = 4.2 / settings.speedScale
-                    let progress = min(max(age / lifetime, 0), 1)
-                    let travel = proxy.size.width + 620 * metrics.scale
+                    let textWidth = DanmakuMotion.textWidth(
+                        comment.text,
+                        fontSize: fontSize,
+                        horizontalPadding: horizontalPadding
+                    )
                     Text(verbatim: comment.text)
                         .modifier(DanmakuTextStyle(settings: settings, metrics: metrics))
                         .foregroundStyle(.white.opacity(settings.opacity))
@@ -1566,8 +1630,14 @@ struct DanmakuOverlay: View {
                         .padding(.vertical, 8 * metrics.scale)
                         .background(.black.opacity(0.22 * settings.opacity), in: Capsule())
                         .offset(
-                            x: proxy.size.width - CGFloat(progress) * CGFloat(travel),
-                            y: CGFloat(index % settings.density) * CGFloat(54 * metrics.scale * settings.sizeScale)
+                            x: DanmakuMotion.horizontalOffset(
+                                age: age,
+                                viewportWidth: viewportWidth,
+                                textWidth: textWidth,
+                                speedScale: settings.speedScale
+                            ),
+                            y: CGFloat(DanmakuMotion.laneIndex(for: comment.stableIdentity, laneCount: settings.density))
+                                * CGFloat(54 * metrics.scale * settings.sizeScale)
                         )
                         .transaction { transaction in
                             transaction.animation = nil

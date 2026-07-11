@@ -172,13 +172,17 @@ public struct Aria2TorrentPlaybackEngine: TorrentPlaybackEngine {
     public var readinessMinimumBytes: UInt64
     public var pollLimit: Int
     public var pollIntervalNanoseconds: UInt64
+    public var maximumCacheBytes: UInt64
+    public var maximumCacheAge: TimeInterval
 
     public init(
         cacheRoot: URL? = nil,
         executablePath: String? = nil,
         readinessMinimumBytes: UInt64 = 48 * 1_048_576,
         pollLimit: Int = 120,
-        pollIntervalNanoseconds: UInt64 = 1_000_000_000
+        pollIntervalNanoseconds: UInt64 = 1_000_000_000,
+        maximumCacheBytes: UInt64 = 20 * 1_024 * 1_024 * 1_024,
+        maximumCacheAge: TimeInterval = 7 * 24 * 60 * 60
     ) {
         self.cacheRoot = cacheRoot ?? FileManager.default
             .urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -187,6 +191,8 @@ public struct Aria2TorrentPlaybackEngine: TorrentPlaybackEngine {
         self.readinessMinimumBytes = readinessMinimumBytes
         self.pollLimit = pollLimit
         self.pollIntervalNanoseconds = pollIntervalNanoseconds
+        self.maximumCacheBytes = maximumCacheBytes
+        self.maximumCacheAge = maximumCacheAge
     }
 
     public func downloadDirectory(for stream: AnimeStreamCandidate) -> URL {
@@ -259,6 +265,7 @@ public struct Aria2TorrentPlaybackEngine: TorrentPlaybackEngine {
         let manifest = TorrentDownloadManifest(title: title, subtitle: subtitle)
         let data = try JSONEncoder().encode(manifest)
         try data.write(to: manifestURL(in: directory), options: Data.WritingOptions.atomic)
+        pruneCache(excludingID: stableIdentifier(for: stream.url.absoluteString))
     }
 
     public func cachedDownloads() -> [TorrentCachedDownload] {
@@ -344,6 +351,75 @@ public struct Aria2TorrentPlaybackEngine: TorrentPlaybackEngine {
             return
         }
         try FileManager.default.removeItem(at: directory)
+    }
+
+    private func pruneCache(excludingID: String) {
+        guard let directories = try? FileManager.default.contentsOfDirectory(
+            at: cacheRoot,
+            includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
+        }
+
+        let entries = directories.compactMap { directory -> TorrentCacheEntry? in
+            let values = try? directory.resourceValues(forKeys: [.isDirectoryKey])
+            guard values?.isDirectory == true else {
+                return nil
+            }
+            return TorrentCacheEntry(
+                id: directory.lastPathComponent,
+                directory: directory,
+                downloadedBytes: downloadedBytes(in: directory),
+                activityDate: cacheActivityDate(in: directory)
+            )
+        }
+
+        var retainedBytes = entries.reduce(UInt64(0)) { partial, entry in
+            partial &+ entry.downloadedBytes
+        }
+        let expirationDate = Date().addingTimeInterval(-max(maximumCacheAge, 0))
+        var removable = entries
+            .filter { entry in
+                entry.id != excludingID && TorrentProcessRegistry.shared.isRunning(id: entry.id) == false
+            }
+            .sorted { $0.activityDate < $1.activityDate }
+
+        if maximumCacheAge > 0 {
+            for entry in removable where entry.activityDate < expirationDate {
+                if (try? FileManager.default.removeItem(at: entry.directory)) != nil {
+                    retainedBytes = retainedBytes >= entry.downloadedBytes ? retainedBytes - entry.downloadedBytes : 0
+                }
+            }
+            removable.removeAll { entry in
+                entry.activityDate < expirationDate || FileManager.default.fileExists(atPath: entry.directory.path) == false
+            }
+        }
+
+        for entry in removable where retainedBytes > maximumCacheBytes {
+            if (try? FileManager.default.removeItem(at: entry.directory)) != nil {
+                retainedBytes = retainedBytes >= entry.downloadedBytes ? retainedBytes - entry.downloadedBytes : 0
+            }
+        }
+    }
+
+    private func cacheActivityDate(in directory: URL) -> Date {
+        var newestDate = (try? directory.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+            ?? .distantPast
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return newestDate
+        }
+        for case let item as URL in enumerator {
+            if let date = try? item.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+               date > newestDate {
+                newestDate = date
+            }
+        }
+        return newestDate
     }
 
     private var playableExtensions: Set<String> {
@@ -518,6 +594,13 @@ public struct Aria2TorrentPlaybackEngine: TorrentPlaybackEngine {
         }
         return String(format: "%016llx", hash)
     }
+}
+
+private struct TorrentCacheEntry {
+    var id: String
+    var directory: URL
+    var downloadedBytes: UInt64
+    var activityDate: Date
 }
 
 private struct TorrentDownloadManifest: Codable {

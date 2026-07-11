@@ -144,6 +144,7 @@ struct TVShellChecks {
         try await checkAniSubsCSS1SubscriptionProvider()
         try await checkAniSubsCSS1PrefersMatchingAnimeOverSameTitleDrama()
         try checkAnimeEpisodeGridLayout()
+        try checkDanmakuMotionCompletesOffscreenTravel()
         try checkTorrentPlaybackEngine()
         try checkInternalVLCPlaybackStrategy()
         try await checkAnimeHomeProviderAggregatesDistinctTitles()
@@ -163,6 +164,36 @@ struct TVShellChecks {
         if condition() == false {
             throw CheckFailure(message)
         }
+    }
+
+    static func checkDanmakuMotionCompletesOffscreenTravel() throws {
+        let viewportWidth = 1_920.0
+        let shortWidth = DanmakuMotion.textWidth("短彈幕", fontSize: 31, horizontalPadding: 40)
+        let longWidth = DanmakuMotion.textWidth(String(repeating: "很長的彈幕", count: 12), fontSize: 31, horizontalPadding: 40)
+        let shortLifetime = DanmakuMotion.lifetime(viewportWidth: viewportWidth, textWidth: shortWidth, speedScale: 1)
+        let longLifetime = DanmakuMotion.lifetime(viewportWidth: viewportWidth, textWidth: longWidth, speedScale: 1)
+
+        try expect(longWidth > shortWidth, "danmaku text measurement accounts for comment length")
+        try expect(longLifetime > shortLifetime, "long danmaku remains visible until its wider text exits")
+        try expect(
+            DanmakuMotion.horizontalOffset(
+                age: longLifetime,
+                viewportWidth: viewportWidth,
+                textWidth: longWidth,
+                speedScale: 1
+            ) <= -longWidth,
+            "danmaku lifetime ends only after the whole comment leaves the screen"
+        )
+
+        let slowLargeScreenLifetime = DanmakuMotion.lifetime(
+            viewportWidth: 3_840,
+            textWidth: DanmakuMotion.textWidth(String(repeating: "超長彈幕", count: 20), fontSize: 56, horizontalPadding: 80),
+            speedScale: 0.6
+        )
+        try expect(DanmakuMotion.retentionWindow >= slowLargeScreenLifetime, "danmaku controller retains comments for the slowest large-screen traversal")
+        let stableLane = DanmakuMotion.laneIndex(for: "10.0-同一條彈幕", laneCount: 5)
+        try expect(stableLane == DanmakuMotion.laneIndex(for: "10.0-同一條彈幕", laneCount: 5), "danmaku keeps the same lane while older comments expire")
+        try expect((0..<5).contains(stableLane), "danmaku lane stays within the configured density")
     }
 
     static func checkKeyCodeMapper() throws {
@@ -2519,6 +2550,40 @@ struct TVShellChecks {
         try engine.deleteDownload(for: stream)
         try expect(FileManager.default.fileExists(atPath: downloadDirectory.path) == false, "torrent playback can delete cached BT downloads")
 
+        let oldStream = AnimeStreamCandidate(
+            url: URL(string: "magnet:?xt=urn:btih:OLD-CACHE")!,
+            quality: "BT",
+            headers: ["resolver": "torrent"]
+        )
+        let currentStream = AnimeStreamCandidate(
+            url: URL(string: "magnet:?xt=urn:btih:CURRENT-CACHE")!,
+            quality: "BT",
+            headers: ["resolver": "torrent"]
+        )
+        let pruningEngine = Aria2TorrentPlaybackEngine(
+            cacheRoot: tempRoot,
+            executablePath: "/usr/bin/aria2c",
+            maximumCacheBytes: 3_000,
+            maximumCacheAge: 7 * 24 * 60 * 60
+        )
+        try pruningEngine.rememberDownload(for: oldStream, title: "舊影片", subtitle: "第 1 話")
+        let oldDirectory = pruningEngine.downloadDirectory(for: oldStream)
+        let oldVideo = oldDirectory.appendingPathComponent("old.mp4")
+        FileManager.default.createFile(atPath: oldVideo.path, contents: Data(repeating: 1, count: 2_048))
+        let oldDate = Date(timeIntervalSinceNow: -3_600)
+        try FileManager.default.setAttributes([.modificationDate: oldDate], ofItemAtPath: oldVideo.path)
+        try FileManager.default.setAttributes([.modificationDate: oldDate], ofItemAtPath: oldDirectory.path)
+
+        let currentDirectory = pruningEngine.downloadDirectory(for: currentStream)
+        try FileManager.default.createDirectory(at: currentDirectory, withIntermediateDirectories: true)
+        FileManager.default.createFile(
+            atPath: currentDirectory.appendingPathComponent("current.mp4").path,
+            contents: Data(repeating: 1, count: 2_048)
+        )
+        try pruningEngine.rememberDownload(for: currentStream, title: "目前影片", subtitle: "第 2 話")
+        try expect(FileManager.default.fileExists(atPath: oldDirectory.path) == false, "torrent cache automatically evicts the oldest download above its size limit")
+        try expect(FileManager.default.fileExists(atPath: currentDirectory.path), "torrent cache never evicts the video that is about to play")
+
         let engineSource = try String(contentsOf: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true).appending(path: "Sources/TVShellCore/Anime/TorrentPlaybackEngine.swift"))
         try expect(engineSource.contains("terminationHandler"), "torrent playback engine records aria2 termination instead of waiting silently")
         try expect(engineSource.contains("lastErrorOutput"), "torrent playback engine exposes aria2 stderr when BT cannot start")
@@ -2834,6 +2899,8 @@ struct TVShellChecks {
         try expect(launcher.contains("ScrollViewReader"), "launcher keeps focused app rows visible after watch history appears")
         try expect(launcher.contains("launcherFocus == .history"), "launcher gives watch history a remote focus section")
         try expect(launcher.contains("tvos-dock-app-\\(app.id.uuidString)"), "launcher dock exposes stable scroll ids")
+        try expect(launcher.contains(".id(\"launcher-top\")"), "launcher exposes a stable top scroll id")
+        try expect(launcher.contains("case .apps:\n                                scrollProxy.scrollTo(\"launcher-top\", anchor: .top)"), "launcher scrolls to the top when remote focus returns to apps")
         try expect(launcher.contains("onChange(of: appState.launcherFocus)"), "launcher scrolls vertically when remote focus enters history")
         try expect(launcher.contains(".scrollIndicators(.hidden)"), "launcher hides TV-unfriendly scroll indicators")
         try expect(launcher.contains("quickActionBar") == false, "launcher removes oversized quick action chips from the home screen")
@@ -2965,9 +3032,12 @@ struct TVShellChecks {
         try expect(animeRuntime.contains("sampleDate: controller.danmakuPlaybackDate"), "danmaku overlay receives a sample date for smooth interpolation")
         try expect(animeRuntime.contains("TimelineView(.animation"), "danmaku overlay uses the animation timeline instead of step-only updates")
         try expect(animeRuntime.contains("interpolatedTime"), "danmaku overlay interpolates between player time samples")
-        try expect(animeRuntime.contains("id: \\.element.stableIdentity"), "danmaku overlay keeps stable identities for moving comments")
+        try expect(animeRuntime.contains("id: \\.stableIdentity"), "danmaku overlay keeps stable identities for moving comments")
         try expect(animeRuntime.contains("onPlaybackTime"), "youtube anime playback feeds time into danmaku")
-        try expect(animeRuntime.contains("lifetime = 4.2 / settings.speedScale"), "danmaku overlay scroll speed follows the user setting")
+        try expect(animeRuntime.contains("DanmakuMotion.textWidth"), "danmaku overlay measures each rendered comment")
+        try expect(animeRuntime.contains("DanmakuMotion.horizontalOffset"), "danmaku overlay scroll speed and lifetime follow the measured travel distance")
+        try expect(animeRuntime.contains("Array(comments.suffix(settings.density))") == false, "new danmaku does not evict comments that are still crossing the screen")
+        try expect(animeRuntime.contains(".suffix(12)") == false, "danmaku controllers do not truncate comments before their travel completes")
         try expect(animeRuntime.contains(".zIndex(3)"), "danmaku overlay is above player surfaces")
         try expect(animeRuntime.contains("subtitleStatusText"), "anime player exposes subtitle status")
         try expect(animeRuntime.contains("loadMediaSelectionGroup(for: .legible)"), "anime player inspects subtitle tracks")

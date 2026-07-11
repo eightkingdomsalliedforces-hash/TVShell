@@ -673,8 +673,7 @@ final class BilibiliRuntimeController: ObservableObject {
         danmakuPlaybackDate = Date()
         isDanmakuClockRunning = mediaState.isPlaying
         visibleDanmaku = comments
-            .filter { time >= $0.time && time - $0.time < 8.0 }
-            .suffix(12)
+            .filter { time >= $0.time && time - $0.time < DanmakuMotion.retentionWindow }
     }
 
     private func recordPlaybackProgress(time: Double, force: Bool = false) {

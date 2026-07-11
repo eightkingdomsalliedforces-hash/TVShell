@@ -122,18 +122,11 @@ public struct LauncherView: View {
                                 .minimumScaleFactor(0.72)
                                 .padding(.bottom, 42 * metrics.scale)
                         }
+                        .id("launcher-top")
                         .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .topLeading)
                         .padding(.horizontal, metrics.horizontalPadding)
                     }
                     .scrollIndicators(.hidden)
-                    .onChange(of: appState.focusedAppID) { _, id in
-                        guard let id else {
-                            return
-                        }
-                        withAnimation(TVMotion.focus) {
-                            scrollProxy.scrollTo("tvos-dock-app-\(id.uuidString)", anchor: .center)
-                        }
-                    }
                     .onChange(of: appState.focusedWatchHistoryID) { _, id in
                         guard let id else {
                             return
@@ -146,9 +139,7 @@ public struct LauncherView: View {
                         withAnimation(TVMotion.focus) {
                             switch focus {
                             case .apps:
-                                if let id = appState.focusedAppID {
-                                    scrollProxy.scrollTo("tvos-dock-app-\(id.uuidString)", anchor: .center)
-                                }
+                                scrollProxy.scrollTo("launcher-top", anchor: .top)
                             case .history:
                                 scrollProxy.scrollTo("launcher-history", anchor: .center)
                             }
