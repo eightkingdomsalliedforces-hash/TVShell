@@ -226,8 +226,8 @@ private struct WatchHistoryRowView: View {
                             .frame(width: 340 * metrics.scale, alignment: .leading)
                             .frame(minHeight: 116 * metrics.scale, alignment: .leading)
                             .padding(22 * metrics.scale)
-                            .liquidGlassCard(isFocused: isFocused && entry.id == focusedEntryID, cornerRadius: 24 * metrics.scale)
-                            .scaleEffect(isFocused && entry.id == focusedEntryID ? 1.045 : 1)
+                            .tvOS18Surface(role: .content, isFocused: isFocused && entry.id == focusedEntryID, cornerRadius: 14 * metrics.scale)
+                            .tvOS18ContentFocus(isFocused: isFocused && entry.id == focusedEntryID)
 
                             Button {
                                 appState.deleteWatchHistory(entry)

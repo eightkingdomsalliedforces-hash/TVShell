@@ -124,6 +124,7 @@ struct TVShellChecks {
         try checkTVOS18SystemOverlays()
         try checkTVOS18MediaBrowsers()
         try checkTVOS18PlayerHUD()
+        try checkTVOS18MigrationComplete()
         try checkAppCatalogVisibilityAndOrdering()
         try checkSettingsPersistAcrossRelaunch()
         try checkCredentialsPersistAndLoadFromFile()
@@ -254,6 +255,23 @@ struct TVShellChecks {
             try expect(source.contains("TVOS18PlayerHUD("), "player uses the shared tvOS 18 HUD: \(path)")
             try expect(source.contains("liquidGlassCard") == false, "player controls remove Liquid Glass: \(path)")
         }
+    }
+
+    static func checkTVOS18MigrationComplete() throws {
+        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        let sourceRoot = root.appending(path: "Sources/TVShellCore")
+        let enumerator = FileManager.default.enumerator(at: sourceRoot, includingPropertiesForKeys: nil)
+        while let url = enumerator?.nextObject() as? URL {
+            guard url.pathExtension == "swift", url.lastPathComponent != "LiquidGlass.swift" else { continue }
+            let source = try String(contentsOf: url)
+            try expect(source.contains("liquidGlassCard") == false, "active UI source still calls Liquid Glass: \(url.lastPathComponent)")
+            try expect(source.contains(".ultraThinMaterial") == false, "active UI source still uses ultra-thin material: \(url.lastPathComponent)")
+        }
+
+        let compatibility = try String(contentsOf: sourceRoot.appending(path: "Design/LiquidGlass.swift"))
+        try expect(compatibility.contains("TVOS18Backdrop"), "legacy backdrop delegates to the tvOS 18 visual system")
+        try expect(compatibility.contains("tvOS18Surface"), "legacy card modifier delegates to a tvOS 18 semantic surface")
+        try expect(compatibility.contains(".ultraThinMaterial") == false, "compatibility layer no longer renders Liquid Glass")
     }
 
     static func checkDanmakuMotionCompletesOffscreenTravel() throws {
@@ -3015,7 +3033,7 @@ struct TVShellChecks {
 
         let glass = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Design/LiquidGlass.swift"))
         try expect(glass.contains("TVControlBackdrop"), "shared design system provides the control-center backdrop")
-        try expect(glass.contains(".ultraThinMaterial"), "shared cards use the control-center frosted material")
+        try expect(glass.contains("TVOS18Backdrop"), "legacy backdrop delegates to the tvOS 18 background")
         try expect(glass.contains("LinearGradient") == false, "shared control-center cards avoid decorative gradients")
 
         let appStateSource = try String(contentsOf: root.appending(path: "Sources/TVShellCore/App/AppState.swift"))
@@ -3146,11 +3164,9 @@ struct TVShellChecks {
         try expect(animeRuntime.contains("isChineseSubtitleOption"), "anime player prefers Chinese subtitles")
 
         let liquidGlass = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Design/LiquidGlass.swift"))
-        try expect(liquidGlass.contains(".ultraThinMaterial"), "liquid glass uses the control-center frosted material")
-        try expect(liquidGlass.contains(".ultraThinMaterial"), "liquid glass matches the control-center material across cards")
-        try expect(liquidGlass.contains("radius: isFocused ? 42") == false, "liquid glass avoids very large focus shadows")
-        try expect(liquidGlass.contains(".clipShape(shape)"), "liquid glass clips material to rounded shape")
-        try expect(liquidGlass.contains(".compositingGroup()"), "liquid glass composites rounded material without square corner artifacts")
+        try expect(liquidGlass.contains(".ultraThinMaterial") == false, "legacy visual compatibility removes Liquid Glass")
+        try expect(liquidGlass.contains("tvOS18Surface"), "legacy cards delegate to semantic tvOS 18 surfaces")
+        try expect(liquidGlass.contains("deprecated"), "legacy Liquid Glass API is marked deprecated")
     }
 
     static func checkGitHubReleaseWorkflow() throws {
