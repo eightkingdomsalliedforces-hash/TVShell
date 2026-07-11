@@ -1521,6 +1521,22 @@ struct TVShellChecks {
 
         let search = try await provider.search(AnimeSearchQuery(keyword: "葬送的芙莉蓮"))
         try expect(search.map(\.title) == ["葬送的芙莉蓮", "葬送的芙莉蓮 第二季"], "anime home provider keeps full search results for explicit search")
+
+        let bangumiResult = AnimeSearchResult(id: "bangumi-index", title: "魔法禁書目錄", episodes: [])
+        let metadataSearchProvider = AnimeHomeSourceProvider(
+            homeProvider: KeywordAnimeSourceProvider(
+                id: "bangumi",
+                displayName: "Bangumi",
+                resultsByKeyword: ["魔法禁書": [bangumiResult]]
+            ),
+            resolver: KeywordAnimeSourceProvider(
+                id: "playback-sources",
+                displayName: "Playback Sources",
+                resultsByKeyword: [:]
+            )
+        )
+        let metadataSearch = try await metadataSearchProvider.search(AnimeSearchQuery(keyword: "魔法禁書"))
+        try expect(metadataSearch.map(\.title) == ["魔法禁書目錄"], "explicit title search uses Bangumi metadata before resolving playback sources")
     }
 
     static func checkLazyAnimeSourceResolution() async throws {

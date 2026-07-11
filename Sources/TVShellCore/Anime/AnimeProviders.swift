@@ -91,7 +91,11 @@ public struct AnimeHomeSourceProvider: AnimeSourceProvider {
     public func search(_ query: AnimeSearchQuery) async throws -> [AnimeSearchResult] {
         let keyword = query.keyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard keyword.isEmpty else {
-            return try await searchWithSimplifiedFallback(keyword, using: resolver)
+            do {
+                return try await searchWithSimplifiedFallback(keyword, using: homeProvider)
+            } catch {
+                return try await searchWithSimplifiedFallback(keyword, using: resolver)
+            }
         }
 
         var matches: [(Int, AnimeSearchResult)] = []
