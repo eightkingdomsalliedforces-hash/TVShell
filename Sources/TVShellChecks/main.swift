@@ -1333,6 +1333,15 @@ struct TVShellChecks {
     @MainActor
     static func checkBilibiliBangumiRuntimeAndAPI() async throws {
         try expect(BilibiliSearchNormalizer.simplified("葬送的芙莉蓮") == "葬送的芙莉莲", "bilibili search converts Traditional Chinese to Simplified Chinese")
+        try expect(BilibiliTopTab.allCases.map(\.title) == ["推薦", "熱門", "番劇", "排行榜", "動態", "我的", "搜尋"], "bilibili exposes the reference top navigation tabs")
+        try expect(BilibiliTopTab.recommended.previous == .recommended, "bilibili top navigation clamps at its leading edge")
+        try expect(BilibiliTopTab.search.next == .search, "bilibili top navigation clamps at its trailing edge")
+        try expect(BilibiliTopTab.bangumi.next == .ranking, "bilibili top navigation moves in visual order")
+        let bilibiliRuntimeSource = try String(contentsOfFile: "Sources/TVShellCore/Bilibili/BilibiliRuntimeView.swift")
+        try expect(bilibiliRuntimeSource.contains("TVOSMediaTopNavigation("), "bilibili uses the centered reference navigation")
+        try expect(bilibiliRuntimeSource.contains("TVOSMediaVideoCard("), "bilibili general videos use the reference 16:9 grid card")
+        try expect(bilibiliRuntimeSource.contains("isTopNavigationFocused"), "bilibili can move focus between its top navigation and content grid")
+        try expect(bilibiliRuntimeSource.contains("BilibiliReferenceDetailHeader("), "bilibili detail follows the reference metadata-and-preview layout")
         let bilibiliApp = SeedApps.defaultApps.first(where: { app in
             if case .bilibili = app.target { return true }
             return false

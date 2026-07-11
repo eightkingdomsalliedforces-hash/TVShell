@@ -55,6 +55,38 @@ public enum BilibiliContentMode: String, Codable, Equatable, CaseIterable, Senda
     }
 }
 
+public enum BilibiliTopTab: String, Codable, Equatable, CaseIterable, Sendable {
+    case recommended
+    case popular
+    case bangumi
+    case ranking
+    case dynamic
+    case profile
+    case search
+
+    public var title: String {
+        switch self {
+        case .recommended: "推薦"
+        case .popular: "熱門"
+        case .bangumi: "番劇"
+        case .ranking: "排行榜"
+        case .dynamic: "動態"
+        case .profile: "我的"
+        case .search: "搜尋"
+        }
+    }
+
+    public var previous: BilibiliTopTab {
+        guard let index = Self.allCases.firstIndex(of: self), index > 0 else { return self }
+        return Self.allCases[index - 1]
+    }
+
+    public var next: BilibiliTopTab {
+        guard let index = Self.allCases.firstIndex(of: self), index < Self.allCases.count - 1 else { return self }
+        return Self.allCases[index + 1]
+    }
+}
+
 public struct BilibiliSeason: Identifiable, Codable, Equatable, Sendable {
     public var id: Int
     public var itemKind: BilibiliItemKind

@@ -99,10 +99,31 @@ public struct BilibiliRuntimeView: View {
         ScrollViewReader { scrollProxy in
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 32 * metrics.scale) {
-                    header(metrics: metrics, title: app.name, subtitle: controller.statusText)
-                        .id("bilibili-browser-top")
+                    TVOSMediaTopNavigation(
+                        items: BilibiliTopTab.allCases.map {
+                            TVOSMediaNavigationItem(
+                                id: $0.rawValue,
+                                title: $0.title,
+                                symbolName: $0 == .search ? "magnifyingglass" : nil
+                            )
+                        },
+                        focusedID: controller.topTab.rawValue,
+                        metrics: metrics
+                    )
+                    .opacity(controller.isTopNavigationFocused ? 1 : 0.78)
+                    .scaleEffect(controller.isTopNavigationFocused ? 1.035 : 1)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .id("bilibili-browser-top")
 
-                    BilibiliModeSwitcher(mode: controller.contentMode, metrics: metrics)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(controller.topTab.title)
+                            .font(.system(size: 46 * metrics.scale, weight: .bold))
+                        Spacer()
+                        Text(controller.statusText)
+                            .font(.system(size: 20 * metrics.scale, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.56))
+                            .lineLimit(1)
+                    }
 
                     BilibiliSectionGrid(
                         title: "番劇",
@@ -120,7 +141,7 @@ public struct BilibiliRuntimeView: View {
                         metrics: metrics
                     )
 
-                    Text("方向鍵選內容，OK 進入詳情，播放/暫停鍵切換全部、番劇、一般影片，Menu 搜尋，Back 或 Home 返回。登入 Cookie 可在設定的 credentials.json 保存。")
+                    Text("第一排按上進入分頁，左右切換，按下回內容。OK 進入詳情，Menu 搜尋，Back 或 Home 返回。")
                         .font(.system(size: 22 * metrics.scale, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.62))
                 }
@@ -156,25 +177,11 @@ public struct BilibiliRuntimeView: View {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 30 * metrics.scale) {
                     if let detail = controller.detail {
-                        HStack(alignment: .top, spacing: 34 * metrics.scale) {
-                            BilibiliPosterImage(url: detail.coverURL, title: detail.title, width: 230 * metrics.scale, height: 322 * metrics.scale)
-
-                            VStack(alignment: .leading, spacing: 14 * metrics.scale) {
-                                Text(detail.title)
-                                    .font(.system(size: 64 * metrics.scale, weight: .bold))
-                                    .lineLimit(2)
-                                    .minimumScaleFactor(0.72)
-                                Text(controller.detailMetaText)
-                                    .font(.system(size: 25 * metrics.scale, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.7))
-                                    .lineLimit(2)
-                                Text(detail.evaluate ?? detail.subtitle ?? "Bilibili 番劇")
-                                    .font(.system(size: 24 * metrics.scale, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.62))
-                                    .lineLimit(4)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                        BilibiliReferenceDetailHeader(
+                            detail: detail,
+                            metadata: controller.detailMetaText,
+                            metrics: metrics
+                        )
                     } else {
                         header(metrics: metrics, title: "Bilibili", subtitle: controller.statusText)
                     }
@@ -273,6 +280,8 @@ final class BilibiliRuntimeController: ObservableObject {
     @Published private(set) var isPlayerHUDVisible = false
     @Published private(set) var keyboardState = VirtualKeyboardState(text: "间谍过家家", layout: .zhuyin)
     @Published private(set) var contentMode: BilibiliContentMode = .all
+    @Published private(set) var topTab: BilibiliTopTab = .recommended
+    @Published private(set) var isTopNavigationFocused = false
     @Published private(set) var visibleDanmaku: [DanmakuComment] = []
     @Published private(set) var danmakuPlaybackTime: Double = 0
     @Published private(set) var danmakuPlaybackDate = Date()
@@ -555,8 +564,8 @@ final class BilibiliRuntimeController: ObservableObject {
 
         switch state.phase {
         case .browsing:
-            if command == .playPause {
-                toggleContentMode()
+            if isTopNavigationFocused {
+                handleTopNavigation(command)
                 return
             }
             if command == .back {
@@ -565,6 +574,10 @@ final class BilibiliRuntimeController: ObservableObject {
             }
             if command == .select, let focusedSeason {
                 loadDetail(for: focusedSeason)
+                return
+            }
+            if command == .up, state.focusedSeasonIndex < seasonColumns {
+                isTopNavigationFocused = true
                 return
             }
             state.applyBrowsing(command, columns: seasonColumns)
@@ -586,6 +599,56 @@ final class BilibiliRuntimeController: ObservableObject {
                 return
             }
             handlePlayback(command)
+        }
+    }
+
+    private func handleTopNavigation(_ command: RemoteCommand) {
+        switch command {
+        case .left:
+            topTab = topTab.previous
+            previewTopTab()
+        case .right:
+            topTab = topTab.next
+            previewTopTab()
+        case .down:
+            isTopNavigationFocused = false
+        case .select:
+            activateTopTab()
+        case .back:
+            NotificationCenter.default.post(name: .tvShellRequestLauncher, object: nil)
+        default:
+            break
+        }
+    }
+
+    private func previewTopTab() {
+        switch topTab {
+        case .recommended:
+            contentMode = .all
+        case .popular, .ranking:
+            contentMode = .video
+        case .bangumi:
+            contentMode = .bangumi
+        case .dynamic, .profile, .search:
+            break
+        }
+        state = BilibiliRuntimeState(seasonCount: visibleSeasons.count)
+        statusText = "Bilibili · \(topTab.title) · \(visibleSeasons.count) 部"
+    }
+
+    private func activateTopTab() {
+        switch topTab {
+        case .search:
+            keyboardState = VirtualKeyboardState(text: currentQuery.isEmpty ? "间谍过家家" : currentQuery, layout: .zhuyin)
+            isKeyboardVisible = true
+            statusText = "Bilibili 搜尋"
+        case .dynamic:
+            statusText = credentials.isConfigured ? "正在準備 Bilibili 動態。" : "Bilibili 動態需要先在設定載入登入 Cookie。"
+        case .profile:
+            statusText = credentials.isConfigured ? "正在準備 Bilibili 我的頁面。" : "Bilibili 我的頁面需要先在設定載入登入 Cookie。"
+        default:
+            previewTopTab()
+            isTopNavigationFocused = false
         }
     }
 
@@ -733,6 +796,60 @@ final class BilibiliRuntimeController: ObservableObject {
     }
 }
 
+private struct BilibiliReferenceDetailHeader: View {
+    let detail: BilibiliSeasonDetail
+    let metadata: String
+    let metrics: TVMetrics
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 46 * metrics.scale) {
+            VStack(alignment: .leading, spacing: 18 * metrics.scale) {
+                Text(detail.title)
+                    .font(.system(size: 52 * metrics.scale, weight: .bold))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+                Text(metadata)
+                    .font(.system(size: 22 * metrics.scale, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .lineLimit(2)
+                Text(detail.evaluate ?? detail.subtitle ?? "Bilibili")
+                    .font(.system(size: 22 * metrics.scale, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .lineLimit(5)
+
+                HStack(spacing: 14 * metrics.scale) {
+                    detailAction("播放", symbol: "play.fill", isFocused: true)
+                    detailAction("讚", symbol: "hand.thumbsup.fill")
+                    detailAction("投幣", symbol: "b.circle.fill")
+                    detailAction("收藏", symbol: "star.fill")
+                }
+                .padding(.top, 8 * metrics.scale)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            BilibiliPosterImage(
+                url: detail.coverURL,
+                title: detail.title,
+                width: 500 * metrics.scale,
+                height: 282 * metrics.scale
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private func detailAction(_ title: String, symbol: String, isFocused: Bool = false) -> some View {
+        VStack(spacing: 8 * metrics.scale) {
+            Image(systemName: symbol)
+                .font(.system(size: 25 * metrics.scale, weight: .bold))
+            Text(title)
+                .font(.system(size: 17 * metrics.scale, weight: .semibold))
+        }
+        .frame(width: 96 * metrics.scale, height: 72 * metrics.scale)
+        .foregroundStyle(isFocused ? .black : .white)
+        .tvOS18Surface(role: .row, isFocused: isFocused, cornerRadius: 10 * metrics.scale)
+    }
+}
+
 private struct BilibiliModeSwitcher: View {
     let mode: BilibiliContentMode
     let metrics: TVMetrics
@@ -797,33 +914,47 @@ private struct BilibiliSeasonCard: View {
     let isFocused: Bool
     let metrics: TVMetrics
 
+    @ViewBuilder
     var body: some View {
         let isVideo = season.itemKind == .video
-        let width = (isVideo ? 330 : 190) * metrics.scale
-        let height = (isVideo ? 186 : 268) * metrics.scale
-        VStack(alignment: .leading, spacing: 12 * metrics.scale) {
-            BilibiliPosterImage(url: season.coverURL, title: season.title, width: width, height: height)
-                .overlay(alignment: .topLeading) {
-                    if let badge = season.badge {
-                        Text(badge)
-                            .font(.system(size: 15 * metrics.scale, weight: .bold))
-                            .padding(.horizontal, 9 * metrics.scale)
-                            .padding(.vertical, 5 * metrics.scale)
-                            .background(.pink.opacity(0.78), in: Capsule())
-                            .padding(9 * metrics.scale)
+        if isVideo {
+            TVOSMediaVideoCard(
+                title: season.title,
+                subtitle: season.subtitle,
+                metadata: season.totalText,
+                imageURL: season.coverURL,
+                isFocused: isFocused,
+                metrics: metrics
+            )
+            .frame(width: 330 * metrics.scale, alignment: .leading)
+            .accessibilityLabel(season.title)
+        } else {
+            let width = 190 * metrics.scale
+            let height = 268 * metrics.scale
+            VStack(alignment: .leading, spacing: 12 * metrics.scale) {
+                BilibiliPosterImage(url: season.coverURL, title: season.title, width: width, height: height)
+                    .overlay(alignment: .topLeading) {
+                        if let badge = season.badge {
+                            Text(badge)
+                                .font(.system(size: 15 * metrics.scale, weight: .bold))
+                                .padding(.horizontal, 9 * metrics.scale)
+                                .padding(.vertical, 5 * metrics.scale)
+                                .background(.pink.opacity(0.78), in: Capsule())
+                                .padding(9 * metrics.scale)
+                        }
                     }
-                }
-            Text(season.title)
-                .font(.system(size: 23 * metrics.scale, weight: .bold))
-                .lineLimit(2)
-            Text(season.totalText ?? season.subtitle ?? "Bilibili")
-                .font(.system(size: 17 * metrics.scale, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.58))
-                .lineLimit(1)
+                Text(season.title)
+                    .font(.system(size: 23 * metrics.scale, weight: .bold))
+                    .lineLimit(2)
+                Text(season.totalText ?? season.subtitle ?? "Bilibili")
+                    .font(.system(size: 17 * metrics.scale, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .lineLimit(1)
+            }
+            .frame(width: width, alignment: .leading)
+            .tvOS18ContentFocus(isFocused: isFocused)
+            .accessibilityLabel(season.title)
         }
-        .frame(width: width, alignment: .leading)
-        .tvOS18ContentFocus(isFocused: isFocused)
-        .accessibilityLabel(season.title)
     }
 }
 
