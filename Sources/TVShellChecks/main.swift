@@ -812,6 +812,19 @@ struct TVShellChecks {
         try expect(parsedComments.first?.time == 1.2, "dandanplay parser reads timestamp")
         try expect(parsedComments[1].mode == .top, "dandanplay parser maps top mode")
 
+        let v2CommentsJSON = """
+        {
+          "comments": [
+            { "p": "1.000,1,16777215,b-ep341309-1", "m": "四欄白色" },
+            { "p": "2.000,5,16711680,gm-18626", "m": "四欄紅色" },
+            { "p": "3.000,1,65280,c-4083833-0", "m": "四欄綠色" }
+          ]
+        }
+        """.data(using: .utf8)!
+        let v2Comments = try DandanplayAPI.decodeComments(v2CommentsJSON)
+        try expect(v2Comments.count == 3, "dandanplay parser preserves v2 comments with nonnumeric source identifiers")
+        try expect(v2Comments.map(\.colorHex) == ["#FFFFFF", "#FF0000", "#00FF00"], "dandanplay parser reads v2 color from field three")
+
         let combined = DanmakuAggregator.merge([
             [DanmakuComment(time: 2.0, text: "B"), DanmakuComment(time: 1.0, text: "A")],
             [DanmakuComment(time: 1.0, text: "A"), DanmakuComment(time: 3.0, text: "C")]

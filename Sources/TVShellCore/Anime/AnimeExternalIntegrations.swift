@@ -268,10 +268,11 @@ private struct DandanplayRawComment: Decodable {
 
     var danmakuComment: DanmakuComment? {
         let fields = p.split(separator: ",")
+        let colorIndex = fields.count == 4 ? 2 : 3
         guard fields.count >= 4,
               let time = Double(fields[0]),
               let rawMode = Int(fields[1]),
-              let colorValue = Int(fields[3])
+              let colorValue = Int(fields[colorIndex])
         else {
             return nil
         }
