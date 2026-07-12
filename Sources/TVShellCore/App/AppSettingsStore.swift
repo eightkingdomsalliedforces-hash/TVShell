@@ -72,8 +72,8 @@ public struct AppSettingsStore: Sendable {
     }
 
     public static func applicationSupport() -> AppSettingsStore {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return AppSettingsStore(fileURL: base.appending(path: "MacTV/settings.json"))
+        let directory = TVShellStorageMigration.resolvedApplicationSupportDirectory()
+        return AppSettingsStore(fileURL: directory.appending(path: "settings.json"))
     }
 
     public func load() throws -> AppSettingsSnapshot? {

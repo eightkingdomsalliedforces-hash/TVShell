@@ -153,6 +153,7 @@ struct TVShellChecks {
         try checkTVOS18MigrationComplete()
         try checkAppCatalogVisibilityAndOrdering()
         try checkSettingsPersistAcrossRelaunch()
+        try checkTVShellStorageMigration()
         try checkCredentialsPersistAndLoadFromFile()
         try checkSavedSettingsMigrateDefaultApps()
         try checkWatchHistoryMergesByMediaID()
@@ -1704,6 +1705,29 @@ struct TVShellChecks {
         let offlineProvider = BingWallpaperProvider(transport: StaticAnimeHTTPTransport(routes: [:]), cacheDirectory: cacheDirectory)
         let offlineSource = try await offlineProvider.fetch()
         try expect(offlineSource == .bingDaily(cachedURL), "bing wallpaper keeps the last successful image while offline")
+    }
+
+    static func checkTVShellStorageMigration() throws {
+        let base = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("TVShellChecks-Migration-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let legacy = base.appendingPathComponent("MacTV", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        let legacySettings = legacy.appendingPathComponent("settings.json")
+        try Data("legacy-settings".utf8).write(to: legacySettings)
+
+        let result = try TVShellStorageMigration.migrateApplicationSupport(baseURL: base)
+        try expect(result == .migrated, "TVShell migrates the legacy application-support directory")
+        let migratedSettings = base.appendingPathComponent("TVShell/settings.json")
+        let migratedData = try Data(contentsOf: migratedSettings)
+        try expect(migratedData == Data("legacy-settings".utf8), "TVShell migration preserves legacy settings")
+        try expect(FileManager.default.fileExists(atPath: legacySettings.path), "TVShell migration leaves legacy data intact")
+
+        try Data("new-settings".utf8).write(to: migratedSettings, options: .atomic)
+        let secondResult = try TVShellStorageMigration.migrateApplicationSupport(baseURL: base)
+        try expect(secondResult == .destinationAlreadyExists, "TVShell does not overwrite an existing destination")
+        let existingData = try Data(contentsOf: migratedSettings)
+        try expect(existingData == Data("new-settings".utf8), "TVShell keeps existing destination data")
     }
 
     static func checkYouTubeEmbedPageIncludesOriginAndFallback() throws {

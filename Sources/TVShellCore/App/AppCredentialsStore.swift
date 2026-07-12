@@ -43,8 +43,8 @@ public struct AppCredentialsStore: Sendable {
     }
 
     public static func applicationSupport() -> AppCredentialsStore {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return AppCredentialsStore(fileURL: base.appending(path: "MacTV/credentials.json"))
+        let directory = TVShellStorageMigration.resolvedApplicationSupportDirectory()
+        return AppCredentialsStore(fileURL: directory.appending(path: "credentials.json"))
     }
 
     public static func userHome() -> AppCredentialsStore {

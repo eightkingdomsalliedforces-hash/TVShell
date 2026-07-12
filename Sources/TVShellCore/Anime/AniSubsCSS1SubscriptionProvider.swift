@@ -668,8 +668,8 @@ public struct AniSubsCSS1SourceHealthStore: Sendable {
     }
 
     public static func applicationSupport() -> AniSubsCSS1SourceHealthStore {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return AniSubsCSS1SourceHealthStore(fileURL: base.appending(path: "MacTV/css1-disabled-sources.json"))
+        let directory = TVShellStorageMigration.resolvedApplicationSupportDirectory()
+        return AniSubsCSS1SourceHealthStore(fileURL: directory.appending(path: "css1-disabled-sources.json"))
     }
 
     public func load() throws -> AniSubsCSS1SourceHealthState {
