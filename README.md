@@ -89,6 +89,21 @@ MacTV.app/Contents/Frameworks/VLCKit.framework
 
 若本機開發版尚未打包 framework，但已安裝全域 `/Library/Frameworks/VLCKit.framework` 或 VLC.app 內含 VLCKit，也會作為 fallback。遙控器的播放/暫停、OK、左右快轉/倒退會同步控制 VLC surface。
 
+### 播放與正版來源遙控
+
+- 動畫、YouTube、Bilibili 播放時，方向鍵上／下調整音量；左右快轉／倒退。
+- 播放 HUD 在遙控操作時顯示，三秒沒有操作後自動隱藏；右上角狀態時鐘在播放期間隱藏。
+- 動畫首頁第一排按上進入頂部分頁，左右切換、OK 進入；官方 YouTube 結果會跟隨焦點捲動。
+- 官方 YouTube 使用 TVShell 原生結果與詳情頁，播放保留 YouTube 官方 embed、廣告與限制。
+- 動畫瘋使用持久官方 WebView。OK／播放鍵控制播放、左右操作官方播放器、上下調音量、Menu 送出全螢幕快捷鍵。可見的年齡確認會以一般按鈕點擊一次。
+- TVShell 不跳過動畫瘋廣告、不提取串流、不偽造會員權限，也不直接修改官方播放器時間。
+
+### Bing 每日圖片與彈幕控制
+
+- 壁紙選項包含 Bing 每日圖片；圖片與署名會快取，離線或更新失敗時保留最後成功圖片。
+- 長按 Menu 開啟控制中心，可調整彈幕顯示、大小、速度、透明度與密度。
+- 控制中心的彈幕變更立即套用並寫入設定，動畫與 Bilibili 播放共用同一份設定。
+
 VLCKit 由 VideoLAN 發布，採用 `LGPL-2.1-or-later`。Release app 會在 `Contents/Resources/ThirdPartyNotices.txt` 保留來源與授權資訊。來源：[`VideoLAN VLCKit`](https://code.videolan.org/videolan/VLCKit)。
 
 ## API、登入與 credentials.json

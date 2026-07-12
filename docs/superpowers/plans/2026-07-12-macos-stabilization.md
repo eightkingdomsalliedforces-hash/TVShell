@@ -8,6 +8,8 @@
 
 **Tech Stack:** Swift 6, SwiftUI, AppKit, WebKit, AVFoundation, URLSession, TVShellChecks
 
+**Status:** Tasks 1–6 implemented and verified on 2026-07-12; final release verification is recorded in the completing commit.
+
 ## Global Constraints
 
 - Work directly on the user-approved `main` branch and push each completed batch to `origin main`.
@@ -284,4 +286,3 @@ Commit: `docs: document TVShell playback and wallpaper controls`
 Run: `git push origin main`
 
 Expected: `main` updates successfully and `git status --short --branch` shows no divergence.
-
