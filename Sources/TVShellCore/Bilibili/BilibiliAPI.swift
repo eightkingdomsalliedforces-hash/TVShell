@@ -22,6 +22,8 @@ public protocol BilibiliBangumiProviding: Sendable {
     func detail(seasonID: Int) async throws -> BilibiliSeasonDetail
     func playback(episode: BilibiliEpisode) async throws -> BilibiliPlaybackStream
     func danmaku(episode: BilibiliEpisode) async throws -> [DanmakuComment]
+    func profile() async throws -> BilibiliProfile
+    func dynamics() async throws -> [BilibiliSeason]
 }
 
 public struct BilibiliBangumiProvider: BilibiliBangumiProviding {
@@ -83,6 +85,31 @@ public struct BilibiliBangumiProvider: BilibiliBangumiProviding {
         let data = try await transport.data(for: BilibiliAPI.danmakuRequest(cid: cid, credentials: credentials))
         return BilibiliAPI.decodeDanmaku(data)
     }
+
+    public func profile() async throws -> BilibiliProfile {
+        let profileData = try await transport.data(for: BilibiliAPI.profileRequest(credentials: credentials))
+        var profile = try BilibiliAPI.decodeProfile(profileData)
+        let mid = profile.mid
+        async let relationData: Data? = try? await transport.data(
+            for: BilibiliAPI.relationStatsRequest(mid: mid, credentials: credentials)
+        )
+        async let navigationData: Data? = try? await transport.data(
+            for: BilibiliAPI.navigationStatsRequest(mid: mid, credentials: credentials)
+        )
+        if let data = await relationData, let stats = try? BilibiliAPI.decodeRelationStats(data) {
+            profile.following = stats.following
+            profile.followers = stats.followers
+        }
+        if let data = await navigationData, let count = try? BilibiliAPI.decodeDynamicCount(data) {
+            profile.dynamicCount = count
+        }
+        return profile
+    }
+
+    public func dynamics() async throws -> [BilibiliSeason] {
+        let data = try await transport.data(for: BilibiliAPI.dynamicsRequest(credentials: credentials))
+        return try BilibiliAPI.decodeDynamics(data)
+    }
 }
 
 public enum BilibiliProviderFactory {
@@ -92,6 +119,26 @@ public enum BilibiliProviderFactory {
 }
 
 public enum BilibiliAPI {
+    public static func profileRequest(credentials: BilibiliCredentials = .environment()) -> AnimeHTTPRequest {
+        request(URL(string: "https://api.bilibili.com/x/web-interface/nav")!, credentials: credentials)
+    }
+
+    public static func relationStatsRequest(mid: Int, credentials: BilibiliCredentials = .environment()) -> AnimeHTTPRequest {
+        let url = URL(string: "https://api.bilibili.com/x/relation/stat")!
+            .appending(queryItems: [URLQueryItem(name: "vmid", value: "\(mid)")])
+        return request(url, credentials: credentials)
+    }
+
+    public static func navigationStatsRequest(mid: Int, credentials: BilibiliCredentials = .environment()) -> AnimeHTTPRequest {
+        let url = URL(string: "https://api.bilibili.com/x/space/navnum")!
+            .appending(queryItems: [URLQueryItem(name: "mid", value: "\(mid)")])
+        return request(url, credentials: credentials)
+    }
+
+    public static func dynamicsRequest(credentials: BilibiliCredentials = .environment()) -> AnimeHTTPRequest {
+        request(URL(string: "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all")!, credentials: credentials)
+    }
+
     public static func homeRequest(cursor: String = "0", credentials: BilibiliCredentials = .environment()) -> AnimeHTTPRequest {
         let url = URL(string: "https://api.bilibili.com/pgc/page/pc/bangumi/tab")!
             .appending(queryItems: [
@@ -310,6 +357,83 @@ public enum BilibiliAPI {
         .sorted { $0.time < $1.time }
     }
 
+    public static func decodeProfile(_ data: Data) throws -> BilibiliProfile {
+        let response = try JSONDecoder().decode(BilibiliProfileResponse.self, from: data)
+        try check(code: response.code, message: response.message)
+        guard let payload = response.data, payload.mid > 0 else {
+            throw BilibiliAPIError.missingData("profile")
+        }
+        return BilibiliProfile(
+            mid: payload.mid,
+            name: payload.uname,
+            faceURL: BilibiliURL.normalizeImageURL(payload.face),
+            coins: payload.money
+        )
+    }
+
+    public static func decodeRelationStats(_ data: Data) throws -> BilibiliRelationStats {
+        let response = try JSONDecoder().decode(BilibiliRelationResponse.self, from: data)
+        try check(code: response.code, message: response.message)
+        guard let payload = response.data else {
+            throw BilibiliAPIError.missingData("relation stats")
+        }
+        return BilibiliRelationStats(following: payload.following, followers: payload.follower)
+    }
+
+    public static func decodeDynamicCount(_ data: Data) throws -> Int {
+        let response = try JSONDecoder().decode(BilibiliNavigationResponse.self, from: data)
+        try check(code: response.code, message: response.message)
+        guard let count = response.data?.dynamicCount else {
+            throw BilibiliAPIError.missingData("dynamic count")
+        }
+        return count
+    }
+
+    public static func decodeDynamics(_ data: Data) throws -> [BilibiliSeason] {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw BilibiliAPIError.missingData("dynamic feed")
+        }
+        let code = (root["code"] as? NSNumber)?.intValue ?? -1
+        try check(code: code, message: root["message"] as? String)
+        let payload = root["data"] as? [String: Any]
+        let items = payload?["items"] as? [[String: Any]] ?? []
+        return uniqueItems(items.compactMap { item in
+            let modules = item["modules"] as? [String: Any]
+            let author = modules?["module_author"] as? [String: Any]
+            let dynamic = modules?["module_dynamic"] as? [String: Any]
+            let major = dynamic?["major"] as? [String: Any]
+            guard let archive = major?["archive"] as? [String: Any],
+                  let title = archive["title"] as? String,
+                  let bvid = archive["bvid"] as? String
+            else { return nil }
+            let aid = integerValue(archive["aid"])
+            let stats = archive["stat"] as? [String: Any]
+            let subtitle = [
+                author?["name"] as? String,
+                author?["pub_time"] as? String,
+                stats?["play"] as? String,
+                stats?["danmaku"] as? String
+            ].compactMap { $0 }.joined(separator: " · ")
+            return BilibiliSeason(
+                id: aid ?? bvid.stableBilibiliID,
+                itemKind: .video,
+                aid: aid,
+                bvid: bvid,
+                title: title.cleanBilibiliHTML,
+                subtitle: subtitle.isEmpty ? (archive["desc"] as? String) : subtitle,
+                coverURL: (archive["cover"] as? String).flatMap(BilibiliURL.normalizeImageURL),
+                badge: "動態",
+                totalText: archive["duration_text"] as? String
+            )
+        })
+    }
+
+    private static func integerValue(_ value: Any?) -> Int? {
+        if let number = value as? NSNumber { return number.intValue }
+        if let string = value as? String { return Int(string) }
+        return nil
+    }
+
     private static func playbackHeaders(credentials: BilibiliCredentials = .environment()) -> [String: String] {
         [
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/605.1.15",
@@ -348,6 +472,44 @@ public enum BilibiliAPI {
             let key = item.bvid ?? "\(item.itemKind.rawValue):\(item.id)"
             return seen.insert(key).inserted
         }
+    }
+}
+
+private struct BilibiliProfileResponse: Decodable {
+    var code: Int
+    var message: String?
+    var data: BilibiliProfilePayload?
+}
+
+private struct BilibiliProfilePayload: Decodable {
+    var mid: Int
+    var uname: String
+    var face: String
+    var money: Double
+}
+
+private struct BilibiliRelationResponse: Decodable {
+    var code: Int
+    var message: String?
+    var data: BilibiliRelationPayload?
+}
+
+private struct BilibiliRelationPayload: Decodable {
+    var following: Int
+    var follower: Int
+}
+
+private struct BilibiliNavigationResponse: Decodable {
+    var code: Int
+    var message: String?
+    var data: BilibiliNavigationPayload?
+}
+
+private struct BilibiliNavigationPayload: Decodable {
+    var dynamicCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case dynamicCount = "dynamic_count"
     }
 }
 

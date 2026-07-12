@@ -133,7 +133,11 @@ public struct BilibiliRuntimeView: View {
                             metrics: metrics
                         )
                     } else if controller.topTab == .profile {
-                        BilibiliProfilePage(isAuthenticated: controller.isAuthenticated, metrics: metrics)
+                        BilibiliProfilePage(
+                            profile: controller.profile,
+                            isAuthenticated: controller.isAuthenticated,
+                            metrics: metrics
+                        )
                     } else {
                         if controller.topTab == .search {
                             BilibiliSectionGrid(
@@ -298,6 +302,7 @@ final class BilibiliRuntimeController: ObservableObject {
     @Published private(set) var topTab: BilibiliTopTab = .recommended
     @Published private(set) var isTopNavigationFocused = false
     @Published private(set) var visibleDanmaku: [DanmakuComment] = []
+    @Published private(set) var profile: BilibiliProfile?
     @Published private(set) var danmakuPlaybackTime: Double = 0
     @Published private(set) var danmakuPlaybackDate = Date()
     @Published private(set) var isDanmakuClockRunning = false
@@ -664,12 +669,49 @@ final class BilibiliRuntimeController: ObservableObject {
             isKeyboardVisible = true
             statusText = "Bilibili 搜尋"
         case .dynamic:
-            statusText = credentials.isConfigured ? "正在準備 Bilibili 動態。" : "Bilibili 動態需要先在設定載入登入 Cookie。"
+            guard credentials.isConfigured else {
+                statusText = "Bilibili 動態需要先在設定載入登入 Cookie。"
+                return
+            }
+            Task { await loadDynamics() }
         case .profile:
-            statusText = credentials.isConfigured ? "正在準備 Bilibili 我的頁面。" : "Bilibili 我的頁面需要先在設定載入登入 Cookie。"
+            guard credentials.isConfigured else {
+                statusText = "Bilibili 我的頁面需要先在設定載入登入 Cookie。"
+                return
+            }
+            Task { await loadProfile() }
         default:
             previewTopTab()
             isTopNavigationFocused = false
+        }
+    }
+
+    private func loadDynamics() async {
+        statusText = "正在載入 Bilibili 真實動態..."
+        do {
+            contentMode = .video
+            seasons = try await provider.dynamics()
+            state = BilibiliRuntimeState(seasonCount: visibleSeasons.count)
+            isTopNavigationFocused = false
+            statusText = seasons.isEmpty ? "目前沒有可顯示的投稿動態。" : "已載入 \(seasons.count) 則追蹤動態"
+        } catch {
+            seasons = []
+            state = BilibiliRuntimeState(seasonCount: 0)
+            statusText = "Bilibili 動態載入失敗：\(error.localizedDescription)"
+        }
+    }
+
+    private func loadProfile() async {
+        statusText = "正在載入 Bilibili 個人統計..."
+        do {
+            profile = try await provider.profile()
+            seasons = []
+            state = BilibiliRuntimeState(seasonCount: 0)
+            isTopNavigationFocused = false
+            statusText = "已載入 \(profile?.name ?? "Bilibili 使用者") 的真實統計"
+        } catch {
+            profile = nil
+            statusText = "Bilibili 個人資料載入失敗：\(error.localizedDescription)"
         }
     }
 
@@ -921,6 +963,7 @@ private struct BilibiliDynamicPage: View {
 }
 
 private struct BilibiliProfilePage: View {
+    let profile: BilibiliProfile?
     let isAuthenticated: Bool
     let metrics: TVMetrics
     private let menuItems = ["歷史記錄", "我的收藏", "稍後再看", "設定", "操作說明", "登出"]
@@ -928,12 +971,10 @@ private struct BilibiliProfilePage: View {
     var body: some View {
         HStack(alignment: .top, spacing: 54 * metrics.scale) {
             VStack(alignment: .center, spacing: 14 * metrics.scale) {
-                Image(systemName: "person.crop.circle.fill")
-                    .font(.system(size: 112 * metrics.scale))
-                    .foregroundStyle(.pink.opacity(0.82))
-                Text(isAuthenticated ? "Bilibili 使用者" : "尚未登入")
+                profileAvatar
+                Text(profile?.name ?? (isAuthenticated ? "正在載入..." : "尚未登入"))
                     .font(.system(size: 28 * metrics.scale, weight: .bold))
-                Text(isAuthenticated ? "已載入登入 Cookie" : "請至設定載入 Cookie")
+                Text(profile.map { "UID \($0.mid)" } ?? (isAuthenticated ? "已載入登入 Cookie" : "請至設定載入 Cookie"))
                     .font(.system(size: 18 * metrics.scale, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.5))
             }
@@ -941,10 +982,10 @@ private struct BilibiliProfilePage: View {
 
             VStack(alignment: .leading, spacing: 12 * metrics.scale) {
                 HStack(spacing: 38 * metrics.scale) {
-                    profileCount("硬幣", value: isAuthenticated ? "--" : "0")
-                    profileCount("動態", value: isAuthenticated ? "--" : "0")
-                    profileCount("關注", value: isAuthenticated ? "--" : "0")
-                    profileCount("粉絲", value: isAuthenticated ? "--" : "0")
+                    profileCount("硬幣", value: profile.map { String(format: "%.1f", $0.coins) } ?? "--")
+                    profileCount("動態", value: profile.map { "\($0.dynamicCount)" } ?? "--")
+                    profileCount("關注", value: profile.map { "\($0.following)" } ?? "--")
+                    profileCount("粉絲", value: profile.map { "\($0.followers)" } ?? "--")
                 }
                 .padding(.bottom, 12 * metrics.scale)
 
@@ -958,6 +999,25 @@ private struct BilibiliProfilePage: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: 520 * metrics.scale, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var profileAvatar: some View {
+        if let faceURL = profile?.faceURL {
+            AsyncImage(url: faceURL) { phase in
+                if let image = phase.image {
+                    image.resizable().scaledToFill()
+                } else {
+                    Image(systemName: "person.crop.circle.fill").resizable().scaledToFit()
+                }
+            }
+            .frame(width: 112 * metrics.scale, height: 112 * metrics.scale)
+            .clipShape(Circle())
+        } else {
+            Image(systemName: "person.crop.circle.fill")
+                .font(.system(size: 112 * metrics.scale))
+                .foregroundStyle(.pink.opacity(0.82))
+        }
     }
 
     private func profileCount(_ title: String, value: String) -> some View {

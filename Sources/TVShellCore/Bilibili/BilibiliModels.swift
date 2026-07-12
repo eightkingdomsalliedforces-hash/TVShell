@@ -201,6 +201,44 @@ public struct BilibiliPlaybackStream: Equatable, Sendable {
     }
 }
 
+public struct BilibiliProfile: Codable, Equatable, Sendable {
+    public var mid: Int
+    public var name: String
+    public var faceURL: URL?
+    public var coins: Double
+    public var dynamicCount: Int
+    public var following: Int
+    public var followers: Int
+
+    public init(
+        mid: Int,
+        name: String,
+        faceURL: URL? = nil,
+        coins: Double = 0,
+        dynamicCount: Int = 0,
+        following: Int = 0,
+        followers: Int = 0
+    ) {
+        self.mid = mid
+        self.name = name
+        self.faceURL = faceURL
+        self.coins = coins
+        self.dynamicCount = dynamicCount
+        self.following = following
+        self.followers = followers
+    }
+}
+
+public struct BilibiliRelationStats: Codable, Equatable, Sendable {
+    public var following: Int
+    public var followers: Int
+
+    public init(following: Int, followers: Int) {
+        self.following = following
+        self.followers = followers
+    }
+}
+
 public enum BilibiliRuntimePhase: String, Codable, Equatable, Sendable {
     case browsing
     case detail

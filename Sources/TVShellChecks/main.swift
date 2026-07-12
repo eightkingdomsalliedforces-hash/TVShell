@@ -140,6 +140,8 @@ private struct StubBilibiliAnimeProvider: BilibiliBangumiProviding {
     func detail(seasonID: Int) async throws -> BilibiliSeasonDetail { seasonDetail }
     func playback(episode: BilibiliEpisode) async throws -> BilibiliPlaybackStream { playbackStream }
     func danmaku(episode: BilibiliEpisode) async throws -> [DanmakuComment] { [] }
+    func profile() async throws -> BilibiliProfile { throw BilibiliAPIError.missingData("stub profile") }
+    func dynamics() async throws -> [BilibiliSeason] { [] }
 }
 
 @main
@@ -1362,6 +1364,8 @@ struct TVShellChecks {
         try expect(bilibiliRuntimeSource.contains("BilibiliReferenceDetailHeader("), "bilibili detail follows the reference metadata-and-preview layout")
         try expect(bilibiliRuntimeSource.contains("BilibiliDynamicPage("), "bilibili exposes the reference dynamic page")
         try expect(bilibiliRuntimeSource.contains("BilibiliProfilePage("), "bilibili exposes the reference profile page")
+        try expect(bilibiliRuntimeSource.contains("provider.dynamics()"), "bilibili dynamic page loads the authenticated feed API")
+        try expect(bilibiliRuntimeSource.contains("provider.profile()"), "bilibili profile page loads real account statistics")
         let bilibiliApp = SeedApps.defaultApps.first(where: { app in
             if case .bilibili = app.target { return true }
             return false
@@ -1570,6 +1574,23 @@ struct TVShellChecks {
         try expect(bilibiliDanmaku.count == 2, "bilibili danmaku parser reads xml comments")
         try expect(bilibiliDanmaku.first?.time == 1.5, "bilibili danmaku parser reads comment time")
         try expect(bilibiliDanmaku.first?.text == "第一條&彈幕", "bilibili danmaku parser decodes xml entities")
+
+        let profileJSON = #"{"code":0,"message":"0","data":{"mid":42,"uname":"測試使用者","face":"https://example.com/avatar.jpg","money":18.5}}"#.data(using: .utf8)!
+        let profile = try BilibiliAPI.decodeProfile(profileJSON)
+        try expect(profile.mid == 42 && profile.name == "測試使用者", "bilibili profile parser reads the authenticated user")
+        try expect(profile.coins == 18.5, "bilibili profile parser reads real coin stats")
+
+        let relationJSON = #"{"code":0,"message":"0","data":{"mid":42,"following":127,"follower":1891}}"#.data(using: .utf8)!
+        let relation = try BilibiliAPI.decodeRelationStats(relationJSON)
+        try expect(relation.following == 127 && relation.followers == 1891, "bilibili relation parser reads following and follower counts")
+
+        let navigationJSON = #"{"code":0,"message":"0","data":{"dynamic_count":6}}"#.data(using: .utf8)!
+        let dynamicCount = try BilibiliAPI.decodeDynamicCount(navigationJSON)
+        try expect(dynamicCount == 6, "bilibili navigation parser reads dynamic count")
+
+        let dynamicJSON = #"{"code":0,"message":"0","data":{"items":[{"id_str":"9001","modules":{"module_author":{"name":"UP 主","pub_time":"剛剛"},"module_dynamic":{"major":{"archive":{"aid":"223344","bvid":"BV1dynamic","title":"真實動態影片","cover":"https://example.com/dynamic.jpg","desc":"最新投稿","duration_text":"12:34","stat":{"play":"1.2萬","danmaku":"88"}}}}}}]}}"#.data(using: .utf8)!
+        let dynamics = try BilibiliAPI.decodeDynamics(dynamicJSON)
+        try expect(dynamics.first?.bvid == "BV1dynamic" && dynamics.first?.title == "真實動態影片", "bilibili dynamics parser reads real archive cards")
 
         let homeProvider = BilibiliBangumiProvider(
             transport: StaticAnimeHTTPTransport(routes: [
