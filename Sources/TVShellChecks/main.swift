@@ -128,6 +128,20 @@ private struct DelayedAnimeSourceProvider: AnimeMediaSourceAdapter {
     }
 }
 
+private struct StubBilibiliAnimeProvider: BilibiliBangumiProviding {
+    let displayName = "Stub Bilibili"
+    let searchResults: [BilibiliSeason]
+    let seasonDetail: BilibiliSeasonDetail
+    let playbackStream: BilibiliPlaybackStream
+
+    func home() async throws -> [BilibiliSeason] { searchResults }
+    func search(keyword: String) async throws -> [BilibiliSeason] { searchResults }
+    func detail(item: BilibiliSeason) async throws -> BilibiliSeasonDetail { seasonDetail }
+    func detail(seasonID: Int) async throws -> BilibiliSeasonDetail { seasonDetail }
+    func playback(episode: BilibiliEpisode) async throws -> BilibiliPlaybackStream { playbackStream }
+    func danmaku(episode: BilibiliEpisode) async throws -> [DanmakuComment] { [] }
+}
+
 @main
 struct TVShellChecks {
     static func main() async throws {
@@ -170,6 +184,7 @@ struct TVShellChecks {
         try await checkDandanplaySearchEpisodesFallback()
         try checkYouTubeNativeRuntimeAndAPI()
         try await checkBilibiliBangumiRuntimeAndAPI()
+        try await checkBilibiliAnimeSourceAdapter()
         try checkOfficialAnimeSourceStateAndAniGamerCatalog()
         try checkYouTubeEmbedPageIncludesOriginAndFallback()
         try checkYouTubeLayoutAndPlayerShell()
@@ -2936,10 +2951,54 @@ struct TVShellChecks {
         try expect(AnimeEpisodeGridLayout.rows(itemCount: 3, columns: 0) == [[0], [1], [2]], "episode grid layout clamps invalid columns")
     }
 
+    static func checkBilibiliAnimeSourceAdapter() async throws {
+        let bangumi = BilibiliSeason(
+            id: 456,
+            title: "葬送的芙莉蓮",
+            subtitle: "正版番劇",
+            coverURL: URL(string: "https://example.com/frieren.jpg"),
+            totalText: "全 28 話"
+        )
+        let unrelatedVideo = BilibiliSeason(
+            id: 789,
+            itemKind: .video,
+            bvid: "BV1TEST",
+            title: "一般影片"
+        )
+        let detail = BilibiliSeasonDetail(
+            id: 456,
+            title: bangumi.title,
+            evaluate: "勇者一行人的後日談。",
+            ratingScore: 9.8,
+            episodes: [
+                BilibiliEpisode(id: 1001, cid: 2001, title: "1", longTitle: "冒險的終點", number: 1)
+            ]
+        )
+        let provider = StubBilibiliAnimeProvider(
+            searchResults: [unrelatedVideo, bangumi],
+            seasonDetail: detail,
+            playbackStream: BilibiliPlaybackStream(
+                url: URL(string: "https://example.com/bilibili.m3u8")!,
+                quality: "1080P",
+                headers: ["Referer": "https://www.bilibili.com/"]
+            )
+        )
+        let adapter = BilibiliAnimeSourceProvider(provider: provider)
+
+        let results = try await adapter.search(AnimeSearchQuery(keyword: "芙莉蓮"))
+        try expect(results.map(\.title) == ["葬送的芙莉蓮"], "anime Bilibili adapter only exposes bangumi results")
+        let episodes = try await adapter.episodes(for: results[0])
+        try expect(episodes.count == 1 && episodes[0].identity.episodeID == "1001", "anime Bilibili adapter resolves real episode ids")
+        let streams = try await adapter.streams(for: episodes[0])
+        try expect(streams.first?.quality == "1080P", "anime Bilibili adapter preserves official stream quality")
+        try expect(streams.first?.headers["Referer"] == "https://www.bilibili.com/", "anime Bilibili adapter preserves playback headers")
+    }
+
     @MainActor
     static func checkAnimekoStyleSourceCatalog() throws {
         let sources = AnimeSourceCatalog.defaultSources
-        try expect(sources.count == 7, "anime source catalog only keeps currently supported built-in sources")
+        try expect(sources.count == 8, "anime source catalog only keeps currently supported built-in sources")
+        try expect(sources.contains { $0.id == "bilibili-bangumi" }, "anime source catalog exposes Bilibili licensed bangumi")
         try expect(sources.first?.id == "bangumi-youtube", "catalog starts with playable bangumi youtube source")
         try expect(sources.allSatisfy { $0.health == .available }, "catalog removes sources without working adapters")
         try expect(sources.contains { $0.id == "girigiri" } == false, "catalog removes girigiri until a working adapter exists")

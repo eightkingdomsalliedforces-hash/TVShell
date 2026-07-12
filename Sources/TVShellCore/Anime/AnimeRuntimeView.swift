@@ -95,7 +95,8 @@ public struct AnimeRuntimeView: View {
             await controller.load(
                 sourceProvider: AnimeSourceProviderFactory.provider(
                     catalog: appState.animeSourceCatalog,
-                    youtubeCredentials: appState.youtubeCredentials
+                    youtubeCredentials: appState.youtubeCredentials,
+                    bilibiliCredentials: appState.bilibiliCredentials
                 ),
                 danmakuProvider: DandanplayDanmakuProvider(credentials: appState.dandanplayCredentials)
             )
@@ -116,6 +117,9 @@ public struct AnimeRuntimeView: View {
         .onChange(of: appState.dandanplayCredentials) { _, _ in
             reloadConfiguredSources()
         }
+        .onChange(of: appState.bilibiliCredentials) { _, _ in
+            reloadConfiguredSources()
+        }
         .onChange(of: appState.animeSourceCatalog) { _, _ in
             reloadConfiguredSources()
         }
@@ -132,7 +136,8 @@ public struct AnimeRuntimeView: View {
             await controller.load(
                 sourceProvider: AnimeSourceProviderFactory.provider(
                     catalog: appState.animeSourceCatalog,
-                    youtubeCredentials: appState.youtubeCredentials
+                    youtubeCredentials: appState.youtubeCredentials,
+                    bilibiliCredentials: appState.bilibiliCredentials
                 ),
                 danmakuProvider: DandanplayDanmakuProvider(credentials: appState.dandanplayCredentials)
             )

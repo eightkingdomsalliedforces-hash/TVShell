@@ -255,6 +255,7 @@ public enum AnimeSourceProviderFactory {
     public static func provider(
         catalog: AnimeSourceCatalogState,
         youtubeCredentials: YouTubeCredentials = .environment(),
+        bilibiliCredentials: BilibiliCredentials = .environment(),
         transport: any AnimeHTTPTransport = URLSessionAnimeHTTPTransport(),
         selectorConfigs: [SelectorAnimeSourceConfig] = (try? SelectorAnimeSourceConfig.environment()) ?? [],
         mediaServerConfigs: [MediaServerAnimeSourceConfig] = MediaServerAnimeSourceConfig.environment()
@@ -284,7 +285,8 @@ public enum AnimeSourceProviderFactory {
                 transport: transport
             ),
             AniSubsBTSubscriptionProvider(transport: transport),
-            AniSubsCSS1SubscriptionProvider(transport: transport)
+            AniSubsCSS1SubscriptionProvider(transport: transport),
+            BilibiliAnimeSourceProvider(credentials: bilibiliCredentials, transport: transport)
         ] + mediaServerAdapters + selectorAdapters
         let registry = AnimeSourceRegistry(adapters: adapters)
         let catalogProvider = CatalogAnimeSourceProvider(
