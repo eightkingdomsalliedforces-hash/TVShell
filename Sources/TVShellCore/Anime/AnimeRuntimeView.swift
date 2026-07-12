@@ -497,7 +497,7 @@ public struct AnimeRuntimeView: View {
                     .ignoresSafeArea()
             }
 
-            if controller.state.isDanmakuVisible {
+            if controller.state.isDanmakuVisible && appState.danmakuDisplaySettings.isVisible {
                 DanmakuOverlay(
                     comments: controller.visibleDanmaku,
                     currentTime: controller.danmakuPlaybackTime,

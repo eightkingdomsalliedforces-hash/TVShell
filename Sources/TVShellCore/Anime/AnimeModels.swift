@@ -177,24 +177,28 @@ public struct DanmakuDisplaySettings: Codable, Equatable, Sendable {
     public var speedScale: Double
     public var opacity: Double
     public var density: Int
+    public var isVisible: Bool
 
     private enum CodingKeys: String, CodingKey {
         case sizeScale
         case speedScale
         case opacity
         case density
+        case isVisible
     }
 
     public init(
         sizeScale: Double = 1.0,
         speedScale: Double = 1.0,
         opacity: Double = 0.92,
-        density: Int = 5
+        density: Int = 5,
+        isVisible: Bool = true
     ) {
         self.sizeScale = min(max(sizeScale, 0.7), 1.8)
         self.speedScale = min(max(speedScale, 0.6), 1.8)
         self.opacity = min(max(opacity, 0.35), 1.0)
         self.density = min(max(density, 1), 10)
+        self.isVisible = isVisible
     }
 
     public init(from decoder: Decoder) throws {
@@ -203,7 +207,8 @@ public struct DanmakuDisplaySettings: Codable, Equatable, Sendable {
             sizeScale: try container.decodeIfPresent(Double.self, forKey: .sizeScale) ?? 1.0,
             speedScale: try container.decodeIfPresent(Double.self, forKey: .speedScale) ?? 1.0,
             opacity: try container.decodeIfPresent(Double.self, forKey: .opacity) ?? 0.92,
-            density: try container.decodeIfPresent(Int.self, forKey: .density) ?? 5
+            density: try container.decodeIfPresent(Int.self, forKey: .density) ?? 5,
+            isVisible: try container.decodeIfPresent(Bool.self, forKey: .isVisible) ?? true
         )
     }
 
@@ -213,6 +218,7 @@ public struct DanmakuDisplaySettings: Codable, Equatable, Sendable {
         try container.encode(speedScale, forKey: .speedScale)
         try container.encode(opacity, forKey: .opacity)
         try container.encode(density, forKey: .density)
+        try container.encode(isVisible, forKey: .isVisible)
     }
 
     public var sizeLabel: String {
@@ -241,7 +247,8 @@ public struct DanmakuDisplaySettings: Codable, Equatable, Sendable {
             sizeScale: (sizeScale + step).rounded(toPlaces: 1),
             speedScale: speedScale,
             opacity: opacity,
-            density: density
+            density: density,
+            isVisible: isVisible
         )
     }
 
@@ -251,7 +258,8 @@ public struct DanmakuDisplaySettings: Codable, Equatable, Sendable {
             sizeScale: sizeScale,
             speedScale: (speedScale + step).rounded(toPlaces: 1),
             opacity: opacity,
-            density: density
+            density: density,
+            isVisible: isVisible
         )
     }
 
@@ -261,7 +269,8 @@ public struct DanmakuDisplaySettings: Codable, Equatable, Sendable {
             sizeScale: sizeScale,
             speedScale: speedScale,
             opacity: (opacity + step).rounded(toPlaces: 1),
-            density: density
+            density: density,
+            isVisible: isVisible
         )
     }
 
@@ -270,7 +279,18 @@ public struct DanmakuDisplaySettings: Codable, Equatable, Sendable {
             sizeScale: sizeScale,
             speedScale: speedScale,
             opacity: opacity,
-            density: density + (previous ? -1 : 1)
+            density: density + (previous ? -1 : 1),
+            isVisible: isVisible
+        )
+    }
+
+    public func toggledVisibility() -> DanmakuDisplaySettings {
+        DanmakuDisplaySettings(
+            sizeScale: sizeScale,
+            speedScale: speedScale,
+            opacity: opacity,
+            density: density,
+            isVisible: !isVisible
         )
     }
 }

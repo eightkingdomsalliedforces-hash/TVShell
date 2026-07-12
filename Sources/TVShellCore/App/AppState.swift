@@ -17,8 +17,13 @@ public enum ControlCenterFocus: CaseIterable, Equatable, Sendable {
     case webZoom
     case remote
     case settings
+    case danmakuVisibility
+    case danmakuSize
+    case danmakuSpeed
+    case danmakuOpacity
+    case danmakuDensity
 
-    fileprivate func moved(by command: RemoteCommand) -> ControlCenterFocus {
+    public func moved(by command: RemoteCommand) -> ControlCenterFocus {
         let items = Self.allCases
         guard let index = items.firstIndex(of: self) else {
             return self
@@ -38,6 +43,15 @@ public enum ControlCenterFocus: CaseIterable, Equatable, Sendable {
             return self
         }
         return items[nextIndex]
+    }
+
+    public var isDanmakuControl: Bool {
+        switch self {
+        case .danmakuVisibility, .danmakuSize, .danmakuSpeed, .danmakuOpacity, .danmakuDensity:
+            true
+        default:
+            false
+        }
     }
 }
 
@@ -355,6 +369,8 @@ public final class AppState: ObservableObject {
         case .left, .right:
             if controlCenterFocus == .audio {
                 adjustQuickVolume(command == .right ? 0.05 : -0.05)
+            } else if controlCenterFocus.isDanmakuControl {
+                adjustControlCenterDanmaku(previous: command == .left)
             } else {
                 controlCenterFocus = controlCenterFocus.moved(by: command)
             }
@@ -400,7 +416,32 @@ public final class AppState: ObservableObject {
         case .settings:
             isControlCenterPresented = false
             setRuntime(.settings)
+        case .danmakuVisibility, .danmakuSize, .danmakuSpeed, .danmakuOpacity, .danmakuDensity:
+            adjustControlCenterDanmaku(previous: false)
         }
+    }
+
+    private func adjustControlCenterDanmaku(previous: Bool) {
+        switch controlCenterFocus {
+        case .danmakuVisibility:
+            danmakuDisplaySettings = danmakuDisplaySettings.toggledVisibility()
+            statusMessage = danmakuDisplaySettings.isVisible ? "彈幕：顯示" : "彈幕：隱藏"
+        case .danmakuSize:
+            danmakuDisplaySettings = danmakuDisplaySettings.adjustedSize(previous: previous)
+            statusMessage = "彈幕大小：\(danmakuDisplaySettings.sizeLabel)"
+        case .danmakuSpeed:
+            danmakuDisplaySettings = danmakuDisplaySettings.adjustedSpeed(previous: previous)
+            statusMessage = "彈幕速度：\(danmakuDisplaySettings.speedLabel)"
+        case .danmakuOpacity:
+            danmakuDisplaySettings = danmakuDisplaySettings.adjustedOpacity(previous: previous)
+            statusMessage = "彈幕透明度：\(danmakuDisplaySettings.opacityLabel)"
+        case .danmakuDensity:
+            danmakuDisplaySettings = danmakuDisplaySettings.adjustedDensity(previous: previous)
+            statusMessage = "彈幕密度：\(danmakuDisplaySettings.densityLabel)"
+        default:
+            return
+        }
+        saveSettings()
     }
 
     private func adjustQuickVolume(_ amount: Double) {

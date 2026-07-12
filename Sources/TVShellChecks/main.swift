@@ -1673,6 +1673,12 @@ struct TVShellChecks {
         try expect(officialYouTubeView.contains("YouTubePlayerView"), "official YouTube playback uses the supported embed player")
         try expect(officialYouTubeView.contains("TVOS18PlayerHUD"), "official YouTube playback uses the TVShell HUD")
         try expect(officialYouTubeView.contains("youtube.com/watch") == false, "official YouTube never navigates the whole app to a watch page")
+        try expect(Array(ControlCenterFocus.allCases.suffix(5)) == [.danmakuVisibility, .danmakuSize, .danmakuSpeed, .danmakuOpacity, .danmakuDensity], "control center danmaku controls follow visual order")
+        try expect(ControlCenterFocus.danmakuDensity.moved(by: .down) == .danmakuDensity, "control center clamps at its bottom boundary")
+        let visibleDanmaku = DanmakuDisplaySettings().toggledVisibility()
+        try expect(visibleDanmaku.isVisible == false, "control center can hide danmaku globally")
+        let controlCenterSource = try String(contentsOfFile: "Sources/TVShellCore/ControlCenter/ControlCenterView.swift")
+        try expect(controlCenterSource.contains("title: \"彈幕大小\"") && controlCenterSource.contains("title: \"彈幕密度\""), "control center renders danmaku adjustment tiles")
     }
 
     static func checkBingWallpaperProvider() async throws {

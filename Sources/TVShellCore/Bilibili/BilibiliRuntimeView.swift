@@ -235,15 +235,17 @@ public struct BilibiliRuntimeView: View {
             BilibiliPlayerSurface(player: controller.player)
                 .ignoresSafeArea()
 
-            DanmakuOverlay(
-                comments: controller.visibleDanmaku,
-                currentTime: controller.danmakuPlaybackTime,
-                sampleDate: controller.danmakuPlaybackDate,
-                isClockRunning: controller.isDanmakuClockRunning,
-                settings: appState.danmakuDisplaySettings,
-                metrics: metrics
-            )
-            .zIndex(3)
+            if appState.danmakuDisplaySettings.isVisible {
+                DanmakuOverlay(
+                    comments: controller.visibleDanmaku,
+                    currentTime: controller.danmakuPlaybackTime,
+                    sampleDate: controller.danmakuPlaybackDate,
+                    isClockRunning: controller.isDanmakuClockRunning,
+                    settings: appState.danmakuDisplaySettings,
+                    metrics: metrics
+                )
+                .zIndex(3)
+            }
 
             TVOS18PlayerHUD(
                 title: controller.playingTitle,

@@ -25,6 +25,8 @@ public struct ControlCenterView: View {
                             .foregroundStyle(.white.opacity(0.9))
                     }
 
+                    ScrollViewReader { scrollProxy in
+                    ScrollView(.vertical) {
                     LazyVGrid(
                         columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)],
                         spacing: 14
@@ -80,6 +82,46 @@ public struct ControlCenterView: View {
                             title: "設定",
                             value: "更多選項"
                         )
+                        ControlCenterTile(
+                            item: .danmakuVisibility,
+                            icon: appState.danmakuDisplaySettings.isVisible ? "text.bubble.fill" : "text.bubble",
+                            title: "彈幕顯示",
+                            value: appState.danmakuDisplaySettings.isVisible ? "顯示" : "隱藏",
+                            isEnabled: appState.danmakuDisplaySettings.isVisible
+                        )
+                        ControlCenterTile(
+                            item: .danmakuSize,
+                            icon: "textformat.size",
+                            title: "彈幕大小",
+                            value: appState.danmakuDisplaySettings.sizeLabel
+                        )
+                        ControlCenterTile(
+                            item: .danmakuSpeed,
+                            icon: "speedometer",
+                            title: "彈幕速度",
+                            value: appState.danmakuDisplaySettings.speedLabel
+                        )
+                        ControlCenterTile(
+                            item: .danmakuOpacity,
+                            icon: "circle.lefthalf.filled",
+                            title: "彈幕透明度",
+                            value: appState.danmakuDisplaySettings.opacityLabel
+                        )
+                        ControlCenterTile(
+                            item: .danmakuDensity,
+                            icon: "line.3.horizontal.decrease",
+                            title: "彈幕密度",
+                            value: appState.danmakuDisplaySettings.densityLabel
+                        )
+                    }
+                    }
+                    .scrollIndicators(.hidden)
+                    .frame(maxHeight: min(650, proxy.size.height * 0.72))
+                    .onChange(of: appState.controlCenterFocus) { _, focus in
+                        withAnimation(TVMotion.focus) {
+                            scrollProxy.scrollTo(focus, anchor: .center)
+                        }
+                    }
                     }
 
                     Text("方向鍵移動，OK 調整，左右可調整音量，Menu 或 Back 關閉")
@@ -155,5 +197,6 @@ private struct ControlCenterTile: View {
             appState.controlCenterFocus = item
             appState.handle(.select)
         }
+        .id(item)
     }
 }
