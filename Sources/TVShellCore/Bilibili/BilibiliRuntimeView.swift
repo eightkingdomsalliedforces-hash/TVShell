@@ -135,13 +135,15 @@ public struct BilibiliRuntimeView: View {
                     } else if controller.topTab == .profile {
                         BilibiliProfilePage(isAuthenticated: controller.isAuthenticated, metrics: metrics)
                     } else {
-                        BilibiliSectionGrid(
-                            title: "番劇",
-                            items: controller.bangumiItems,
-                            baseIndex: controller.bangumiStartIndex,
-                            focusedIndex: controller.state.focusedSeasonIndex,
-                            metrics: metrics
-                        )
+                        if controller.topTab == .search {
+                            BilibiliSectionGrid(
+                                title: "番劇搜尋結果",
+                                items: controller.bangumiItems,
+                                baseIndex: controller.bangumiStartIndex,
+                                focusedIndex: controller.state.focusedSeasonIndex,
+                                metrics: metrics
+                            )
+                        }
 
                         BilibiliSectionGrid(
                             title: "一般影片",
@@ -489,6 +491,8 @@ final class BilibiliRuntimeController: ObservableObject {
     private func search(keyword: String) async {
         do {
             currentQuery = keyword
+            topTab = .search
+            contentMode = .all
             seasons = try await provider.search(keyword: keyword)
             state = BilibiliRuntimeState(seasonCount: visibleSeasons.count)
             let requestKeyword = BilibiliSearchNormalizer.simplified(keyword)
@@ -573,6 +577,8 @@ final class BilibiliRuntimeController: ObservableObject {
         }
 
         if command == .menu {
+            topTab = .search
+            contentMode = .all
             keyboardState = VirtualKeyboardState(text: currentQuery.isEmpty ? "间谍过家家" : currentQuery, layout: .zhuyin)
             isKeyboardVisible = true
             statusText = "Bilibili 搜尋"
@@ -644,8 +650,6 @@ final class BilibiliRuntimeController: ObservableObject {
             contentMode = .all
         case .popular, .ranking:
             contentMode = .video
-        case .bangumi:
-            contentMode = .bangumi
         case .dynamic, .profile, .search:
             break
         }
@@ -710,12 +714,6 @@ final class BilibiliRuntimeController: ObservableObject {
         }
         mediaState.isPlaying ? player.play() : player.pause()
         isDanmakuClockRunning = mediaState.isPlaying
-    }
-
-    private func toggleContentMode() {
-        contentMode = contentMode.next
-        state = BilibiliRuntimeState(seasonCount: visibleSeasons.count)
-        statusText = "Bilibili：已切換到\(contentMode.title) · \(visibleSeasons.count) 部"
     }
 
     private func resumeTime(for episode: BilibiliEpisode) -> Double {
@@ -968,27 +966,6 @@ private struct BilibiliProfilePage: View {
             Text(title)
                 .font(.system(size: 18 * metrics.scale, weight: .medium))
                 .foregroundStyle(.white.opacity(0.52))
-        }
-    }
-}
-
-private struct BilibiliModeSwitcher: View {
-    let mode: BilibiliContentMode
-    let metrics: TVMetrics
-
-    var body: some View {
-        HStack(spacing: 14 * metrics.scale) {
-            ForEach(BilibiliContentMode.allCases, id: \.self) { item in
-                Text(item.title)
-                    .font(.system(size: 24 * metrics.scale, weight: .heavy))
-                    .foregroundStyle(item == mode ? .black.opacity(0.82) : .white.opacity(0.72))
-                    .padding(.horizontal, 26 * metrics.scale)
-                    .padding(.vertical, 14 * metrics.scale)
-                    .background(item == mode ? .white.opacity(0.92) : .white.opacity(0.12), in: Capsule())
-            }
-            Text("播放/暫停鍵切換")
-                .font(.system(size: 20 * metrics.scale, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.54))
         }
     }
 }

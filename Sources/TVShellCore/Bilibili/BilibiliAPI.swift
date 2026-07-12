@@ -38,16 +38,8 @@ public struct BilibiliBangumiProvider: BilibiliBangumiProviding {
     }
 
     public func home() async throws -> [BilibiliSeason] {
-        async let bangumiData = transport.data(for: BilibiliAPI.homeRequest(credentials: credentials))
-        async let popularData = transport.data(for: BilibiliAPI.popularVideoRequest(credentials: credentials))
-        var results: [BilibiliSeason] = []
-        if let bangumi = try? await BilibiliAPI.decodeHome(bangumiData) {
-            results.append(contentsOf: bangumi)
-        }
-        if let videos = try? await BilibiliAPI.decodePopularVideos(popularData) {
-            results.append(contentsOf: videos)
-        }
-        return BilibiliAPI.uniqueItems(results)
+        let data = try await transport.data(for: BilibiliAPI.popularVideoRequest(credentials: credentials))
+        return try BilibiliAPI.decodePopularVideos(data)
     }
 
     public func search(keyword: String) async throws -> [BilibiliSeason] {

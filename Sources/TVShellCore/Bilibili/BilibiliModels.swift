@@ -58,7 +58,6 @@ public enum BilibiliContentMode: String, Codable, Equatable, CaseIterable, Senda
 public enum BilibiliTopTab: String, Codable, Equatable, CaseIterable, Sendable {
     case recommended
     case popular
-    case bangumi
     case ranking
     case dynamic
     case profile
@@ -68,7 +67,6 @@ public enum BilibiliTopTab: String, Codable, Equatable, CaseIterable, Sendable {
         switch self {
         case .recommended: "推薦"
         case .popular: "熱門"
-        case .bangumi: "番劇"
         case .ranking: "排行榜"
         case .dynamic: "動態"
         case .profile: "我的"

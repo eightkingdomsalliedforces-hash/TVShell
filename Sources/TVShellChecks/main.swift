@@ -1351,10 +1351,10 @@ struct TVShellChecks {
     @MainActor
     static func checkBilibiliBangumiRuntimeAndAPI() async throws {
         try expect(BilibiliSearchNormalizer.simplified("葬送的芙莉蓮") == "葬送的芙莉莲", "bilibili search converts Traditional Chinese to Simplified Chinese")
-        try expect(BilibiliTopTab.allCases.map(\.title) == ["推薦", "熱門", "番劇", "排行榜", "動態", "我的", "搜尋"], "bilibili exposes the reference top navigation tabs")
+        try expect(BilibiliTopTab.allCases.map(\.title) == ["推薦", "熱門", "排行榜", "動態", "我的", "搜尋"], "bilibili app removes the migrated bangumi home tab")
         try expect(BilibiliTopTab.recommended.previous == .recommended, "bilibili top navigation clamps at its leading edge")
         try expect(BilibiliTopTab.search.next == .search, "bilibili top navigation clamps at its trailing edge")
-        try expect(BilibiliTopTab.bangumi.next == .ranking, "bilibili top navigation moves in visual order")
+        try expect(BilibiliTopTab.popular.next == .ranking, "bilibili top navigation moves in visual order")
         let bilibiliRuntimeSource = try String(contentsOfFile: "Sources/TVShellCore/Bilibili/BilibiliRuntimeView.swift")
         try expect(bilibiliRuntimeSource.contains("TVOSMediaTopNavigation("), "bilibili uses the centered reference navigation")
         try expect(bilibiliRuntimeSource.contains("TVOSMediaVideoCard("), "bilibili general videos use the reference 16:9 grid card")
@@ -1574,12 +1574,15 @@ struct TVShellChecks {
         let homeProvider = BilibiliBangumiProvider(
             transport: StaticAnimeHTTPTransport(routes: [
                 BilibiliAPI.homeRequest().url.absoluteString: homeJSON,
-                BilibiliAPI.popularVideoRequest().url.absoluteString: popularJSON
+                BilibiliAPI.popularVideoRequest().url.absoluteString: popularJSON,
+                BilibiliAPI.searchBangumiRequest(keyword: "间谍").url.absoluteString: searchJSON,
+                BilibiliAPI.searchVideoRequest(keyword: "间谍").url.absoluteString: videoSearchJSON
             ])
         )
         let homeItems = try await homeProvider.home()
-        try expect(homeItems.contains { $0.itemKind == .bangumi }, "bilibili home includes bangumi section items")
-        try expect(homeItems.contains { $0.itemKind == .video }, "bilibili home includes general video section items")
+        try expect(homeItems.allSatisfy { $0.itemKind == .video }, "bilibili home excludes bangumi after migration to Anime")
+        let searchableItems = try await homeProvider.search(keyword: "間諜")
+        try expect(searchableItems.contains { $0.itemKind == .bangumi }, "bilibili search still includes bangumi after home migration")
 
         var runtime = BilibiliRuntimeState(seasonCount: 8, episodeCount: 3)
         runtime.applyBrowsing(.right, columns: 4)
@@ -1600,12 +1603,12 @@ struct TVShellChecks {
         try expect(runtimeSource.contains("ScrollViewReader"), "bilibili runtime keeps remote focus visible")
         try expect(runtimeSource.contains("VirtualKeyboardView"), "bilibili runtime supports remote search")
         try expect(runtimeSource.contains("AVURLAssetHTTPHeaderFieldsKey"), "bilibili player sends required playback headers")
-        try expect(runtimeSource.contains("controller.bangumiItems"), "bilibili runtime renders a dedicated bangumi section")
+        try expect(runtimeSource.contains("controller.bangumiItems"), "bilibili search can still render bangumi results")
         try expect(runtimeSource.contains("controller.videoItems"), "bilibili runtime renders a dedicated general video section")
         try expect(runtimeSource.contains("一般影片"), "bilibili runtime labels the general video section")
-        try expect(runtimeSource.contains("BilibiliModeSwitcher"), "bilibili runtime shows a mode switch button")
+        try expect(runtimeSource.contains("BilibiliModeSwitcher") == false, "bilibili runtime removes the obsolete bangumi mode switch")
         try expect(runtimeSource.contains("let isVideo = season.itemKind == .video"), "bilibili general videos use a dedicated landscape card")
-        try expect(runtimeSource.contains("toggleContentMode"), "bilibili runtime can switch between bangumi and general video")
+        try expect(runtimeSource.contains("topTab == .search"), "bilibili only exposes its bangumi section for search results")
         try expect(runtimeSource.contains("DanmakuOverlay("), "bilibili runtime renders danmaku overlay")
         try expect(runtimeSource.contains("provider.danmaku"), "bilibili runtime loads bilibili danmaku")
     }
