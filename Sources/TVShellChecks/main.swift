@@ -162,6 +162,7 @@ struct TVShellChecks {
         try checkLauncherLayoutNavigation()
         try checkAppStateOpensFocusedApps()
         try checkTVMetricsScaleWithWindowSize()
+        try checkCrossPlatformContracts()
         try checkTVOS18VisualSystem()
         try checkTVOS18SettingsLayout()
         try checkTVOS18SystemOverlays()
@@ -231,6 +232,21 @@ struct TVShellChecks {
         let metrics = TVMetrics(size: CGSize(width: 1_920, height: 1_080))
         try expect(abs(metrics.appTileWidth / metrics.appTileHeight - 1.55) < 0.02, "launcher app tiles use the approved 1.55:1 ratio")
         try expect(metrics.horizontalPadding >= 80, "tvOS layout keeps the horizontal safe area")
+    }
+
+    static func checkCrossPlatformContracts() throws {
+        let contractURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("Contracts/tvshell-contract.json")
+        let root = try JSONSerialization.jsonObject(with: Data(contentsOf: contractURL)) as? [String: Any]
+        let design = root?["design"] as? [String: Any]
+        let launcher = design?["launcher"] as? [String: Any]
+        let remoteCommands = root?["remoteCommands"] as? [String]
+        let metrics = TVMetrics(size: CGSize(width: 1_920, height: 1_080))
+        try expect((design?["referenceWidth"] as? NSNumber)?.doubleValue == 1_920, "cross-platform contract uses the canonical 1080p width")
+        try expect((launcher?["horizontalPadding"] as? NSNumber)?.doubleValue == metrics.horizontalPadding, "Swift launcher padding matches the shared contract")
+        try expect((launcher?["appTileWidth"] as? NSNumber)?.doubleValue == metrics.appTileWidth, "Swift app tile width matches the shared contract")
+        try expect((launcher?["appTileAspectRatio"] as? NSNumber)?.doubleValue == 1.55, "shared app cards retain the tvOS 18 rectangular ratio")
+        try expect(remoteCommands == ["up", "down", "left", "right", "select", "back", "home", "menu", "playPause", "rewind", "fastForward", "volumeUp", "volumeDown", "mute"], "all platform shells share one remote command order")
     }
 
     static func checkTVOS18SettingsLayout() throws {

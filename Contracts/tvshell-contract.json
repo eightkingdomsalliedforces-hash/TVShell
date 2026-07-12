@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "design": {
+    "referenceWidth": 1920,
+    "referenceHeight": 1080,
+    "scaleMinimum": 0.72,
+    "scaleMaximum": 1.65,
+    "backdrop": {
+      "red": 0.055,
+      "green": 0.060,
+      "blue": 0.070,
+      "bottomBlackOpacity": 0.48
+    },
+    "launcher": {
+      "horizontalPadding": 86,
+      "topPadding": 48,
+      "rowSpacing": 32,
+      "cardSpacing": 42,
+      "appTileWidth": 222,
+      "appTileAspectRatio": 1.55,
+      "appTitleSize": 34,
+      "focusScale": 1.06,
+      "focusLift": 10,
+      "focusAnimationMilliseconds": 180
+    },
+    "typography": {
+      "heroTitle": 82,
+      "heroSubtitle": 30,
+      "rowTitle": 30,
+      "hint": 26
+    }
+  },
+  "remoteCommands": [
+    "up",
+    "down",
+    "left",
+    "right",
+    "select",
+    "back",
+    "home",
+    "menu",
+    "playPause",
+    "rewind",
+    "fastForward",
+    "volumeUp",
+    "volumeDown",
+    "mute"
+  ],
+  "launcherApp": {
+    "requiredFields": ["id", "name", "target", "controlMode", "isVisibleOnHome"],
+    "targets": ["web", "portableWeb", "media", "anime", "youtube", "bilibili", "nativeApp"]
+  },
+  "anime": {
+    "requiredTitleFields": ["id", "title", "episodes"],
+    "requiredEpisodeFields": ["id", "title", "number", "providerID", "subjectID", "episodeID"],
+    "requiredStreamFields": ["url", "quality", "priority", "headers"]
+  }
+}
