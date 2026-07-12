@@ -13,6 +13,64 @@ permissions:
   contents: write
 
 jobs:
+  compose-platforms:
+    name: Build Android TV variants
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: platforms/compose
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Test shared UI and build Android TV APKs
+        run: ./gradlew :shared-ui:desktopTest :android-app:assemblePlayDebug :android-app:assembleLauncherDebug
+      - name: Verify launcher intent separation
+        run: |
+          PLAY="android-app/build/intermediates/merged_manifests/playDebug/processPlayDebugManifest/AndroidManifest.xml"
+          LAUNCHER="android-app/build/intermediates/merged_manifests/launcherDebug/processLauncherDebugManifest/AndroidManifest.xml"
+          grep -q "android.intent.category.LEANBACK_LAUNCHER" "$PLAY"
+          ! grep -q "android.intent.category.HOME" "$PLAY"
+          grep -q "android.intent.category.LEANBACK_LAUNCHER" "$LAUNCHER"
+          grep -q "android.intent.category.HOME" "$LAUNCHER"
+      - name: Upload Android TV APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: TVShell-Android-TV
+          path: |
+            platforms/compose/android-app/build/outputs/apk/play/debug/*.apk
+            platforms/compose/android-app/build/outputs/apk/launcher/debug/*.apk
+
+  windows-compose:
+    name: Build Windows shell
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: platforms/compose
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Test and package Windows MSI
+        run: ./gradlew.bat :shared-ui:desktopTest :shared-ui:packageMsi
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: TVShell-Windows
+          path: platforms/compose/shared-ui/build/compose/binaries/main/msi/*.msi
+
   build:
     name: Build TVShell
     runs-on: macos-15
