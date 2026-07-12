@@ -1657,6 +1657,14 @@ struct TVShellChecks {
         try expect(animeRuntime.contains("mainSourceNavigation.move(.left)"), "anime main top navigation responds to left")
         try expect(animeRuntime.contains("official-youtube-\\(index)"), "official YouTube results have stable scroll IDs")
         try expect(animeRuntime.contains("scrollProxy.scrollTo(\"official-youtube-"), "official YouTube results follow focused cards")
+        var overlay = PlaybackOverlayState(autoHideInterval: 3)
+        overlay.registerInput(at: Date(timeIntervalSince1970: 10))
+        try expect(overlay.isVisible(at: Date(timeIntervalSince1970: 12)), "player HUD remains visible before inactivity timeout")
+        try expect(overlay.isVisible(at: Date(timeIntervalSince1970: 14)) == false, "player HUD hides after inactivity timeout")
+        try expect(VolumeLevel(0.98).adjusted(by: 0.1).value == 1, "volume clamps to one")
+        try expect(VolumeLevel(0.02).adjusted(by: -0.1).value == 0, "volume clamps to zero")
+        try expect(animeRuntime.contains("SystemVolumeController.adjust(by: 0.0625)"), "anime playback up raises volume")
+        try expect(animeRuntime.contains("SystemVolumeController.adjust(by: -0.0625)"), "anime playback down lowers volume")
     }
 
     static func checkYouTubeEmbedPageIncludesOriginAndFallback() throws {
@@ -3260,7 +3268,7 @@ struct TVShellChecks {
         let animeRuntime = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Anime/AnimeRuntimeView.swift"))
         try expect(animeRuntime.contains("isPlayerHUDVisible"), "anime player can hide the large playback HUD")
         try expect(animeRuntime.contains("hidePlayerHUDTask"), "anime player schedules HUD auto-hide")
-        try expect(animeRuntime.contains("5_000_000_000"), "anime player hides HUD after five seconds")
+        try expect(animeRuntime.contains("3_000_000_000"), "anime player hides HUD after three seconds of inactivity")
         try expect(animeRuntime.contains("resumeTime(for:"), "anime player looks up resume time")
         try expect(animeRuntime.contains("recordPlaybackProgress"), "anime player records playback progress")
         try expect(animeRuntime.contains("restartOnSelect: canRestartFromBeginningWithSelect"), "anime player lets OK return to 00:00 only from the initial playback HUD")

@@ -316,6 +316,17 @@ final class YouTubeRuntimeController: ObservableObject {
             return
         }
 
+        if state.phase == .playing, command == .up {
+            SystemVolumeController.adjust(by: 0.0625)
+            showPlayerHUD(allowRestart: false)
+            return
+        }
+        if state.phase == .playing, command == .down {
+            SystemVolumeController.adjust(by: -0.0625)
+            showPlayerHUD(allowRestart: false)
+            return
+        }
+
         let previousPhase = state.phase
         state.apply(command, columns: gridColumns)
 
@@ -348,7 +359,7 @@ final class YouTubeRuntimeController: ObservableObject {
             return
         }
 
-        if state.phase == .playing && (command == .playPause || command == .select) {
+        if state.phase == .playing && (command == .playPause || command == .select || command == .left || command == .right || command == .rewind || command == .fastForward) {
             showPlayerHUD(allowRestart: false)
         }
     }
@@ -404,7 +415,7 @@ final class YouTubeRuntimeController: ObservableObject {
         canRestartFromBeginningWithSelect = allowRestart
         hidePlayerHUDTask?.cancel()
         hidePlayerHUDTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
             self?.isPlayerHUDVisible = false
             self?.canRestartFromBeginningWithSelect = false
         }

@@ -683,6 +683,16 @@ final class BilibiliRuntimeController: ObservableObject {
     }
 
     private func handlePlayback(_ command: RemoteCommand) {
+        if command == .up {
+            SystemVolumeController.adjust(by: 0.0625)
+            showPlayerHUD()
+            return
+        }
+        if command == .down {
+            SystemVolumeController.adjust(by: -0.0625)
+            showPlayerHUD()
+            return
+        }
         mediaState.apply(command)
         if mediaState.pendingSeekOffset != 0 {
             let target = max(0, player.currentTime().seconds + mediaState.pendingSeekOffset)
@@ -693,7 +703,7 @@ final class BilibiliRuntimeController: ObservableObject {
             player.play()
             return
         }
-        if command == .playPause || command == .select {
+        if command == .playPause || command == .select || command == .left || command == .right || command == .rewind || command == .fastForward {
             showPlayerHUD()
         }
         mediaState.isPlaying ? player.play() : player.pause()
@@ -781,7 +791,7 @@ final class BilibiliRuntimeController: ObservableObject {
         isPlayerHUDVisible = true
         hidePlayerHUDTask?.cancel()
         hidePlayerHUDTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
             self?.isPlayerHUDVisible = false
         }
     }

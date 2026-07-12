@@ -785,6 +785,14 @@ final class AnimeRuntimeController: ObservableObject {
     }
 
     private func handle(_ command: RemoteCommand) {
+        if officialYouTubeVideoID != nil, command == .up {
+            SystemVolumeController.adjust(by: 0.0625)
+            return
+        }
+        if officialYouTubeVideoID != nil, command == .down {
+            SystemVolumeController.adjust(by: -0.0625)
+            return
+        }
         if officialYouTubeVideoID != nil, command == .back {
             closeOfficialPlayer()
             return
@@ -1573,6 +1581,16 @@ final class AnimeRuntimeController: ObservableObject {
     }
 
     private func handlePlayback(_ command: RemoteCommand) {
+        if command == .up {
+            SystemVolumeController.adjust(by: 0.0625)
+            showPlayerHUD(allowRestart: false)
+            return
+        }
+        if command == .down {
+            SystemVolumeController.adjust(by: -0.0625)
+            showPlayerHUD(allowRestart: false)
+            return
+        }
         mediaState.apply(command, restartOnSelect: canRestartFromBeginningWithSelect)
 
         if mediaState.pendingSeekOffset != 0 {
@@ -1591,7 +1609,7 @@ final class AnimeRuntimeController: ObservableObject {
             return
         }
 
-        if command == .playPause || command == .select {
+        if command == .playPause || command == .select || command == .left || command == .right || command == .rewind || command == .fastForward {
             showPlayerHUD(allowRestart: false)
             if mediaState.isPlaying {
                 player.play()
@@ -1608,7 +1626,7 @@ final class AnimeRuntimeController: ObservableObject {
         canRestartFromBeginningWithSelect = allowRestart
         hidePlayerHUDTask?.cancel()
         hidePlayerHUDTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
             self?.isPlayerHUDVisible = false
             self?.canRestartFromBeginningWithSelect = false
         }
