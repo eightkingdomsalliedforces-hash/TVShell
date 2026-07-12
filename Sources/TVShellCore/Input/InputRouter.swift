@@ -30,6 +30,9 @@ public final class HostingKeyView<Content: View>: NSHostingView<Content> {
     private var globalMonitor: Any?
     private var observesActivation = false
     private var controllerMonitor: GameControllerRemoteMonitor?
+    private var hidConsumerMonitor: HIDConsumerRemoteMonitor?
+    private var lastRawInput: RawInputEvent?
+    private var lastRawInputDate = Date.distantPast
     private var longPressDispatchedKeys = Set<UInt16>()
     private var pendingMenuDispatches: [UInt16: DispatchWorkItem] = [:]
 
@@ -68,6 +71,12 @@ public final class HostingKeyView<Content: View>: NSHostingView<Content> {
 
     @discardableResult
     private func handle(_ raw: RawInputEvent, isRepeat: Bool = false) -> Bool {
+        let now = Date()
+        if isRepeat == false, raw == lastRawInput, now.timeIntervalSince(lastRawInputDate) < 0.08 {
+            return true
+        }
+        lastRawInput = raw
+        lastRawInputDate = now
         let wasCapturing = mappingCenter.captureTarget != nil
         guard let command = mappingCenter.command(for: raw) else {
             return wasCapturing
@@ -163,6 +172,14 @@ public final class HostingKeyView<Content: View>: NSHostingView<Content> {
             controllerMonitor = monitor
             monitor.start()
         }
+
+        if hidConsumerMonitor == nil {
+            let monitor = HIDConsumerRemoteMonitor { [weak self] raw in
+                _ = self?.handle(raw)
+            }
+            hidConsumerMonitor = monitor
+            _ = monitor.start()
+        }
     }
 
     private func restartGlobalEventMonitor() {
@@ -200,6 +217,8 @@ public final class HostingKeyView<Content: View>: NSHostingView<Content> {
         }
         controllerMonitor?.stop()
         controllerMonitor = nil
+        hidConsumerMonitor?.stop()
+        hidConsumerMonitor = nil
     }
 }
 

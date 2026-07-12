@@ -30,6 +30,12 @@ public struct KeyCodeMapper: Equatable, Sendable {
         case 4 where modifiers.contains(.command): return .home
         case 46 where modifiers.contains(.command): return .menu
         default:
+            switch characters?.lowercased() {
+            case "menu_pick": return .select
+            case "ac_back": return .back
+            case "ac_home": return .home
+            default: break
+            }
             if characters == "\r" { return .select }
             if characters == "\u{1b}" { return .back }
             return nil
@@ -44,6 +50,9 @@ public struct KeyCodeMapper: Equatable, Sendable {
         case 0: return .volumeUp
         case 1: return .volumeDown
         case 7: return .mute
+        case 0x41: return .select
+        case 0x223: return .home
+        case 0x224: return .back
         default: return nil
         }
     }

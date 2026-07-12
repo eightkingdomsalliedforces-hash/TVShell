@@ -594,9 +594,18 @@ struct TVShellChecks {
         try expect(KeyCodeMapper.default.command(for: GameControllerRemoteInput.rawInput(for: .primary)) == .select, "macOS game-controller OK maps to Select")
         try expect(KeyCodeMapper.default.command(for: GameControllerRemoteInput.rawInput(for: .back)) == .back, "macOS game-controller Back maps to Back")
         try expect(KeyCodeMapper.default.command(for: GameControllerRemoteInput.rawInput(for: .home)) == .home, "macOS game-controller Home maps to Home")
+        try expect(KeyCodeMapper.default.command(for: .media(systemCode: 0x41)) == .select, "menu_pick consumer event maps to Select")
+        try expect(KeyCodeMapper.default.command(for: .media(systemCode: 0x224)) == .back, "ac_back consumer event maps to Back")
+        try expect(KeyCodeMapper.default.command(for: .media(systemCode: 0x223)) == .home, "ac_home consumer event maps to Home")
+        try expect(KeyCodeMapper.default.command(for: .keyboard(keyCode: 0, characters: "menu_pick", modifiers: [])) == .select, "named menu_pick input maps to Select")
+        try expect(KeyCodeMapper.default.command(for: .keyboard(keyCode: 0, characters: "ac_back", modifiers: [])) == .back, "named ac_back input maps to Back")
+        try expect(KeyCodeMapper.default.command(for: .keyboard(keyCode: 0, characters: "ac_home", modifiers: [])) == .home, "named ac_home input maps to Home")
 
         let inputRouterSource = try String(contentsOfFile: "Sources/TVShellCore/Input/InputRouter.swift")
         try expect(inputRouterSource.contains("GCController.startWirelessControllerDiscovery"), "macOS discovers paired remotes through GameController")
+        try expect(inputRouterSource.contains("HIDConsumerRemoteMonitor"), "macOS listens to raw HID consumer controls reported by Karabiner EventViewer")
+        let hidMonitorSource = try String(contentsOfFile: "Sources/TVShellCore/Input/HIDConsumerRemoteMonitor.swift")
+        try expect(hidMonitorSource.contains("IOHIDManagerRegisterInputValueCallback") && hidMonitorSource.contains("kHIDPage_Consumer"), "raw HID monitor reads consumer usages such as menu_pick, ac_back, and ac_home")
         try expect(inputRouterSource.contains("NSApplication.didBecomeActiveNotification"), "macOS rebuilds global input monitoring after returning from Privacy settings")
 
         let appStateSource = try String(contentsOfFile: "Sources/TVShellCore/App/AppState.swift")
@@ -622,6 +631,12 @@ struct TVShellChecks {
             try expect(reloaded.command(for: raw) == .select, "custom remote mappings persist across relaunch")
             reloaded.reset()
             try expect(reloaded.command(for: raw) == nil, "reset removes custom remote mappings")
+            _ = reloaded.command(for: .hid(usagePage: 0x0C, usage: 0x41))
+            try expect(reloaded.lastRawEventDescription == "menu_pick", "learning screen names the remote OK usage")
+            _ = reloaded.command(for: .hid(usagePage: 0x0C, usage: 0x224))
+            try expect(reloaded.lastRawEventDescription == "ac_back", "learning screen names the remote Back usage")
+            _ = reloaded.command(for: .hid(usagePage: 0x0C, usage: 0x223))
+            try expect(reloaded.lastRawEventDescription == "ac_home", "learning screen names the remote Home usage")
         }
     }
 

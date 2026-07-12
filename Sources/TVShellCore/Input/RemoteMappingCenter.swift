@@ -81,9 +81,21 @@ public final class RemoteMappingCenter: ObservableObject {
             let modifierText = modifiers.isEmpty ? "" : " \(modifiers.map(\.rawValue).sorted().joined(separator: "+"))"
             return "Keyboard \(keyCode)\(text)\(modifierText)"
         case let .media(systemCode):
-            return "Media \(systemCode)"
+            return consumerUsageName(systemCode) ?? "Media \(systemCode)"
         case let .hid(usagePage, usage):
+            if usagePage == 0x0C, let name = consumerUsageName(usage) {
+                return name
+            }
             return String(format: "HID %02X:%03X", usagePage, usage)
+        }
+    }
+
+    private static func consumerUsageName(_ usage: Int) -> String? {
+        switch usage {
+        case 0x41: "menu_pick"
+        case 0x223: "ac_home"
+        case 0x224: "ac_back"
+        default: nil
         }
     }
 }
