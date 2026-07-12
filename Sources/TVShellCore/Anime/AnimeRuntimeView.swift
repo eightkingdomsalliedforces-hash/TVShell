@@ -225,7 +225,31 @@ public struct AnimeRuntimeView: View {
                             .lineLimit(1)
                     }
 
-                    if controller.titles.isEmpty {
+                    if controller.mainTab == .history, controller.animeHistoryEntries.isEmpty {
+                        TVOSMediaEmptyState(
+                            title: "沒有觀看記錄",
+                            message: controller.statusText,
+                            metrics: metrics
+                        )
+                    } else if controller.mainTab == .history {
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 360 * metrics.scale), spacing: 22 * metrics.scale)],
+                            alignment: .leading,
+                            spacing: 24 * metrics.scale
+                        ) {
+                            ForEach(Array(controller.animeHistoryEntries.enumerated()), id: \.element.id) { index, entry in
+                                TVOSMediaVideoCard(
+                                    title: entry.title,
+                                    subtitle: entry.progressSubtitle,
+                                    metadata: "動畫觀看記錄",
+                                    imageURL: nil,
+                                    isFocused: index == controller.state.focusedTitleIndex,
+                                    metrics: metrics
+                                )
+                                .id("anime-history-\(index)")
+                            }
+                        }
+                    } else if controller.titles.isEmpty {
                         TVOSMediaEmptyState(
                             title: "沒有動畫",
                             message: controller.statusText,
@@ -261,7 +285,11 @@ public struct AnimeRuntimeView: View {
             .scrollIndicators(.hidden)
             .onChange(of: controller.state.focusedTitleIndex) { _, index in
                 withAnimation(TVMotion.focus) {
-                    scrollProxy.scrollTo("anime-title-\(index)", anchor: .center)
+                    if controller.mainTab == .history {
+                        scrollProxy.scrollTo("anime-history-\(index)", anchor: .center)
+                    } else {
+                        scrollProxy.scrollTo("anime-title-\(index)", anchor: .center)
+                    }
                 }
             }
             .onChange(of: controller.titles.count) { _, _ in
@@ -669,6 +697,10 @@ final class AnimeRuntimeController: ObservableObject {
         return titles[state.focusedTitleIndex]
     }
 
+    var animeHistoryEntries: [WatchHistoryEntry] {
+        AnimeWatchHistory.entries(from: watchHistory)
+    }
+
     var pendingStreamEpisodeTitle: String {
         pendingStreamEpisode?.title ?? "選擇播放來源"
     }
@@ -781,6 +813,9 @@ final class AnimeRuntimeController: ObservableObject {
 
     func updateWatchHistory(_ history: [WatchHistoryEntry]) {
         watchHistory = history
+        if mainTab == .history, state.phase == .titles {
+            state.updateTitleCount(animeHistoryEntries.count)
+        }
     }
 
     func updatePreferredStreams(_ preferences: [String: String]) {
@@ -875,6 +910,11 @@ final class AnimeRuntimeController: ObservableObject {
             return
         }
 
+        if state.phase == .titles, mainTab == .history, command == .select {
+            resumeFromFocusedHistory()
+            return
+        }
+
         if state.phase == .titles || state.phase == .details, command == .menu {
             keyboardState = VirtualKeyboardState(text: currentQuery, layout: .zhuyin)
             isKeyboardVisible = true
@@ -947,9 +987,11 @@ final class AnimeRuntimeController: ObservableObject {
         case .left:
             mainSourceNavigation.move(.left)
             mainTab = AnimeMainTab.allCases[mainSourceNavigation.focusedSourceIndex]
+            synchronizeMainTabContent()
         case .right:
             mainSourceNavigation.move(.right)
             mainTab = AnimeMainTab.allCases[mainSourceNavigation.focusedSourceIndex]
+            synchronizeMainTabContent()
         case .down:
             mainSourceNavigation.enterContent()
         case .select:
@@ -976,12 +1018,28 @@ final class AnimeRuntimeController: ObservableObject {
             statusText = "我的訂閱 · 目前顯示已啟用來源的作品"
         case .history:
             mainSourceNavigation.enterContent()
-            statusText = watchHistory.isEmpty ? "目前沒有觀看記錄。" : "觀看記錄 · \(watchHistory.count) 筆"
+            synchronizeMainTabContent()
+            statusText = animeHistoryEntries.isEmpty ? "目前沒有動畫觀看記錄。" : "觀看記錄 · \(animeHistoryEntries.count) 筆"
         case .search:
             keyboardState = VirtualKeyboardState(text: currentQuery, layout: .zhuyin)
             isKeyboardVisible = true
             statusText = "動漫搜尋"
         }
+    }
+
+    private func synchronizeMainTabContent() {
+        guard state.phase == .titles else { return }
+        state.updateTitleCount(mainTab == .history ? animeHistoryEntries.count : titles.count)
+    }
+
+    private func resumeFromFocusedHistory() {
+        guard animeHistoryEntries.indices.contains(state.focusedTitleIndex) else {
+            statusText = "目前沒有可恢復的動畫觀看記錄。"
+            return
+        }
+        let entry = animeHistoryEntries[state.focusedTitleIndex]
+        statusText = "正在恢復：\(entry.title) · \(entry.resumeTimeLabel)"
+        Task { await resume(from: entry) }
     }
 
     private func handleKeyboard(_ command: RemoteCommand) {

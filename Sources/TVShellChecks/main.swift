@@ -934,6 +934,16 @@ struct TVShellChecks {
         state.handle(.select)
         try expect(state.pendingWatchHistoryEntry?.title == "葬送的芙莉蓮", "selecting watch history prepares resumable entry")
 
+        let mixedHistory = state.watchingHistory + [WatchHistoryEntry(
+            title: "YouTube",
+            kind: .youtube,
+            mediaID: "youtube:test"
+        )]
+        try expect(AnimeWatchHistory.entries(from: mixedHistory).map(\.kind) == [.anime], "anime history tab filters out other apps")
+        let animeRuntimeSource = try String(contentsOfFile: "Sources/TVShellCore/Anime/AnimeRuntimeView.swift")
+        try expect(animeRuntimeSource.contains(#"anime-history-\(index)"#), "anime history cards have stable focus scroll IDs")
+        try expect(animeRuntimeSource.contains("resumeFromFocusedHistory()"), "anime history OK resumes the selected episode")
+
         let launcherState = AppState(apps: SeedApps.defaultApps)
         let visibleApps = launcherState.apps.filter(\.isVisibleOnHome)
         launcherState.focusedAppID = visibleApps.first?.id
@@ -1390,6 +1400,21 @@ struct TVShellChecks {
         try expect(youtubeState.phase == .playing, "youtube select starts playback")
         youtubeState.apply(.back)
         try expect(youtubeState.phase == .browsing, "youtube back returns to native list")
+
+        var topNavigation = YouTubeTopNavigationState()
+        topNavigation.enterNavigation()
+        topNavigation.move(.right)
+        try expect(topNavigation.selectedTab == .popular, "youtube top navigation moves right in visual order")
+        topNavigation.move(.right)
+        topNavigation.move(.right)
+        try expect(topNavigation.selectedTab == .history, "youtube top navigation reaches watch history")
+        topNavigation.enterContent()
+        try expect(topNavigation.isNavigationFocused == false, "youtube down returns focus to the content grid")
+
+        let youtubeRuntimeSource = try String(contentsOfFile: "Sources/TVShellCore/YouTube/YouTubeRuntimeView.swift")
+        try expect(youtubeRuntimeSource.contains("focusedID: controller.topNavigation.selectedTab.rawValue"), "youtube top bar renders the actual focused tab")
+        try expect(youtubeRuntimeSource.contains("topNavigation.enterNavigation()"), "youtube first grid row can move focus into the top bar")
+        try expect(youtubeRuntimeSource.contains("showWatchHistory()"), "youtube History tab renders persisted watch entries")
     }
 
     @MainActor

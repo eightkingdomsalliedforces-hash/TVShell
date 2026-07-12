@@ -85,16 +85,14 @@ public struct YouTubeRuntimeView: View {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 32 * metrics.scale) {
                     TVOSMediaTopNavigation(
-                        items: [
-                            .init(id: "recommended", title: "推薦"),
-                            .init(id: "popular", title: "熱門"),
-                            .init(id: "subscriptions", title: "訂閱"),
-                            .init(id: "history", title: "記錄"),
-                            .init(id: "search", title: "搜尋", symbolName: "magnifyingglass")
-                        ],
-                        focusedID: "recommended",
+                        items: YouTubeTopTab.allCases.map {
+                            .init(id: $0.rawValue, title: $0.title, symbolName: $0.symbolName)
+                        },
+                        focusedID: controller.topNavigation.selectedTab.rawValue,
                         metrics: metrics
                     )
+                    .opacity(controller.topNavigation.isNavigationFocused ? 1 : 0.78)
+                    .scaleEffect(controller.topNavigation.isNavigationFocused ? 1.035 : 1)
                     .frame(maxWidth: .infinity, alignment: .center)
 
                     HStack(alignment: .firstTextBaseline) {
@@ -202,6 +200,7 @@ final class YouTubeRuntimeController: ObservableObject {
     @Published private(set) var isPlayerHUDVisible = false
     @Published private(set) var canRestartFromBeginningWithSelect = false
     @Published private(set) var keyboardState = VirtualKeyboardState(text: "anime", layout: .zhuyin)
+    @Published private(set) var topNavigation = YouTubeTopNavigationState()
     private var gridColumns = 3
     private var currentQuery = "anime"
     private var watchHistory: [WatchHistoryEntry] = []
@@ -249,6 +248,9 @@ final class YouTubeRuntimeController: ObservableObject {
 
     func updateWatchHistory(_ history: [WatchHistoryEntry]) {
         watchHistory = history
+        if topNavigation.selectedTab == .history {
+            showWatchHistory()
+        }
     }
 
     func updateCredentials(_ credentials: YouTubeCredentials) {
@@ -316,6 +318,16 @@ final class YouTubeRuntimeController: ObservableObject {
             return
         }
 
+        if state.phase == .browsing, topNavigation.isNavigationFocused {
+            handleTopNavigation(command)
+            return
+        }
+
+        if state.phase == .browsing, command == .up, state.focusedIndex < gridColumns {
+            topNavigation.enterNavigation()
+            return
+        }
+
         if state.phase == .playing, command == .up {
             SystemVolumeController.adjust(by: 0.0625)
             showPlayerHUD(allowRestart: false)
@@ -362,6 +374,70 @@ final class YouTubeRuntimeController: ObservableObject {
         if state.phase == .playing && (command == .playPause || command == .select || command == .left || command == .right || command == .rewind || command == .fastForward) {
             showPlayerHUD(allowRestart: false)
         }
+    }
+
+    private func handleTopNavigation(_ command: RemoteCommand) {
+        switch command {
+        case .left, .right:
+            topNavigation.move(command)
+        case .down:
+            topNavigation.enterContent()
+        case .select:
+            activateTopTab()
+        case .menu:
+            topNavigation = YouTubeTopNavigationState(
+                selectedIndex: YouTubeTopTab.allCases.firstIndex(of: .search) ?? 0,
+                isNavigationFocused: true
+            )
+            activateTopTab()
+        case .back, .home:
+            NotificationCenter.default.post(name: .tvShellRequestLauncher, object: nil)
+        default:
+            break
+        }
+    }
+
+    private func activateTopTab() {
+        switch topNavigation.selectedTab {
+        case .recommended:
+            topNavigation.enterContent()
+            Task { await load(query: "anime") }
+        case .popular:
+            topNavigation.enterContent()
+            Task { await load(query: "熱門") }
+        case .subscriptions:
+            topNavigation.enterContent()
+            videos = []
+            state.updateItemCount(0)
+            statusText = "訂閱需要 YouTube 帳號 OAuth；目前不會顯示假的訂閱內容。"
+        case .history:
+            topNavigation.enterContent()
+            showWatchHistory()
+        case .search:
+            keyboardState = VirtualKeyboardState(text: currentQuery, layout: .zhuyin)
+            isKeyboardVisible = true
+            statusText = "YouTube 搜尋"
+        }
+    }
+
+    private func showWatchHistory() {
+        var seen = Set<String>()
+        videos = watchHistory
+            .filter { $0.kind == .youtube }
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .compactMap { entry in
+                guard let videoID = entry.mediaID?.replacingOccurrences(of: "youtube:", with: ""),
+                      videoID.isEmpty == false,
+                      seen.insert(videoID).inserted
+                else { return nil }
+                return YouTubeVideo(
+                    id: videoID,
+                    title: entry.title,
+                    channelTitle: entry.subtitle ?? "YouTube"
+                )
+            }
+        state = YouTubeRuntimeState(itemCount: videos.count)
+        statusText = videos.isEmpty ? "目前沒有 YouTube 觀看記錄。" : "觀看記錄 · \(videos.count) 部"
     }
 
     private func handleKeyboard(_ command: RemoteCommand) {
