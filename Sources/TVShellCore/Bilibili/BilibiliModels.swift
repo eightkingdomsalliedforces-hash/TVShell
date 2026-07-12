@@ -26,6 +26,41 @@ public struct BilibiliCredentials: Codable, Equatable, Sendable {
     public var requestHeaders: [String: String] {
         isConfigured ? ["Cookie": cookie] : [:]
     }
+
+    public var csrfToken: String? {
+        cookie.split(separator: ";").lazy.compactMap { component -> String? in
+            let pair = component.split(separator: "=", maxSplits: 1).map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            guard pair.count == 2, pair[0] == "bili_jct", pair[1].isEmpty == false else { return nil }
+            return pair[1]
+        }.first
+    }
+}
+
+public enum BilibiliDetailAction: String, CaseIterable, Equatable, Sendable {
+    case play
+    case like
+    case coin
+    case favorite
+
+    public var title: String {
+        switch self {
+        case .play: "播放"
+        case .like: "讚"
+        case .coin: "投幣"
+        case .favorite: "收藏"
+        }
+    }
+
+    public var symbolName: String {
+        switch self {
+        case .play: "play.fill"
+        case .like: "hand.thumbsup.fill"
+        case .coin: "b.circle.fill"
+        case .favorite: "star.fill"
+        }
+    }
 }
 
 public enum BilibiliItemKind: String, Codable, Equatable, Sendable {

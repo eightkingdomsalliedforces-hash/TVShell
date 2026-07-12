@@ -17,6 +17,8 @@ public enum BilibiliAPIError: Error, Equatable, LocalizedError, Sendable {
 public protocol BilibiliBangumiProviding: Sendable {
     var displayName: String { get }
     func home() async throws -> [BilibiliSeason]
+    func recommended() async throws -> [BilibiliSeason]
+    func ranking() async throws -> [BilibiliSeason]
     func search(keyword: String) async throws -> [BilibiliSeason]
     func detail(item: BilibiliSeason) async throws -> BilibiliSeasonDetail
     func detail(seasonID: Int) async throws -> BilibiliSeasonDetail
@@ -24,6 +26,8 @@ public protocol BilibiliBangumiProviding: Sendable {
     func danmaku(episode: BilibiliEpisode) async throws -> [DanmakuComment]
     func profile() async throws -> BilibiliProfile
     func dynamics() async throws -> [BilibiliSeason]
+    func like(episode: BilibiliEpisode) async throws
+    func coin(episode: BilibiliEpisode) async throws
 }
 
 public struct BilibiliBangumiProvider: BilibiliBangumiProviding {
@@ -42,6 +46,16 @@ public struct BilibiliBangumiProvider: BilibiliBangumiProviding {
     public func home() async throws -> [BilibiliSeason] {
         let data = try await transport.data(for: BilibiliAPI.popularVideoRequest(credentials: credentials))
         return try BilibiliAPI.decodePopularVideos(data)
+    }
+
+    public func recommended() async throws -> [BilibiliSeason] {
+        let data = try await transport.data(for: BilibiliAPI.recommendedVideoRequest(credentials: credentials))
+        return try BilibiliAPI.decodeRecommendedVideos(data)
+    }
+
+    public func ranking() async throws -> [BilibiliSeason] {
+        let data = try await transport.data(for: BilibiliAPI.rankingVideoRequest(credentials: credentials))
+        return try BilibiliAPI.decodeRankingVideos(data)
     }
 
     public func search(keyword: String) async throws -> [BilibiliSeason] {
@@ -109,6 +123,16 @@ public struct BilibiliBangumiProvider: BilibiliBangumiProviding {
     public func dynamics() async throws -> [BilibiliSeason] {
         let data = try await transport.data(for: BilibiliAPI.dynamicsRequest(credentials: credentials))
         return try BilibiliAPI.decodeDynamics(data)
+    }
+
+    public func like(episode: BilibiliEpisode) async throws {
+        let data = try await transport.data(for: BilibiliAPI.likeRequest(episode: episode, credentials: credentials))
+        try BilibiliAPI.decodeActionResponse(data)
+    }
+
+    public func coin(episode: BilibiliEpisode) async throws {
+        let data = try await transport.data(for: BilibiliAPI.coinRequest(episode: episode, credentials: credentials))
+        try BilibiliAPI.decodeActionResponse(data)
     }
 }
 
@@ -191,6 +215,54 @@ public enum BilibiliAPI {
                 URLQueryItem(name: "ps", value: "\(max(min(pageSize, 50), 1))")
             ])
         return request(url, credentials: credentials)
+    }
+
+    public static func recommendedVideoRequest(
+        pageSize: Int = 20,
+        credentials: BilibiliCredentials = .environment()
+    ) -> AnimeHTTPRequest {
+        let url = URL(string: "https://api.bilibili.com/x/web-interface/index/top/feed/rcmd")!
+            .appending(queryItems: [
+                URLQueryItem(name: "fresh_type", value: "3"),
+                URLQueryItem(name: "ps", value: "\(max(min(pageSize, 50), 1))")
+            ])
+        return request(url, credentials: credentials)
+    }
+
+    public static func rankingVideoRequest(credentials: BilibiliCredentials = .environment()) -> AnimeHTTPRequest {
+        let url = URL(string: "https://api.bilibili.com/x/web-interface/ranking/v2")!
+            .appending(queryItems: [
+                URLQueryItem(name: "rid", value: "0"),
+                URLQueryItem(name: "type", value: "all")
+            ])
+        return request(url, credentials: credentials)
+    }
+
+    public static func likeRequest(
+        episode: BilibiliEpisode,
+        credentials: BilibiliCredentials = .environment()
+    ) throws -> AnimeHTTPRequest {
+        try actionRequest(
+            url: URL(string: "https://api.bilibili.com/x/web-interface/archive/like")!,
+            episode: episode,
+            fields: [URLQueryItem(name: "like", value: "1")],
+            credentials: credentials
+        )
+    }
+
+    public static func coinRequest(
+        episode: BilibiliEpisode,
+        credentials: BilibiliCredentials = .environment()
+    ) throws -> AnimeHTTPRequest {
+        try actionRequest(
+            url: URL(string: "https://api.bilibili.com/x/web-interface/coin/add")!,
+            episode: episode,
+            fields: [
+                URLQueryItem(name: "multiply", value: "1"),
+                URLQueryItem(name: "select_like", value: "0")
+            ],
+            credentials: credentials
+        )
     }
 
     public static func seasonDetailRequest(
@@ -282,6 +354,21 @@ public enum BilibiliAPI {
         let response = try JSONDecoder().decode(BilibiliPopularVideoResponse.self, from: data)
         try check(code: response.code, message: response.message)
         return uniqueItems(response.data?.list.compactMap(\.item) ?? [])
+    }
+
+    public static func decodeRecommendedVideos(_ data: Data) throws -> [BilibiliSeason] {
+        let response = try JSONDecoder().decode(BilibiliRecommendedVideoResponse.self, from: data)
+        try check(code: response.code, message: response.message)
+        return uniqueItems(response.data?.item.compactMap(\.item) ?? [])
+    }
+
+    public static func decodeRankingVideos(_ data: Data) throws -> [BilibiliSeason] {
+        try decodePopularVideos(data)
+    }
+
+    public static func decodeActionResponse(_ data: Data) throws {
+        let response = try JSONDecoder().decode(BilibiliActionResponse.self, from: data)
+        try check(code: response.code, message: response.message)
     }
 
     public static func decodeSeasonDetail(_ data: Data) throws -> BilibiliSeasonDetail {
@@ -455,6 +542,40 @@ public enum BilibiliAPI {
         )
     }
 
+    private static func actionRequest(
+        url: URL,
+        episode: BilibiliEpisode,
+        fields: [URLQueryItem],
+        credentials: BilibiliCredentials
+    ) throws -> AnimeHTTPRequest {
+        guard credentials.isConfigured, let csrf = credentials.csrfToken else {
+            throw BilibiliAPIError.missingData("登入 Cookie 的 bili_jct / CSRF")
+        }
+        var queryItems = fields
+        if let aid = episode.aid {
+            queryItems.append(URLQueryItem(name: "aid", value: "\(aid)"))
+        } else if let bvid = episode.bvid {
+            queryItems.append(URLQueryItem(name: "bvid", value: bvid))
+        } else {
+            throw BilibiliAPIError.missingData("影片 aid / bvid")
+        }
+        queryItems.append(URLQueryItem(name: "csrf", value: csrf))
+        var form = URLComponents()
+        form.queryItems = queryItems
+        return AnimeHTTPRequest(
+            method: "POST",
+            url: url,
+            headers: [
+                "Accept": "application/json,text/plain,*/*",
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "User-Agent": playbackHeaders()["User-Agent"] ?? "Mozilla/5.0",
+                "Referer": "https://www.bilibili.com/",
+                "Origin": "https://www.bilibili.com"
+            ].merging(credentials.requestHeaders, uniquingKeysWith: { _, new in new }),
+            body: Data((form.percentEncodedQuery ?? "").utf8)
+        )
+    }
+
     private static func check(code: Int, message: String?) throws {
         guard code == 0 else {
             throw BilibiliAPIError.api(code: code, message: message ?? "unknown")
@@ -479,6 +600,11 @@ private struct BilibiliProfileResponse: Decodable {
     var code: Int
     var message: String?
     var data: BilibiliProfilePayload?
+}
+
+private struct BilibiliActionResponse: Decodable {
+    var code: Int
+    var message: String?
 }
 
 private struct BilibiliProfilePayload: Decodable {
@@ -667,12 +793,23 @@ private struct BilibiliPopularVideoResponse: Decodable {
     var data: BilibiliPopularVideoData?
 }
 
+private struct BilibiliRecommendedVideoResponse: Decodable {
+    var code: Int
+    var message: String?
+    var data: BilibiliRecommendedVideoData?
+}
+
+private struct BilibiliRecommendedVideoData: Decodable {
+    var item: [BilibiliPopularVideoItem]
+}
+
 private struct BilibiliPopularVideoData: Decodable {
     var list: [BilibiliPopularVideoItem]
 }
 
 private struct BilibiliPopularVideoItem: Decodable {
     var aid: Int?
+    var id: Int?
     var bvid: String?
     var title: String?
     var pic: String?
@@ -683,7 +820,7 @@ private struct BilibiliPopularVideoItem: Decodable {
     var item: BilibiliSeason? {
         guard let title = title?.cleanBilibiliHTML,
               title.isEmpty == false,
-              let stableID = aid ?? bvid?.stableBilibiliID
+              let stableID = aid ?? id ?? bvid?.stableBilibiliID
         else {
             return nil
         }
@@ -700,7 +837,7 @@ private struct BilibiliPopularVideoItem: Decodable {
         return BilibiliSeason(
             id: stableID,
             itemKind: .video,
-            aid: aid,
+            aid: aid ?? id,
             bvid: bvid,
             title: title,
             subtitle: subtitle.isEmpty ? "一般影片" : subtitle,

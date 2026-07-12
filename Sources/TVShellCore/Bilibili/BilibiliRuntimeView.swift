@@ -197,6 +197,7 @@ public struct BilibiliRuntimeView: View {
                         BilibiliReferenceDetailHeader(
                             detail: detail,
                             metadata: controller.detailMetaText,
+                            focusedActionIndex: controller.isDetailActionFocused ? controller.focusedDetailActionIndex : nil,
                             metrics: metrics
                         )
                     } else {
@@ -301,6 +302,8 @@ final class BilibiliRuntimeController: ObservableObject {
     @Published private(set) var contentMode: BilibiliContentMode = .all
     @Published private(set) var topTab: BilibiliTopTab = .recommended
     @Published private(set) var isTopNavigationFocused = false
+    @Published private(set) var isDetailActionFocused = false
+    @Published private(set) var focusedDetailActionIndex = 0
     @Published private(set) var visibleDanmaku: [DanmakuComment] = []
     @Published private(set) var profile: BilibiliProfile?
     @Published private(set) var danmakuPlaybackTime: Double = 0
@@ -483,7 +486,7 @@ final class BilibiliRuntimeController: ObservableObject {
 
     func loadHome() async {
         do {
-            seasons = try await provider.home()
+            seasons = try await provider.recommended()
             state.updateSeasonCount(visibleSeasons.count)
             statusText = seasons.isEmpty ? "Bilibili 沒有回傳推薦。" : "Bilibili 推薦 · \(contentMode.title) · 已載入 \(visibleSeasons.count) 部"
         } catch {
@@ -517,6 +520,8 @@ final class BilibiliRuntimeController: ObservableObject {
             detail = try await provider.detail(item: season)
                 state.updateEpisodeCount(episodes.count)
                 state.openDetail()
+                isDetailActionFocused = true
+                focusedDetailActionIndex = 0
                 statusText = "已載入 \(episodes.count) 集 · OK 播放"
             } catch {
                 statusText = "番劇詳情載入失敗：\(error.localizedDescription)"
@@ -612,10 +617,19 @@ final class BilibiliRuntimeController: ObservableObject {
         case .detail:
             if command == .back {
                 state.resetToBrowsing()
+                isDetailActionFocused = false
+                return
+            }
+            if isDetailActionFocused {
+                handleDetailAction(command)
                 return
             }
             if command == .select, let focusedEpisode {
                 play(focusedEpisode)
+                return
+            }
+            if command == .up, state.focusedEpisodeIndex < episodeColumns {
+                isDetailActionFocused = true
                 return
             }
             state.applyDetail(command, columns: episodeColumns)
@@ -627,6 +641,53 @@ final class BilibiliRuntimeController: ObservableObject {
                 return
             }
             handlePlayback(command)
+        }
+    }
+
+    private func handleDetailAction(_ command: RemoteCommand) {
+        switch command {
+        case .left:
+            focusedDetailActionIndex = max(0, focusedDetailActionIndex - 1)
+        case .right:
+            focusedDetailActionIndex = min(BilibiliDetailAction.allCases.count - 1, focusedDetailActionIndex + 1)
+        case .down:
+            isDetailActionFocused = false
+        case .select:
+            performDetailAction(BilibiliDetailAction.allCases[focusedDetailActionIndex])
+        default:
+            break
+        }
+    }
+
+    private func performDetailAction(_ action: BilibiliDetailAction) {
+        guard let episode = focusedEpisode ?? episodes.first else {
+            statusText = "這個項目沒有可操作的影片。"
+            return
+        }
+        switch action {
+        case .play:
+            isDetailActionFocused = false
+            play(episode)
+        case .like:
+            Task {
+                do {
+                    try await provider.like(episode: episode)
+                    statusText = "已在 Bilibili 按讚。"
+                } catch {
+                    statusText = "Bilibili 按讚失敗：\(error.localizedDescription)"
+                }
+            }
+        case .coin:
+            Task {
+                do {
+                    try await provider.coin(episode: episode)
+                    statusText = "已在 Bilibili 投 1 枚硬幣。"
+                } catch {
+                    statusText = "Bilibili 投幣失敗：\(error.localizedDescription)"
+                }
+            }
+        case .favorite:
+            statusText = "收藏需要先選擇 Bilibili 收藏夾；目前已可聚焦，收藏夾選擇器將在下一階段接入。"
         }
     }
 
@@ -680,9 +741,42 @@ final class BilibiliRuntimeController: ObservableObject {
                 return
             }
             Task { await loadProfile() }
-        default:
-            previewTopTab()
+        case .recommended:
+            Task { await loadRecommended() }
+        case .popular:
+            Task { await loadPopular() }
+        case .ranking:
+            Task { await loadRanking() }
+        }
+    }
+
+    private func loadRecommended() async {
+        await loadVideoFeed(label: "推薦") { try await provider.recommended() }
+    }
+
+    private func loadPopular() async {
+        await loadVideoFeed(label: "熱門") { try await provider.home() }
+    }
+
+    private func loadRanking() async {
+        await loadVideoFeed(label: "排行榜") { try await provider.ranking() }
+    }
+
+    private func loadVideoFeed(
+        label: String,
+        operation: () async throws -> [BilibiliSeason]
+    ) async {
+        statusText = "正在載入 Bilibili \(label)..."
+        do {
+            contentMode = .video
+            seasons = try await operation()
+            state = BilibiliRuntimeState(seasonCount: visibleSeasons.count)
             isTopNavigationFocused = false
+            statusText = seasons.isEmpty ? "Bilibili \(label)目前沒有內容。" : "Bilibili \(label) · 已載入 \(seasons.count) 部"
+        } catch {
+            seasons = []
+            state = BilibiliRuntimeState(seasonCount: 0)
+            statusText = "Bilibili \(label)載入失敗：\(error.localizedDescription)"
         }
     }
 
@@ -866,6 +960,7 @@ final class BilibiliRuntimeController: ObservableObject {
 private struct BilibiliReferenceDetailHeader: View {
     let detail: BilibiliSeasonDetail
     let metadata: String
+    let focusedActionIndex: Int?
     let metrics: TVMetrics
 
     var body: some View {
@@ -885,10 +980,9 @@ private struct BilibiliReferenceDetailHeader: View {
                     .lineLimit(5)
 
                 HStack(spacing: 14 * metrics.scale) {
-                    detailAction("播放", symbol: "play.fill", isFocused: true)
-                    detailAction("讚", symbol: "hand.thumbsup.fill")
-                    detailAction("投幣", symbol: "b.circle.fill")
-                    detailAction("收藏", symbol: "star.fill")
+                    ForEach(Array(BilibiliDetailAction.allCases.enumerated()), id: \.element.rawValue) { index, action in
+                        detailAction(action.title, symbol: action.symbolName, isFocused: focusedActionIndex == index)
+                    }
                 }
                 .padding(.top, 8 * metrics.scale)
             }

@@ -136,6 +136,8 @@ private struct StubBilibiliAnimeProvider: BilibiliBangumiProviding {
     let playbackStream: BilibiliPlaybackStream
 
     func home() async throws -> [BilibiliSeason] { searchResults }
+    func recommended() async throws -> [BilibiliSeason] { searchResults }
+    func ranking() async throws -> [BilibiliSeason] { searchResults }
     func search(keyword: String) async throws -> [BilibiliSeason] { searchResults }
     func detail(item: BilibiliSeason) async throws -> BilibiliSeasonDetail { seasonDetail }
     func detail(seasonID: Int) async throws -> BilibiliSeasonDetail { seasonDetail }
@@ -143,6 +145,8 @@ private struct StubBilibiliAnimeProvider: BilibiliBangumiProviding {
     func danmaku(episode: BilibiliEpisode) async throws -> [DanmakuComment] { [] }
     func profile() async throws -> BilibiliProfile { throw BilibiliAPIError.missingData("stub profile") }
     func dynamics() async throws -> [BilibiliSeason] { [] }
+    func like(episode: BilibiliEpisode) async throws {}
+    func coin(episode: BilibiliEpisode) async throws {}
 }
 
 @main
@@ -1503,6 +1507,11 @@ struct TVShellChecks {
         try expect(bilibiliRuntimeSource.contains("BilibiliProfilePage("), "bilibili exposes the reference profile page")
         try expect(bilibiliRuntimeSource.contains("provider.dynamics()"), "bilibili dynamic page loads the authenticated feed API")
         try expect(bilibiliRuntimeSource.contains("provider.profile()"), "bilibili profile page loads real account statistics")
+        try expect(bilibiliRuntimeSource.contains("provider.recommended()"), "bilibili recommendation tab loads its real feed API")
+        try expect(bilibiliRuntimeSource.contains("provider.ranking()"), "bilibili ranking tab loads its real ranking API")
+        try expect(bilibiliRuntimeSource.contains("isDetailActionFocused"), "bilibili detail can move focus from episodes into its action row")
+        try expect(bilibiliRuntimeSource.contains("provider.like(episode:"), "bilibili Like action calls the authenticated API")
+        try expect(bilibiliRuntimeSource.contains("provider.coin(episode:"), "bilibili Coin action calls the authenticated API")
         let bilibiliApp = SeedApps.defaultApps.first(where: { app in
             if case .bilibili = app.target { return true }
             return false
@@ -1566,6 +1575,27 @@ struct TVShellChecks {
         let popular = try BilibiliAPI.decodePopularVideos(popularJSON)
         try expect(popular.first?.itemKind == .video, "bilibili popular parser returns general videos")
         try expect(popular.first?.bvid == "BV1popular", "bilibili popular parser reads bvid")
+
+        let recommendedRequest = BilibiliAPI.recommendedVideoRequest()
+        try expect(recommendedRequest.url.absoluteString.contains("/x/web-interface/index/top/feed/rcmd"), "bilibili recommended tab uses the recommendation feed")
+        let rankingRequest = BilibiliAPI.rankingVideoRequest()
+        try expect(rankingRequest.url.absoluteString.contains("/x/web-interface/ranking/v2"), "bilibili ranking tab uses the ranking feed")
+        let recommendedJSON = String(decoding: popularJSON, as: UTF8.self)
+            .replacingOccurrences(of: "\"list\"", with: "\"item\"")
+            .data(using: .utf8)!
+        let recommended = try BilibiliAPI.decodeRecommendedVideos(recommendedJSON)
+        let ranking = try BilibiliAPI.decodeRankingVideos(popularJSON)
+        try expect(recommended.first?.bvid == "BV1popular", "bilibili recommendation parser reads feed items")
+        try expect(ranking.first?.bvid == "BV1popular", "bilibili ranking parser reads ranked items")
+
+        let actionCredentials = BilibiliCredentials(cookie: "SESSDATA=test; bili_jct=csrf-token; DedeUserID=1")
+        try expect(actionCredentials.csrfToken == "csrf-token", "bilibili reads csrf token from login cookie")
+        let actionEpisode = BilibiliEpisode(id: 7, aid: 223344, cid: 9, bvid: "BV1popular", title: "1", number: 1)
+        let likeRequest = try BilibiliAPI.likeRequest(episode: actionEpisode, credentials: actionCredentials)
+        try expect(likeRequest.method == "POST" && String(decoding: likeRequest.body ?? Data(), as: UTF8.self).contains("csrf=csrf-token"), "bilibili Like sends an authenticated CSRF POST")
+        let coinRequest = try BilibiliAPI.coinRequest(episode: actionEpisode, credentials: actionCredentials)
+        try expect(String(decoding: coinRequest.body ?? Data(), as: UTF8.self).contains("multiply=1"), "bilibili Coin sends one coin through the action API")
+        try expect(BilibiliDetailAction.allCases.map(\.title) == ["播放", "讚", "投幣", "收藏"], "bilibili detail action row exposes all remote-focusable actions")
 
         let searchJSON = """
         {
