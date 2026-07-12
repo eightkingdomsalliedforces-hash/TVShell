@@ -26,8 +26,9 @@ public struct RemoteLearningView: View {
                         metrics: metrics
                     )
                 } content: {
-                    ScrollView(.vertical) {
-                        VStack(alignment: .leading, spacing: 14 * metrics.scale) {
+                    ScrollViewReader { scrollProxy in
+                        ScrollView(.vertical) {
+                            VStack(alignment: .leading, spacing: 14 * metrics.scale) {
                             TVOS18SettingsRow(
                                 symbolName: "remote.fill",
                                 title: "最近指令",
@@ -51,6 +52,7 @@ public struct RemoteLearningView: View {
                                         isFocused: index == focusedCommandIndex,
                                         metrics: metrics
                                     )
+                                    .id(index)
                                 }
 
                                 TVOS18SettingsRow(
@@ -60,6 +62,7 @@ public struct RemoteLearningView: View {
                                     isFocused: focusedCommandIndex == learnableCommands.count,
                                     metrics: metrics
                                 )
+                                .id(learnableCommands.count)
 
                                 Text("最近原始輸入：\(mappingCenter.lastRawEventDescription) · 已學習 \(mappingCenter.learnedMappingCount) 個。Menu 清除全部。")
                                     .font(.system(size: 18 * metrics.scale, weight: .medium))
@@ -87,10 +90,16 @@ public struct RemoteLearningView: View {
                             .tvOS18Surface(role: .panel, cornerRadius: 12 * metrics.scale)
 
                             PermissionStatusView()
+                            }
+                            .padding(.horizontal, 10 * metrics.scale)
                         }
-                        .padding(.horizontal, 10 * metrics.scale)
+                        .scrollIndicators(.hidden)
+                        .onChange(of: focusedCommandIndex) { newValue in
+                            withAnimation(.easeOut(duration: 0.18)) {
+                                scrollProxy.scrollTo(focusedCommandIndex, anchor: newValue == 0 ? .top : .center)
+                            }
+                        }
                     }
-                    .scrollIndicators(.hidden)
                 }
             }
         }

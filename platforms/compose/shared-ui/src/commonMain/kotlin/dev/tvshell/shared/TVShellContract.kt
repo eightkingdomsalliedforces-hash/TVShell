@@ -32,6 +32,10 @@ interface PlatformAdapter {
     fun installedApps(): List<ShellApp>
     fun launch(app: ShellApp): Result<Unit>
     fun openSystemSettings(): Result<Unit>
+    fun fetchMediaFeed(service: NativeMediaService): Result<List<NativeMediaCard>> =
+        Result.failure(UnsupportedOperationException("此平台尚未連接媒體服務"))
+    fun playMedia(card: NativeMediaCard): Result<Unit> =
+        Result.failure(UnsupportedOperationException("此平台尚未連接播放器"))
 }
 
 data class LauncherState(

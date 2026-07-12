@@ -92,9 +92,9 @@ public struct VirtualKeyboardState: Equatable, Sendable {
         case .latin:
             return [
             "1234567890".map { VirtualKeyboardKey(String($0)) },
-            "QWERTYUIOP".map { VirtualKeyboardKey(String($0)) },
-            "ASDFGHJKL".map { VirtualKeyboardKey(String($0)) },
-            "ZXCVBNM".map { VirtualKeyboardKey(String($0)) },
+            "qwertyuiop".map { VirtualKeyboardKey(String($0)) },
+            "asdfghjkl".map { VirtualKeyboardKey(String($0)) },
+            "zxcvbnm".map { VirtualKeyboardKey(String($0)) },
             [
                 VirtualKeyboardKey("空格", value: " ", kind: .space),
                 VirtualKeyboardKey("刪除", kind: .delete),

@@ -22,6 +22,11 @@ public struct AniGamerOfficialPlayerView: NSViewRepresentable {
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.allowsAirPlayForMediaPlayback = true
         configuration.userContentController.addUserScript(WKUserScript(
+            source: WebScrollbarHidingScript.source,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        ))
+        configuration.userContentController.addUserScript(WKUserScript(
             source: AniGamerOfficialPageScript.source,
             injectionTime: .atDocumentEnd,
             forMainFrameOnly: false

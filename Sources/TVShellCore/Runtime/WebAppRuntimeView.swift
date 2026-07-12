@@ -24,6 +24,11 @@ public struct WebAppRuntimeView: NSViewRepresentable {
 
     public func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: WebScrollbarHidingScript.source,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        ))
         let userScript = WKUserScript(
             source: Self.remoteBridgeScript,
             injectionTime: .atDocumentEnd,
@@ -765,7 +770,7 @@ public struct WebAppRuntimeView: NSViewRepresentable {
         if (mode === 'mouse') {
           ensureCursor();
           ensureCursorLabel('虛擬滑鼠：方向鍵移動，OK 點擊');
-          const step = Math.max(34, Math.round(Math.min(window.innerWidth, window.innerHeight) * 0.075));
+          const step = Math.max(20, Math.round(Math.min(window.innerWidth, window.innerHeight) * 0.032));
           if (command === 'up') return moveCursor(0, -step);
           if (command === 'down') return moveCursor(0, step);
           if (command === 'left') return moveCursor(-step, 0);

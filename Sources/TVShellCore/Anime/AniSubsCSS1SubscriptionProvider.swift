@@ -27,7 +27,38 @@ private struct CSS1SubjectSearchResolution: Sendable {
 
 private struct CSS1StreamResolution: Sendable {
     var lineIndex: Int
-    var candidate: AnimeStreamCandidate?
+    var candidates: [AnimeStreamCandidate]
+}
+
+public struct CSS1HLSVariant: Equatable, Sendable {
+    public var url: URL
+    public var height: Int
+    public var bandwidth: Int
+}
+
+public enum CSS1HLSMasterPlaylist {
+    public static func variants(in playlist: String, baseURL: URL) -> [CSS1HLSVariant] {
+        let lines = playlist.components(separatedBy: .newlines)
+        var variants: [CSS1HLSVariant] = []
+        for index in lines.indices where lines[index].hasPrefix("#EXT-X-STREAM-INF:") {
+            guard let urlLine = lines.dropFirst(index + 1).first(where: { $0.isEmpty == false && $0.hasPrefix("#") == false }),
+                  let url = URL(string: urlLine.trimmingCharacters(in: .whitespacesAndNewlines), relativeTo: baseURL)?.absoluteURL
+            else { continue }
+            let metadata = lines[index]
+            let height = capture(#"RESOLUTION=\d+x(\d+)"#, in: metadata)
+            let bandwidth = capture(#"(?:AVERAGE-)?BANDWIDTH=(\d+)"#, in: metadata)
+            variants.append(CSS1HLSVariant(url: url, height: height, bandwidth: bandwidth))
+        }
+        return variants.sorted { ($0.height, $0.bandwidth) > ($1.height, $1.bandwidth) }
+    }
+
+    private static func capture(_ pattern: String, in value: String) -> Int {
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
+              let range = Range(match.range(at: 1), in: value)
+        else { return 0 }
+        return Int(value[range]) ?? 0
+    }
 }
 
 public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
@@ -221,7 +252,7 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
             }
             return values.sorted { $0.lineIndex < $1.lineIndex }
         }
-        let candidates = resolutions.compactMap(\.candidate)
+        let candidates = resolutions.flatMap(\.candidates)
         guard candidates.isEmpty == false else {
             throw AnimeHTTPError.missingRoute("ani-subs css1 video url: \(episode.identity.episodeID)")
         }
@@ -245,7 +276,7 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
                 ?? sources.first(where: { $0.name == fallbackSourceName })
                 ?? sources.first
             else {
-                return CSS1StreamResolution(lineIndex: lineIndex, candidate: nil)
+                return CSS1StreamResolution(lineIndex: lineIndex, candidates: [])
             }
             let watchHTML = try await html(for: line.playbackURL, source: source)
             let playbackHTML: String
@@ -267,28 +298,52 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
                 pattern: source.videoPattern,
                 baseURL: playbackBaseURL
             ) else {
-                return CSS1StreamResolution(lineIndex: lineIndex, candidate: nil)
+                return CSS1StreamResolution(lineIndex: lineIndex, candidates: [])
             }
 
+            let headers = [
+                "resolver": "web-selector",
+                "source": source.name,
+                "title": "\(episode.identity.subjectID) · \(line.title)",
+                "episode": episode.title,
+                "User-Agent": source.userAgent
+            ].merging(source.videoHeaders, uniquingKeysWith: { _, new in new })
+            let variants = await hlsVariants(for: streamURL, source: source)
+            if variants.isEmpty == false {
+                return CSS1StreamResolution(
+                    lineIndex: lineIndex,
+                    candidates: variants.map { variant in
+                        let quality = variant.height > 0 ? "\(variant.height)p" : css1QualityLabel(sourceName: source.name, streamURL: variant.url)
+                        return AnimeStreamCandidate(
+                            url: variant.url,
+                            quality: quality,
+                            priority: css1QualityPriority(quality) + min(variant.bandwidth / 100_000, 80) + max(0, 64 - lineIndex),
+                            headers: headers
+                        )
+                    }
+                )
+            }
             let quality = css1QualityLabel(sourceName: source.name, streamURL: streamURL)
             return CSS1StreamResolution(
                 lineIndex: lineIndex,
-                candidate: AnimeStreamCandidate(
+                candidates: [AnimeStreamCandidate(
                     url: streamURL,
                     quality: quality,
                     priority: css1QualityPriority(quality) + max(0, 64 - lineIndex),
-                    headers: [
-                        "resolver": "web-selector",
-                        "source": source.name,
-                        "title": "\(episode.identity.subjectID) · \(line.title)",
-                        "episode": episode.title,
-                        "User-Agent": source.userAgent
-                    ].merging(source.videoHeaders, uniquingKeysWith: { _, new in new })
-                )
+                    headers: headers
+                )]
             )
         } catch {
-            return CSS1StreamResolution(lineIndex: lineIndex, candidate: nil)
+            return CSS1StreamResolution(lineIndex: lineIndex, candidates: [])
         }
+    }
+
+    private func hlsVariants(for url: URL, source: AniSubsCSS1Source) async -> [CSS1HLSVariant] {
+        guard url.pathExtension.lowercased() == "m3u8" || url.absoluteString.lowercased().contains("m3u8") else { return [] }
+        guard let data = try? await withCSS1Timeout(secondsLabel: "HLS master", operation: {
+            try await transport.data(for: AnimeHTTPRequest(method: "GET", url: url, headers: source.videoHeaders.merging(source.requestHeaders) { first, _ in first }))
+        }) else { return [] }
+        return CSS1HLSMasterPlaylist.variants(in: String(decoding: data, as: UTF8.self), baseURL: url)
     }
 
     private func css1QualityLabel(sourceName: String, streamURL: URL) -> String {

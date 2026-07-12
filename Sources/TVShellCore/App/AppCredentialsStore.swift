@@ -56,7 +56,19 @@ public struct AppCredentialsStore: Sendable {
             return nil
         }
         let data = try Data(contentsOf: fileURL)
-        return try JSONDecoder().decode(AppCredentialsSnapshot.self, from: data)
+        do {
+            return try JSONDecoder().decode(AppCredentialsSnapshot.self, from: data)
+        } catch {
+            guard let text = String(data: data, encoding: .utf8),
+                  let recovered = CredentialFileRecovery.snapshot(from: text)
+            else { throw error }
+            let backupURL = fileURL.appendingPathExtension("invalid.bak")
+            if FileManager.default.fileExists(atPath: backupURL.path) == false {
+                try data.write(to: backupURL, options: [.atomic])
+            }
+            try save(recovered)
+            return recovered
+        }
     }
 
     public func save(_ snapshot: AppCredentialsSnapshot) throws {
@@ -79,5 +91,46 @@ public struct AppCredentialsStore: Sendable {
             dandanplay: DandanplayCredentials(appID: "", appSecret: ""),
             bilibili: BilibiliCredentials(cookie: "")
         ))
+    }
+}
+
+private enum CredentialFileRecovery {
+    static func snapshot(from text: String) -> AppCredentialsSnapshot? {
+        let recognized = ["apiKey", "appID", "appSecret", "cookie"].contains { text.contains("\"\($0)\"") }
+        guard recognized else { return nil }
+        return AppCredentialsSnapshot(
+            youtube: YouTubeCredentials(apiKey: quotedValue(named: "apiKey", in: text) ?? ""),
+            dandanplay: DandanplayCredentials(
+                appID: quotedValue(named: "appID", in: text) ?? "",
+                appSecret: quotedValue(named: "appSecret", in: text) ?? ""
+            ),
+            bilibili: BilibiliCredentials(cookie: quotedValue(named: "cookie", in: text) ?? rawValue(named: "cookie", in: text) ?? "")
+        )
+    }
+
+    private static func quotedValue(named field: String, in text: String) -> String? {
+        let escaped = NSRegularExpression.escapedPattern(for: field)
+        guard let regex = try? NSRegularExpression(
+            pattern: "\\\"\(escaped)\\\"\\s*:\\s*(\\\"(?:\\\\.|[^\\\"\\\\])*\\\")"
+        ) else { return nil }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let match = regex.firstMatch(in: text, range: range),
+              let valueRange = Range(match.range(at: 1), in: text)
+        else { return nil }
+        return try? JSONDecoder().decode(String.self, from: Data(text[valueRange].utf8))
+    }
+
+    private static func rawValue(named field: String, in text: String) -> String? {
+        guard let marker = text.range(of: "\"\(field)\"") else { return nil }
+        let suffix = text[marker.upperBound...]
+        guard let colon = suffix.firstIndex(of: ":") else { return nil }
+        let valueStart = suffix.index(after: colon)
+        let remainder = suffix[valueStart...]
+        let valueEnd = remainder.firstIndex(where: { $0 == "\n" || $0 == "\r" || $0 == "}" }) ?? remainder.endIndex
+        var value = String(remainder[..<valueEnd]).trimmingCharacters(in: .whitespacesAndNewlines)
+        while value.last == "," { value.removeLast() }
+        value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("\"") && value.hasSuffix("\"") { value = String(value.dropFirst().dropLast()) }
+        return value.isEmpty ? nil : value
     }
 }

@@ -521,6 +521,7 @@ struct TVShellChecks {
     static func checkVirtualKeyboardState() throws {
         var keyboard = VirtualKeyboardState()
         try expect(keyboard.focusedKey.label == "1", "virtual keyboard starts at first key")
+        try expect(keyboard.rows[1].map(\.label) == Array("qwertyuiop").map(String.init), "English keyboard presents lowercase letters")
         try expect(keyboard.apply(.right) == .none, "virtual keyboard right moves focus")
         try expect(keyboard.focusedKey.label == "2", "virtual keyboard focuses next key")
         try expect(keyboard.apply(.select) == .textChanged, "virtual keyboard select types focused key")
@@ -621,6 +622,11 @@ struct TVShellChecks {
         try expect(candidateKeyboard.focusedCandidateIndex == 1, "zhuyin keyboard focuses next candidate")
         try expect(candidateKeyboard.apply(.select) == .textChanged, "zhuyin keyboard commits selected candidate")
         try expect(candidateKeyboard.text == "店", "zhuyin keyboard commits the focused candidate rather than always the first one")
+
+        let webRuntime = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Runtime/WebAppRuntimeView.swift"))
+        try expect(webRuntime.contains("* 0.032"), "virtual cursor uses a precise TV-sized movement step")
+        let learningView = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Settings/RemoteLearningView.swift"))
+        try expect(learningView.contains("ScrollViewReader") && learningView.contains("scrollTo(focusedCommandIndex"), "remote learning follows the focused row while scrolling")
     }
 
     static func checkNetworkRemoteControlServer() throws {
@@ -1020,6 +1026,12 @@ struct TVShellChecks {
         let animeRuntimeSource = try String(contentsOfFile: "Sources/TVShellCore/Anime/AnimeRuntimeView.swift")
         try expect(animeRuntimeSource.contains(#"anime-history-\(index)"#), "anime history cards have stable focus scroll IDs")
         try expect(animeRuntimeSource.contains("resumeFromFocusedHistory()"), "anime history OK resumes the selected episode")
+        try expect(animeRuntimeSource.contains("if command == .menu") && animeRuntimeSource.contains("presentStreamPicker(playbackCandidates"), "anime player Menu opens playback source switching")
+        try expect(animeRuntimeSource.contains("preferredPeakBitRate = 0") && animeRuntimeSource.contains("preferredMaximumResolution"), "anime AVPlayer allows the highest available rendition")
+
+        let webRuntimeSource = try String(contentsOfFile: "Sources/TVShellCore/Runtime/WebAppRuntimeView.swift")
+        let aniGamerSource = try String(contentsOfFile: "Sources/TVShellCore/Anime/AniGamerOfficialPlayerView.swift")
+        try expect(webRuntimeSource.contains("injectionTime: .atDocumentStart") && aniGamerSource.contains("injectionTime: .atDocumentStart"), "all embedded web apps hide scrollbars before first paint")
 
         let launcherState = AppState(apps: SeedApps.defaultApps)
         let visibleApps = launcherState.apps.filter(\.isVisibleOnHome)
@@ -1535,6 +1547,21 @@ struct TVShellChecks {
         let partial = try AppCredentialsStore(fileURL: partialURL).load()
         try expect(partial?.youtube.apiKey == "only-youtube-key", "partial credentials file loads configured API keys")
         try expect(partial?.dandanplay.isConfigured == false, "partial credentials defaults missing sections")
+
+        let malformedURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("TVShellChecks-MalformedCredentials-\(UUID().uuidString).json")
+        defer {
+            try? FileManager.default.removeItem(at: malformedURL)
+            try? FileManager.default.removeItem(at: malformedURL.appendingPathExtension("invalid.bak"))
+        }
+        let malformed = #"{"youtube":{"apiKey":"yt-kept"},"dandanplay":{"appID":"dd-kept","appSecret":"secret-kept"},"bilibili":{"cookie":SESSDATA=abc; bili_jct=csrf-token;}}"#
+        try Data(malformed.utf8).write(to: malformedURL)
+        let recovered = try AppCredentialsStore(fileURL: malformedURL).load()
+        try expect(recovered?.youtube.apiKey == "yt-kept", "malformed Bilibili cookie does not erase YouTube credentials")
+        try expect(recovered?.dandanplay.appSecret == "secret-kept", "malformed Bilibili cookie does not erase Dandanplay credentials")
+        try expect(recovered?.bilibili.cookie == "SESSDATA=abc; bili_jct=csrf-token;", "unquoted Bilibili cookie is recovered")
+        _ = try JSONDecoder().decode(AppCredentialsSnapshot.self, from: Data(contentsOf: malformedURL))
+        try expect(FileManager.default.fileExists(atPath: malformedURL.appendingPathExtension("invalid.bak").path), "malformed credentials keep a backup before normalization")
 
         let generatedURL = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("TVShellChecks-AutoCredentials-\(UUID().uuidString).json")
@@ -2729,6 +2756,19 @@ struct TVShellChecks {
         try expect(streams.first?.url.absoluteString == "https://cdn.example/frieren-1.mkv?token=abc", "css1 provider parses nested encoded video url")
         try expect(streams.first?.headers["resolver"] == "web-selector", "css1 stream marks web selector resolver")
         try expect(streams.first?.headers["Referer"] == "https://web.example/", "css1 stream carries video headers from subscription")
+
+        let hlsVariants = CSS1HLSMasterPlaylist.variants(
+            in: """
+            #EXTM3U
+            #EXT-X-STREAM-INF:BANDWIDTH=850000,RESOLUTION=854x480
+            low/index.m3u8
+            #EXT-X-STREAM-INF:AVERAGE-BANDWIDTH=5200000,RESOLUTION=1920x1080
+            high/index.m3u8
+            """,
+            baseURL: URL(string: "https://cdn.example/master.m3u8")!
+        )
+        try expect(hlsVariants.map(\.height) == [1080, 480], "css1 expands HLS master playlists with the highest rendition first")
+        try expect(hlsVariants.first?.url.absoluteString == "https://cdn.example/high/index.m3u8", "css1 resolves relative HLS rendition URLs")
 
         let qualitySubscription = """
         {

@@ -922,6 +922,11 @@ final class AnimeRuntimeController: ObservableObject {
             return
         }
 
+        if state.phase == .playing, command == .menu {
+            handlePlayback(command)
+            return
+        }
+
         let previousPhase = state.phase
         state.apply(command, titleColumns: titleColumns, episodeColumns: episodeColumns)
 
@@ -1403,6 +1408,9 @@ final class AnimeRuntimeController: ObservableObject {
     private func loadPlayer(_ stream: AnimeStreamCandidate, episode: AnimeEpisode) {
         showPlayerHUD(allowRestart: true)
         currentPlayingEpisode = episode
+        if let index = playbackCandidates.firstIndex(where: { $0.url == stream.url }) {
+            playbackCandidateIndex = index
+        }
         lastRecordedMediaID = nil
         lastRecordedTime = -1
         if stream.url.scheme == "youtube" {
@@ -1545,6 +1553,9 @@ final class AnimeRuntimeController: ObservableObject {
             ? AVURLAsset(url: url)
             : AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
         let item = AVPlayerItem(asset: asset)
+        item.preferredPeakBitRate = 0
+        item.preferredMaximumResolution = CGSize(width: 3840, height: 2160)
+        item.preferredForwardBufferDuration = 12
         itemObserver?.invalidate()
         itemObserver = item.observe(\.status, options: [.new, .initial]) { [weak self] item, _ in
             Task { @MainActor in
@@ -1671,6 +1682,20 @@ final class AnimeRuntimeController: ObservableObject {
     }
 
     private func handlePlayback(_ command: RemoteCommand) {
+        if command == .menu {
+            guard let episode = currentPlayingEpisode else { return }
+            guard playbackCandidates.count > 1 else {
+                statusText = "這一集沒有其他播放源。"
+                showPlayerHUD(allowRestart: false)
+                return
+            }
+            presentStreamPicker(playbackCandidates, episode: episode)
+            focusedStreamChoiceIndex = streamChoices.firstIndex {
+                $0.url == playbackCandidates[playbackCandidateIndex].url
+            } ?? 0
+            statusText = "切換播放源：目前是第 \(playbackCandidateIndex + 1) 線。"
+            return
+        }
         if command == .up {
             SystemVolumeController.adjust(by: 0.0625)
             showPlayerHUD(allowRestart: false)
