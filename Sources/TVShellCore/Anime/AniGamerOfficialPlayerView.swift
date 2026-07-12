@@ -24,7 +24,7 @@ public struct AniGamerOfficialPlayerView: NSViewRepresentable {
         configuration.userContentController.addUserScript(WKUserScript(
             source: AniGamerOfficialPageScript.source,
             injectionTime: .atDocumentEnd,
-            forMainFrameOnly: true
+            forMainFrameOnly: false
         ))
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
@@ -76,7 +76,11 @@ public struct AniGamerOfficialPlayerView: NSViewRepresentable {
         private func handle(_ command: RemoteCommand) {
             switch AniGamerRemoteBridge.action(for: command) {
             case let .key(code, characters):
-                sendKey(code: code, characters: functionKey(characters))
+                if let domKey = AniGamerRemoteBridge.domKey(for: command) {
+                    sendDOMKey(domKey, fallbackCode: code, fallbackCharacters: functionKey(characters))
+                } else {
+                    sendKey(code: code, characters: functionKey(characters))
+                }
                 guard command == .back else { return }
                 let now = Date()
                 if now.timeIntervalSince(lastBackDate) < 1.1 {
@@ -89,6 +93,24 @@ public struct AniGamerOfficialPlayerView: NSViewRepresentable {
                 onExit()
             case .none:
                 break
+            }
+        }
+
+        private func sendDOMKey(_ domKey: AniGamerDOMKey, fallbackCode: UInt16, fallbackCharacters: String) {
+            guard let webView,
+                  let payload = try? JSONSerialization.data(withJSONObject: [domKey.key, domKey.code]),
+                  let arguments = String(data: payload, encoding: .utf8)
+            else {
+                sendKey(code: fallbackCode, characters: fallbackCharacters)
+                return
+            }
+            webView.window?.makeFirstResponder(webView)
+            webView.evaluateJavaScript("window.tvShellOfficialKey && window.tvShellOfficialKey(...\(arguments))") { [weak self] result, error in
+                if error != nil || (result as? Bool) != true {
+                    Task { @MainActor [weak self] in
+                        self?.sendKey(code: fallbackCode, characters: fallbackCharacters)
+                    }
+                }
             }
         }
 

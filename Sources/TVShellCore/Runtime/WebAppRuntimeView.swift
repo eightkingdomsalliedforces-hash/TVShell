@@ -144,6 +144,14 @@ public struct WebAppRuntimeView: NSViewRepresentable {
 
       const style = document.createElement('style');
       style.textContent = `
+        html, body, * {
+          scrollbar-width: none !important;
+        }
+        ::-webkit-scrollbar {
+          width: 0 !important;
+          height: 0 !important;
+          display: none !important;
+        }
         :focus {
           outline: 6px solid rgba(255,255,255,.96) !important;
           outline-offset: 8px !important;
