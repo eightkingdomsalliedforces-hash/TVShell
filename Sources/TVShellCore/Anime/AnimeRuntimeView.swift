@@ -24,9 +24,13 @@ public struct AnimeRuntimeView: View {
                         controller.closeOfficialPlayer()
                     }
                     .ignoresSafeArea()
-                } else if let videoID = controller.officialYouTubeVideoID {
-                    YouTubePlayerView(videoID: videoID, startSeconds: 0, restartOnSelect: false) { _, _ in }
-                        .ignoresSafeArea()
+                } else if let video = controller.officialYouTubeSelectedVideo {
+                    OfficialYouTubeAnimeView(
+                        video: video,
+                        isPlaying: controller.officialYouTubeVideoID != nil,
+                        isHUDVisible: controller.isPlayerHUDVisible,
+                        metrics: metrics
+                    )
                 } else if controller.isOfficialSourcesVisible {
                     officialSourcesBrowser(metrics: metrics)
                 } else {
@@ -584,6 +588,7 @@ final class AnimeRuntimeController: ObservableObject {
     @Published private(set) var officialStatusText = "選擇正版來源"
     @Published private(set) var officialAniGamerURL: URL?
     @Published private(set) var officialYouTubeVideoID: String?
+    @Published private(set) var officialYouTubeSelectedVideo: YouTubeVideo?
 
     private var sourceProvider: (any AnimeSourceProvider)?
     private var officialYouTubeProvider: any YouTubeVideoProvider = YouTubeProviderFactory.defaultProvider()
@@ -685,6 +690,7 @@ final class AnimeRuntimeController: ObservableObject {
     func closeOfficialPlayer() {
         officialAniGamerURL = nil
         officialYouTubeVideoID = nil
+        officialYouTubeSelectedVideo = nil
         setStatusClockHidden(false)
     }
 
@@ -794,10 +800,32 @@ final class AnimeRuntimeController: ObservableObject {
             return
         }
         if officialYouTubeVideoID != nil, command == .back {
-            closeOfficialPlayer()
+            officialYouTubeVideoID = nil
+            hidePlayerHUDTask?.cancel()
+            isPlayerHUDVisible = false
+            setStatusClockHidden(false)
             return
         }
-        if officialAniGamerURL != nil || officialYouTubeVideoID != nil {
+        if officialYouTubeVideoID != nil {
+            showPlayerHUD(allowRestart: false)
+            if command == .home {
+                closeOfficialPlayer()
+            }
+            return
+        }
+        if let selectedVideo = officialYouTubeSelectedVideo {
+            if command == .select || command == .playPause {
+                officialYouTubeVideoID = selectedVideo.id
+                setStatusClockHidden(true)
+                showPlayerHUD(allowRestart: false)
+            } else if command == .back {
+                officialYouTubeSelectedVideo = nil
+            } else if command == .home {
+                closeOfficialPlayer()
+            }
+            return
+        }
+        if officialAniGamerURL != nil {
             if command == .home {
                 closeOfficialPlayer()
             }
@@ -1072,8 +1100,7 @@ final class AnimeRuntimeController: ObservableObject {
             guard officialYouTubeVideos.indices.contains(index) else { return }
             let video = officialYouTubeVideos[index]
             officialSourcesState.recordHistory(video.id, for: .officialYouTube)
-            officialYouTubeVideoID = video.id
-            setStatusClockHidden(true)
+            officialYouTubeSelectedVideo = video
         }
     }
 

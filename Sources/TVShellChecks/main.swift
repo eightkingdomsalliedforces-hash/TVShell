@@ -1665,6 +1665,13 @@ struct TVShellChecks {
         try expect(VolumeLevel(0.02).adjusted(by: -0.1).value == 0, "volume clamps to zero")
         try expect(animeRuntime.contains("SystemVolumeController.adjust(by: 0.0625)"), "anime playback up raises volume")
         try expect(animeRuntime.contains("SystemVolumeController.adjust(by: -0.0625)"), "anime playback down lowers volume")
+        let officialYouTubeViewPath = "Sources/TVShellCore/Anime/OfficialYouTubeAnimeView.swift"
+        try expect(FileManager.default.fileExists(atPath: officialYouTubeViewPath), "official YouTube anime has a native TVShell view")
+        let officialYouTubeView = try String(contentsOfFile: officialYouTubeViewPath)
+        try expect(officialYouTubeView.contains("TVOSMediaVideoCard") || officialYouTubeView.contains("AsyncImage"), "official YouTube detail keeps TVShell artwork")
+        try expect(officialYouTubeView.contains("YouTubePlayerView"), "official YouTube playback uses the supported embed player")
+        try expect(officialYouTubeView.contains("TVOS18PlayerHUD"), "official YouTube playback uses the TVShell HUD")
+        try expect(officialYouTubeView.contains("youtube.com/watch") == false, "official YouTube never navigates the whole app to a watch page")
     }
 
     static func checkYouTubeEmbedPageIncludesOriginAndFallback() throws {
