@@ -21,6 +21,11 @@ public struct AniGamerOfficialPlayerView: NSViewRepresentable {
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.allowsAirPlayForMediaPlayback = true
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: AniGamerOfficialPageScript.source,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        ))
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
@@ -69,35 +74,27 @@ public struct AniGamerOfficialPlayerView: NSViewRepresentable {
         }
 
         private func handle(_ command: RemoteCommand) {
-            switch command {
-            case .up:
-                sendKey(code: 126, characters: functionKey(NSUpArrowFunctionKey))
-            case .down:
-                sendKey(code: 125, characters: functionKey(NSDownArrowFunctionKey))
-            case .left, .rewind:
-                sendKey(code: 123, characters: functionKey(NSLeftArrowFunctionKey))
-            case .right, .fastForward:
-                sendKey(code: 124, characters: functionKey(NSRightArrowFunctionKey))
-            case .select:
-                sendKey(code: 49, characters: " ")
-            case .playPause:
-                sendKey(code: 40, characters: "k")
-            case .back, .menu:
-                sendKey(code: 53, characters: "\u{1b}")
+            switch AniGamerRemoteBridge.action(for: command) {
+            case let .key(code, characters):
+                sendKey(code: code, characters: functionKey(characters))
+                guard command == .back else { return }
                 let now = Date()
                 if now.timeIntervalSince(lastBackDate) < 1.1 {
                     onExit()
                 }
                 lastBackDate = now
-            case .home:
+            case let .volume(step):
+                SystemVolumeController.adjust(by: step)
+            case .exit:
                 onExit()
-            default:
+            case .none:
                 break
             }
         }
 
         private func sendKey(code: UInt16, characters: String) {
             guard let webView else { return }
+            webView.window?.makeFirstResponder(webView)
             let windowNumber = webView.window?.windowNumber ?? 0
             let timestamp = ProcessInfo.processInfo.systemUptime
             for type in [NSEvent.EventType.keyDown, .keyUp] {
@@ -123,6 +120,11 @@ public struct AniGamerOfficialPlayerView: NSViewRepresentable {
 
         private func functionKey(_ value: Int) -> String {
             UnicodeScalar(value).map(String.init) ?? ""
+        }
+
+        public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            webView.window?.makeFirstResponder(webView)
+            webView.evaluateJavaScript(AniGamerOfficialPageScript.source)
         }
     }
 }
