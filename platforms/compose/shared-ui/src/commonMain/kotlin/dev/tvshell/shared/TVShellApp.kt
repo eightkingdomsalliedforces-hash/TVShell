@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,13 +40,20 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
-fun TVShellApp(adapter: PlatformAdapter, animeOnly: Boolean = false, appsRevision: Int = 0) {
+fun TVShellApp(
+    adapter: PlatformAdapter,
+    animeOnly: Boolean = false,
+    appsRevision: Int = 0,
+    dispatcher: RemoteCommandDispatcher? = null,
+) {
     val discovered = remember(appsRevision) { adapter.installedApps() }
     val builtIns = remember {
         if (animeOnly) listOf(ShellApp("anime", "動畫", "正版來源 · 訂閱 · 搜尋"))
@@ -59,6 +67,8 @@ fun TVShellApp(adapter: PlatformAdapter, animeOnly: Boolean = false, appsRevisio
     var screen by remember { mutableStateOf(if (animeOnly) ShellScreen.Anime else ShellScreen.Launcher) }
     var animeState by remember { mutableStateOf(AnimeState()) }
     var controlCenterVisible by remember { mutableStateOf(false) }
+    val activeDispatcher = remember(dispatcher) { dispatcher ?: RemoteCommandDispatcher() }
+    val focusRequester = remember { FocusRequester() }
 
     fun handle(command: RemoteCommand) {
         if (screen == ShellScreen.Anime) {
@@ -84,6 +94,14 @@ fun TVShellApp(adapter: PlatformAdapter, animeOnly: Boolean = false, appsRevisio
         }
     }
 
+    DisposableEffect(activeDispatcher) {
+        val unsubscribe = activeDispatcher.subscribe(::handle)
+        onDispose(unsubscribe)
+    }
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
     Box(
         Modifier.fillMaxSize()
             .background(
@@ -95,6 +113,7 @@ fun TVShellApp(adapter: PlatformAdapter, animeOnly: Boolean = false, appsRevisio
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 event.key.toRemoteCommand()?.let { handle(it); true } ?: false
             }
+            .focusRequester(focusRequester)
             .focusable()
     ) {
         when (screen) {

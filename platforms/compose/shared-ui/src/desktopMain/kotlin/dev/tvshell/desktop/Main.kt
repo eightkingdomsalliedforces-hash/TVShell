@@ -1,6 +1,8 @@
 package dev.tvshell.desktop
 
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowPlacement
+import androidx.compose.ui.window.rememberWindowState
 import androidx.compose.ui.window.application
 import dev.tvshell.shared.PlatformAdapter
 import dev.tvshell.shared.ShellApp
@@ -12,6 +14,7 @@ fun main() = application {
         onCloseRequest = ::exitApplication,
         title = "TVShell",
         undecorated = true,
+        state = rememberWindowState(placement = WindowPlacement.Fullscreen),
     ) {
         TVShellApp(WindowsPlatformAdapter())
     }

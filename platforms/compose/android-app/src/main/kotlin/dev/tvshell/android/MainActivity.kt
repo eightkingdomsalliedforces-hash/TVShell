@@ -8,17 +8,22 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Build
 import android.provider.Settings
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import dev.tvshell.shared.PlatformAdapter
+import dev.tvshell.shared.AndroidTVKeyMapper
+import dev.tvshell.shared.RemoteCommandDispatcher
 import dev.tvshell.shared.ShellApp
 import dev.tvshell.shared.TVShellApp
 
 class MainActivity : ComponentActivity() {
     private var appsRevision by mutableIntStateOf(0)
+    private val remoteDispatcher = RemoteCommandDispatcher()
+    private var longBackDispatched = false
     private val packageReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             appsRevision += 1
@@ -31,8 +36,36 @@ class MainActivity : ComponentActivity() {
             TVShellApp(
                 AndroidTVPlatformAdapter(packageManager, packageName, ::startActivity),
                 appsRevision = appsRevision,
+                dispatcher = remoteDispatcher,
             )
         }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount > 0 && event.isLongPress) {
+                longBackDispatched = true
+                AndroidTVKeyMapper.command(event.keyCode, isLongPress = true)?.let(remoteDispatcher::dispatch)
+                return true
+            }
+            if (event.action == KeyEvent.ACTION_DOWN) return true
+            if (event.action == KeyEvent.ACTION_UP) {
+                if (longBackDispatched) {
+                    longBackDispatched = false
+                } else {
+                    AndroidTVKeyMapper.command(event.keyCode, isLongPress = false)?.let(remoteDispatcher::dispatch)
+                }
+                return true
+            }
+        }
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            val command = AndroidTVKeyMapper.command(event.keyCode, event.isLongPress)
+            if (command != null) {
+                remoteDispatcher.dispatch(command)
+                return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onStart() {

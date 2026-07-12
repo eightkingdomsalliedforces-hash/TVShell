@@ -35,4 +35,25 @@ class LauncherStateTest {
         assertEquals(false, state.isTopNavigationFocused)
         assertEquals(1, state.focusedCard)
     }
+
+    @Test
+    fun externalDispatcherDeliversOkAndBackToTheActiveScreen() {
+        val dispatcher = RemoteCommandDispatcher()
+        val received = mutableListOf<RemoteCommand>()
+        val unsubscribe = dispatcher.subscribe { received += it }
+        dispatcher.dispatch(RemoteCommand.Select)
+        dispatcher.dispatch(RemoteCommand.Back)
+        unsubscribe()
+        dispatcher.dispatch(RemoteCommand.Home)
+        assertEquals(listOf(RemoteCommand.Select, RemoteCommand.Back), received)
+    }
+
+    @Test
+    fun androidTvKeyCodesMapBeforeComposeFocusHandling() {
+        assertEquals(RemoteCommand.Select, AndroidTVKeyMapper.command(23, isLongPress = false))
+        assertEquals(RemoteCommand.Select, AndroidTVKeyMapper.command(66, isLongPress = false))
+        assertEquals(RemoteCommand.Back, AndroidTVKeyMapper.command(4, isLongPress = false))
+        assertEquals(RemoteCommand.Home, AndroidTVKeyMapper.command(4, isLongPress = true))
+        assertEquals(RemoteCommand.Menu, AndroidTVKeyMapper.command(82, isLongPress = false))
+    }
 }
