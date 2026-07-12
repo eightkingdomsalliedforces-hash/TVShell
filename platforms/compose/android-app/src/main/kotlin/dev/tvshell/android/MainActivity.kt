@@ -1,20 +1,59 @@
 package dev.tvshell.android
 
-import android.content.ComponentName
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Build
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import dev.tvshell.shared.PlatformAdapter
 import dev.tvshell.shared.ShellApp
 import dev.tvshell.shared.TVShellApp
 
 class MainActivity : ComponentActivity() {
+    private var appsRevision by mutableIntStateOf(0)
+    private val packageReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            appsRevision += 1
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { TVShellApp(AndroidTVPlatformAdapter(packageManager, packageName, ::startActivity)) }
+        setContent {
+            TVShellApp(
+                AndroidTVPlatformAdapter(packageManager, packageName, ::startActivity),
+                appsRevision = appsRevision,
+            )
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_ADDED)
+            addAction(Intent.ACTION_PACKAGE_REMOVED)
+            addAction(Intent.ACTION_PACKAGE_CHANGED)
+            addDataScheme("package")
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(packageReceiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(packageReceiver, filter)
+        }
+    }
+
+    override fun onStop() {
+        unregisterReceiver(packageReceiver)
+        super.onStop()
     }
 }
 

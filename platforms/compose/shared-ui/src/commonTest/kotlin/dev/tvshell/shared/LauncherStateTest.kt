@@ -23,4 +23,16 @@ class LauncherStateTest {
         assertEquals(1.55f, TVShellDesign.AppTileAspectRatio)
         assertEquals(86f, TVShellDesign.HorizontalPadding)
     }
+
+    @Test
+    fun animeTopNavigationAndCardsClampAtTheirEdges() {
+        var state = AnimeState()
+        state = state.reduce(RemoteCommand.Left)
+        assertEquals(0, state.focusedTab)
+        state = state.reduce(RemoteCommand.Right).reduce(RemoteCommand.Right)
+        assertEquals(2, state.focusedTab)
+        state = state.reduce(RemoteCommand.Down).reduce(RemoteCommand.Right)
+        assertEquals(false, state.isTopNavigationFocused)
+        assertEquals(1, state.focusedCard)
+    }
 }

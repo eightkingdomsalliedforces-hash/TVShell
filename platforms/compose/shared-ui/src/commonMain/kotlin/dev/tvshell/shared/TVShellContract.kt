@@ -47,3 +47,20 @@ data class LauncherState(
         else -> this
     }
 }
+
+data class AnimeState(
+    val tabs: List<String> = listOf("推薦", "正版來源", "我的訂閱", "觀看記錄", "搜尋"),
+    val focusedTab: Int = 0,
+    val focusedCard: Int = 0,
+    val isTopNavigationFocused: Boolean = true,
+) {
+    fun reduce(command: RemoteCommand): AnimeState = when {
+        isTopNavigationFocused && command == RemoteCommand.Left -> copy(focusedTab = (focusedTab - 1).coerceAtLeast(0))
+        isTopNavigationFocused && command == RemoteCommand.Right -> copy(focusedTab = (focusedTab + 1).coerceAtMost(tabs.lastIndex))
+        isTopNavigationFocused && command == RemoteCommand.Down -> copy(isTopNavigationFocused = false)
+        isTopNavigationFocused.not() && command == RemoteCommand.Up -> copy(isTopNavigationFocused = true)
+        isTopNavigationFocused.not() && command == RemoteCommand.Left -> copy(focusedCard = (focusedCard - 1).coerceAtLeast(0))
+        isTopNavigationFocused.not() && command == RemoteCommand.Right -> copy(focusedCard = (focusedCard + 1).coerceAtMost(7))
+        else -> this
+    }
+}

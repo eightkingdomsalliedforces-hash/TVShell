@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "TVShellPlatforms"
-include(":shared-ui", ":android-app")
+include(":shared-ui", ":android-app", ":anime-android-app", ":anime-desktop")

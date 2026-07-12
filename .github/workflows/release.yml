@@ -30,7 +30,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
       - name: Test shared UI and build Android TV APKs
-        run: ./gradlew :shared-ui:desktopTest :android-app:assemblePlayDebug :android-app:assembleLauncherDebug
+        run: ./gradlew :shared-ui:desktopTest :android-app:assemblePlayDebug :android-app:assembleLauncherDebug :anime-android-app:assembleDebug
       - name: Verify launcher intent separation
         run: |
           PLAY="android-app/build/intermediates/merged_manifests/playDebug/processPlayDebugManifest/AndroidManifest.xml"
@@ -46,6 +46,7 @@ jobs:
           path: |
             platforms/compose/android-app/build/outputs/apk/play/debug/*.apk
             platforms/compose/android-app/build/outputs/apk/launcher/debug/*.apk
+            platforms/compose/anime-android-app/build/outputs/apk/debug/*.apk
 
   windows-compose:
     name: Build Windows shell
@@ -64,12 +65,14 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
       - name: Test and package Windows MSI
-        run: ./gradlew.bat :shared-ui:desktopTest :shared-ui:packageMsi
+        run: ./gradlew.bat :shared-ui:desktopTest :shared-ui:packageMsi :anime-desktop:packageMsi
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
         with:
           name: TVShell-Windows
-          path: platforms/compose/shared-ui/build/compose/binaries/main/msi/*.msi
+          path: |
+            platforms/compose/shared-ui/build/compose/binaries/main/msi/*.msi
+            platforms/compose/anime-desktop/build/compose/binaries/main/msi/*.msi
 
   build:
     name: Build TVShell
