@@ -162,6 +162,8 @@ public struct SettingsView: View {
             "本機圖片"
         case .remoteImage:
             "壁紙提供商"
+        case .bingDaily:
+            "Bing 每日圖片"
         }
     }
 

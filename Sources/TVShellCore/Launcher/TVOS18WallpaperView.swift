@@ -50,6 +50,14 @@ public struct TVOS18WallpaperView: View {
                     fallbackGradient
                 }
             }
+        case let .bingDaily(url):
+            if let url, let image = NSImage(contentsOf: url) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                fallbackGradient
+            }
         }
     }
 

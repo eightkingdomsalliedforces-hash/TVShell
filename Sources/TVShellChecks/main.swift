@@ -157,6 +157,7 @@ struct TVShellChecks {
         try checkSavedSettingsMigrateDefaultApps()
         try checkWatchHistoryMergesByMediaID()
         try checkWallpaperPresetCyclingAndProvider()
+        try await checkBingWallpaperProvider()
         try checkQuickActionsAndBrowserArePresent()
         try checkWebRemoteModeCycles()
         try checkWebRuntimeShowsVirtualCursor()
@@ -1672,6 +1673,31 @@ struct TVShellChecks {
         try expect(officialYouTubeView.contains("YouTubePlayerView"), "official YouTube playback uses the supported embed player")
         try expect(officialYouTubeView.contains("TVOS18PlayerHUD"), "official YouTube playback uses the TVShell HUD")
         try expect(officialYouTubeView.contains("youtube.com/watch") == false, "official YouTube never navigates the whole app to a watch page")
+    }
+
+    static func checkBingWallpaperProvider() async throws {
+        let cacheDirectory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("TVShellChecks-Bing-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: cacheDirectory) }
+        let metadataURL = "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1"
+        let imageURL = "https://www.bing.com/th?id=OHR.Test_1920x1080.jpg"
+        let metadata = """
+        {"images":[{"url":"/th?id=OHR.Test_1920x1080.jpg","copyright":"測試 Bing 圖片","startdate":"20260712"}]}
+        """.data(using: .utf8)!
+        let image = Data([0xFF, 0xD8, 0xFF, 0xD9])
+        let transport = StaticAnimeHTTPTransport(routes: [metadataURL: metadata, imageURL: image])
+        let provider = BingWallpaperProvider(transport: transport, cacheDirectory: cacheDirectory)
+        let source = try await provider.fetch()
+        guard case let .bingDaily(cachedURL) = source, let cachedURL else {
+            throw CheckFailure("bing provider did not return a cached daily image")
+        }
+        try expect(FileManager.default.fileExists(atPath: cachedURL.path), "bing wallpaper writes the image cache")
+        try expect(provider.cachedMetadata()?.copyright == "測試 Bing 圖片", "bing wallpaper preserves attribution")
+        try expect(transport.requests.map(\.url.absoluteString) == [metadataURL, imageURL], "bing wallpaper resolves the official image URL")
+
+        let offlineProvider = BingWallpaperProvider(transport: StaticAnimeHTTPTransport(routes: [:]), cacheDirectory: cacheDirectory)
+        let offlineSource = try await offlineProvider.fetch()
+        try expect(offlineSource == .bingDaily(cachedURL), "bing wallpaper keeps the last successful image while offline")
     }
 
     static func checkYouTubeEmbedPageIncludesOriginAndFallback() throws {

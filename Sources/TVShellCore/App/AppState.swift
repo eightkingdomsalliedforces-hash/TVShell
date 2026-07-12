@@ -180,6 +180,11 @@ public final class AppState: ObservableObject {
         if startNetworkRemote {
             startNetworkRemoteServer()
         }
+        if case .bingDaily = wallpaperSource {
+            Task { @MainActor [weak self] in
+                await self?.refreshBingWallpaper()
+            }
+        }
     }
 
     deinit {
@@ -383,9 +388,7 @@ public final class AppState: ObservableObject {
             displayScale = displayScale.next
             saveSettings()
         case .wallpaper:
-            let preset = wallpaperSource.preset ?? .aurora
-            wallpaperSource = .builtIn(preset.next)
-            saveSettings()
+            cycleWallpaper(previous: false)
         case .webZoom:
             webZoom = webZoom >= 2 ? 1 : min(webZoom + 0.25, 2)
             saveSettings()
@@ -570,8 +573,8 @@ public final class AppState: ObservableObject {
         case .scale:
             displayScale = previous ? displayScale.previous : displayScale.next
         case .wallpaper:
-            let currentPreset = wallpaperSource.preset ?? .aurora
-            wallpaperSource = .builtIn(previous ? currentPreset.previous : currentPreset.next)
+            cycleWallpaper(previous: previous)
+            return
         case .webZoom:
             let delta = previous ? -0.1 : 0.1
             webZoom = min(max((webZoom + delta) * 10, 8), 24) / 10
@@ -591,6 +594,41 @@ public final class AppState: ObservableObject {
             return
         }
         saveSettings()
+    }
+
+    @MainActor
+    private func cycleWallpaper(previous: Bool) {
+        switch wallpaperSource {
+        case let .builtIn(preset):
+            if previous, preset == .aurora {
+                wallpaperSource = .bingDaily(nil)
+            } else if previous == false, preset == .graphite {
+                wallpaperSource = .bingDaily(nil)
+            } else {
+                wallpaperSource = .builtIn(previous ? preset.previous : preset.next)
+            }
+        case .bingDaily:
+            wallpaperSource = .builtIn(previous ? .graphite : .aurora)
+        case .localFile, .remoteImage:
+            wallpaperSource = .builtIn(.aurora)
+        }
+        saveSettings()
+        if case .bingDaily = wallpaperSource {
+            Task { @MainActor [weak self] in
+                await self?.refreshBingWallpaper()
+            }
+        }
+    }
+
+    @MainActor
+    private func refreshBingWallpaper() async {
+        do {
+            wallpaperSource = try await BingWallpaperProvider().fetch()
+            statusMessage = "已更新 Bing 每日圖片"
+            saveSettings()
+        } catch {
+            statusMessage = "Bing 每日圖片載入失敗：\(error.localizedDescription)"
+        }
     }
 
     private func chooseVideoFile() {

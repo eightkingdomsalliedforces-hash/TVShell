@@ -81,6 +81,7 @@ public enum WallpaperSource: Codable, Equatable, Sendable {
     case builtIn(WallpaperPreset)
     case localFile(URL)
     case remoteImage(URL)
+    case bingDaily(URL?)
 
     public var preset: WallpaperPreset? {
         if case let .builtIn(preset) = self {

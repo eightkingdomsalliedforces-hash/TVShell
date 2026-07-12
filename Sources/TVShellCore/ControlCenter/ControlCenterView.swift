@@ -106,6 +106,8 @@ public struct ControlCenterView: View {
             "本機圖片"
         case .remoteImage:
             "線上壁紙"
+        case .bingDaily:
+            "Bing 每日圖片"
         }
     }
 
