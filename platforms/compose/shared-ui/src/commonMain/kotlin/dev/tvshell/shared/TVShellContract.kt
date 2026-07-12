@@ -36,6 +36,7 @@ interface PlatformAdapter {
         Result.failure(UnsupportedOperationException("此平台尚未連接媒體服務"))
     fun playMedia(card: NativeMediaCard): Result<Unit> =
         Result.failure(UnsupportedOperationException("此平台尚未連接播放器"))
+    fun exitApp(): Result<Unit> = Result.failure(UnsupportedOperationException("此平台不允許由 App 結束程序"))
 }
 
 data class LauncherState(

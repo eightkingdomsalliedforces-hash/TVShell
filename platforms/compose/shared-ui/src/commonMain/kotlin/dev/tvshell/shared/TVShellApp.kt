@@ -67,7 +67,9 @@ fun TVShellApp(
     }
     var state by remember(discovered) { mutableStateOf(LauncherState((builtIns + discovered).distinctBy { it.id })) }
     var screen by remember { mutableStateOf(if (animeOnly) ShellScreen.Anime else ShellScreen.Launcher) }
-    var animeState by remember { mutableStateOf(AnimeState()) }
+    var animeState by remember { mutableStateOf(CrossPlatformAnimeBrowserState(sourceCount = 2)) }
+    var animeCards by remember { mutableStateOf(emptyList<NativeMediaCard>()) }
+    var animeStatus by remember { mutableStateOf("選擇正版動畫來源後按 OK 載入。") }
     var mediaState by remember { mutableStateOf(NativeMediaState(0)) }
     var mediaCards by remember { mutableStateOf(emptyList<NativeMediaCard>()) }
     var mediaStatus by remember { mutableStateOf("正在載入…") }
@@ -92,10 +94,26 @@ fun TVShellApp(
             return
         }
         if (screen == ShellScreen.Anime) {
-            if (command == RemoteCommand.Back && animeOnly.not()) {
-                screen = ShellScreen.Launcher
-            } else {
-                animeState = animeState.reduce(command)
+            val next = animeState.reduce(command)
+            val action = next.pendingAction
+            when {
+                action == "exit" -> {
+                    animeState = next.clearAction()
+                    if (animeOnly) adapter.exitApp() else screen = ShellScreen.Launcher
+                }
+                action?.startsWith("play:") == true -> {
+                    val index = action.substringAfter(':').toIntOrNull() ?: 0
+                    animeCards.getOrNull(index)?.let { card ->
+                        animeStatus = adapter.playMedia(card).fold(
+                            { "正在播放 ${card.title}" },
+                            { "播放失敗：${it.message}" },
+                        )
+                    }
+                    animeState = next.clearAction()
+                }
+                else -> {
+                    animeState = next
+                }
             }
             return
         }
@@ -150,6 +168,23 @@ fun TVShellApp(
             },
         )
     }
+    LaunchedEffect(screen, animeState.phase, animeState.focusedSource) {
+        if (screen != ShellScreen.Anime || animeState.phase != CrossPlatformAnimePhase.Loading) return@LaunchedEffect
+        val service = if (animeState.focusedSource == 0) NativeMediaService.YouTube else NativeMediaService.Bilibili
+        animeStatus = "正在載入${if (service == NativeMediaService.YouTube) "官方 YouTube 動畫" else "Bilibili 動畫"}…"
+        withContext(Dispatchers.Default) { adapter.fetchMediaFeed(service) }.fold(
+            onSuccess = { cards ->
+                animeCards = cards
+                animeState = animeState.loaded(cards.size)
+                animeStatus = "已載入 ${cards.size} 部可播放內容，按 OK 播放。"
+            },
+            onFailure = {
+                animeCards = emptyList()
+                animeState = animeState.failed()
+                animeStatus = "動畫來源載入失敗：${it.message}"
+            },
+        )
+    }
 
     Box(
         Modifier.fillMaxSize()
@@ -167,7 +202,7 @@ fun TVShellApp(
     ) {
         when (screen) {
             ShellScreen.Launcher -> Launcher(state)
-            ShellScreen.Anime -> AnimeBrowser(animeState)
+            ShellScreen.Anime -> AnimeBrowser(animeState, animeCards, animeStatus)
             ShellScreen.YouTube -> NativeMediaBrowser("YouTube", listOf("推薦", "熱門", "訂閱", "搜尋"), mediaState, mediaCards, mediaStatus)
             ShellScreen.Bilibili -> NativeMediaBrowser("Bilibili", listOf("推薦", "熱門", "排行榜", "動態"), mediaState, mediaCards, mediaStatus)
         }
@@ -305,11 +340,12 @@ private fun AppTile(app: ShellApp, focused: Boolean) {
 }
 
 @Composable
-private fun AnimeBrowser(state: AnimeState) {
-    val cards = listOf("動畫瘋", "Bilibili 番劇", "官方 YouTube", "CSS1", "Mikan", "動漫花園", "Jellyfin", "Emby")
+private fun AnimeBrowser(state: CrossPlatformAnimeBrowserState, cards: List<NativeMediaCard>, status: String) {
+    val sources = listOf("官方 YouTube 動畫", "Bilibili 動畫")
     val listState = rememberLazyListState()
-    LaunchedEffect(state.focusedCard) {
-        if (state.isTopNavigationFocused.not()) listState.animateScrollToItem(state.focusedCard)
+    LaunchedEffect(state.focusedSource, state.focusedCard, state.phase) {
+        val target = if (state.phase == CrossPlatformAnimePhase.Titles) state.focusedCard else state.focusedSource
+        if (target >= 0) listState.animateScrollToItem(target)
     }
     Column(
         Modifier.fillMaxSize().padding(horizontal = 86.dp, vertical = 48.dp),
@@ -321,8 +357,8 @@ private fun AnimeBrowser(state: AnimeState) {
                 Modifier.clip(RoundedCornerShape(32.dp)).background(Color.Black.copy(alpha = .55f)).padding(6.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                state.tabs.forEachIndexed { index, title ->
-                    val selected = index == state.focusedTab
+                listOf("正版來源", "觀看內容").forEachIndexed { index, title ->
+                    val selected = (state.phase == CrossPlatformAnimePhase.Titles) == (index == 1)
                     Text(
                         title,
                         color = if (selected && state.isTopNavigationFocused) Color.Black else Color.White.copy(alpha = if (selected) .92f else .58f),
@@ -341,12 +377,18 @@ private fun AnimeBrowser(state: AnimeState) {
             horizontalArrangement = Arrangement.spacedBy(42.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            itemsIndexed(cards, key = { _, title -> title }) { index, title ->
-                AppTile(ShellApp("anime-source:$title", title, "動畫來源"), state.isTopNavigationFocused.not() && index == state.focusedCard)
+            if (state.phase == CrossPlatformAnimePhase.Titles) {
+                itemsIndexed(cards, key = { _, card -> card.id }) { index, card ->
+                    MediaTile(card, index == state.focusedCard)
+                }
+            } else {
+                itemsIndexed(sources, key = { _, title -> title }) { index, title ->
+                    AppTile(ShellApp("anime-source:$title", title, "可播放正版內容"), !state.isTopNavigationFocused && index == state.focusedSource)
+                }
             }
         }
         Text(
-            if (state.isTopNavigationFocused) "左右切換分頁，按下進入內容。" else "方向鍵選擇來源，按上回到分頁。",
+            status,
             color = Color.White.copy(alpha = .62f),
             fontSize = 22.sp,
         )

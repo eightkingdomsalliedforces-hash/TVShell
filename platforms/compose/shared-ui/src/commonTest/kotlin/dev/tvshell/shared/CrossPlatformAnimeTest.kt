@@ -14,6 +14,27 @@ import kotlin.test.assertTrue
 
 class CrossPlatformAnimeTest {
     @Test
+    fun animeBrowserOpensARealFeedAndSelectsPlayback() {
+        var state = CrossPlatformAnimeBrowserState(sourceCount = 2)
+        state = state.reduce(RemoteCommand.Down).reduce(RemoteCommand.Select)
+        assertEquals(CrossPlatformAnimePhase.Loading, state.phase)
+        state = state.loaded(cardCount = 3)
+        assertEquals(CrossPlatformAnimePhase.Titles, state.phase)
+        state = state.reduce(RemoteCommand.Right).reduce(RemoteCommand.Select)
+        assertEquals("play:1", state.pendingAction)
+    }
+
+    @Test
+    fun animeLoadingCanBeCancelledWithBack() {
+        var state = CrossPlatformAnimeBrowserState(sourceCount = 2, isTopNavigationFocused = false)
+        state = state.reduce(RemoteCommand.Select)
+        assertEquals(CrossPlatformAnimePhase.Loading, state.phase)
+        state = state.reduce(RemoteCommand.Back)
+        assertEquals(CrossPlatformAnimePhase.Sources, state.phase)
+        val root = CrossPlatformAnimeBrowserState(sourceCount = 2).reduce(RemoteCommand.Back)
+        assertEquals("exit", root.pendingAction)
+    }
+    @Test
     fun css1FiltersMetadataAndRanksPlayableQuality() {
         val episodes = CSS1HtmlParser.episodes(
             """

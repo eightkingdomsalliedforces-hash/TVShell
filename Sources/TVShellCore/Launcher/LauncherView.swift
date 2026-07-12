@@ -79,7 +79,7 @@ public struct LauncherView: View {
                 TVOS18WallpaperView(source: appState.wallpaperSource)
 
                 ScrollViewReader { scrollProxy in
-                    ScrollView(.vertical) {
+                    ScrollView(.vertical, showsIndicators: false) {
                         VStack(alignment: .leading, spacing: 34 * metrics.scale) {
                             Color.clear
                                 .frame(height: 1)
@@ -162,7 +162,7 @@ private struct TVOSAppDock: View {
 
     var body: some View {
         ScrollViewReader { dockScrollProxy in
-            ScrollView(.horizontal) {
+            ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .bottom, spacing: 24 * metrics.scale) {
                     ForEach(apps) { app in
                         AppCardView(app: app, isFocused: app.id == focusedAppID, metrics: metrics)
@@ -225,7 +225,7 @@ private struct WatchHistoryRowView: View {
                     .foregroundStyle(.white.opacity(0.52))
             }
 
-            ScrollView(.horizontal) {
+            ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 20 * metrics.scale) {
                     ForEach(entries.prefix(8)) { entry in
                         ZStack(alignment: .topTrailing) {
@@ -309,7 +309,7 @@ private struct LauncherRowView: View {
                 .font(.system(size: metrics.rowTitleSize, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.78))
 
-            ScrollView(.horizontal) {
+            ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: metrics.cardSpacing) {
                     ForEach(section.apps) { app in
                         AppCardView(title: app.name, isFocused: app.id == focusedAppID, metrics: metrics)

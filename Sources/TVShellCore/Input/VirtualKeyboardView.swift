@@ -21,7 +21,7 @@ public struct VirtualKeyboardView: View {
                     Text(title)
                         .font(.system(size: 42 * metrics.scale, weight: .bold))
                     Spacer()
-                    Text(state.layout.title)
+                    Text(state.layout == .latin ? (state.isUppercase ? "ABC" : "abc") : state.layout.title)
                         .font(.system(size: 24 * metrics.scale, weight: .bold))
                         .padding(.horizontal, 18 * metrics.scale)
                         .padding(.vertical, 10 * metrics.scale)
@@ -29,11 +29,20 @@ public struct VirtualKeyboardView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 12 * metrics.scale) {
-                    Text(previewText)
-                        .font(.system(size: 48 * metrics.scale, weight: .heavy, design: .rounded))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.48)
-                        .frame(maxWidth: .infinity, minHeight: 66 * metrics.scale, alignment: .leading)
+                    HStack(spacing: 3 * metrics.scale) {
+                        Text(previewText)
+                            .contentTransition(.interpolate)
+                        TimelineView(.periodic(from: .now, by: 0.55)) { timeline in
+                            Text("▌")
+                                .accessibilityIdentifier("keyboard-caret")
+                                .opacity(Int(timeline.date.timeIntervalSinceReferenceDate * 2).isMultiple(of: 2) ? 0.92 : 0.18)
+                        }
+                    }
+                    .font(.system(size: 48 * metrics.scale, weight: .heavy, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.48)
+                    .frame(maxWidth: .infinity, minHeight: 66 * metrics.scale, alignment: .leading)
+                    .animation(.snappy(duration: 0.16), value: state.text + state.composition)
 
                     if state.composition.isEmpty == false {
                         HStack(spacing: 10 * metrics.scale) {
@@ -90,6 +99,7 @@ public struct VirtualKeyboardView: View {
             .tvOS18Surface(role: .panel, cornerRadius: 20 * metrics.scale)
             .padding(.horizontal, 56 * metrics.scale)
         }
+        .sensoryFeedback(.selection, trigger: state.text.count + state.composition.count)
     }
 
     private func keyWidth(for key: VirtualKeyboardKey) -> Double {

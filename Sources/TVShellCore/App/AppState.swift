@@ -341,7 +341,11 @@ public final class AppState: ObservableObject {
                 dandanplayCredentials = Self.resolved(snapshot.dandanplay, fallback: .environment())
                 bilibiliCredentials = Self.resolved(snapshot.bilibili, fallback: .environment())
             }
-            statusMessage = "已重載憑證：\(credentialsStore.fileURL.path)"
+            if let issue = bilibiliCredentials.authenticationIssue, bilibiliCredentials.isConfigured {
+                statusMessage = "已讀取憑證，但 Bilibili 尚未登入：\(issue)"
+            } else {
+                statusMessage = "已重載憑證：\(credentialsStore.fileURL.path)"
+            }
         } catch {
             statusMessage = "憑證讀取失敗：\(error.localizedDescription)"
         }

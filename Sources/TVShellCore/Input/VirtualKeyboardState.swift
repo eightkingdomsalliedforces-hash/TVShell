@@ -32,6 +32,7 @@ public struct VirtualKeyboardKey: Identifiable, Equatable, Sendable {
         case submit
         case cancel
         case layoutSwitch
+        case shift
     }
 
     public init(_ label: String, value: String? = nil, kind: Kind = .character) {
@@ -46,7 +47,7 @@ public struct VirtualKeyboardKey: Identifiable, Equatable, Sendable {
             68
         case .space:
             150
-        case .delete, .submit, .cancel, .layoutSwitch:
+        case .delete, .submit, .cancel, .layoutSwitch, .shift:
             132
         }
     }
@@ -59,6 +60,7 @@ public struct VirtualKeyboardState: Equatable, Sendable {
     public private(set) var focusedColumn: Int
     public private(set) var focusedCandidateIndex: Int?
     public private(set) var layout: VirtualKeyboardLayout
+    public private(set) var isUppercase: Bool
     private var lastCompositionKey: String?
 
     public var candidates: [String] {
@@ -74,7 +76,7 @@ public struct VirtualKeyboardState: Equatable, Sendable {
     }
 
     public var rows: [[VirtualKeyboardKey]] {
-        Self.rows(for: layout)
+        rows(for: layout)
     }
 
     public init(text: String = "", layout: VirtualKeyboardLayout = .latin) {
@@ -84,21 +86,27 @@ public struct VirtualKeyboardState: Equatable, Sendable {
         self.focusedColumn = 0
         self.focusedCandidateIndex = nil
         self.layout = layout
+        self.isUppercase = false
         self.lastCompositionKey = nil
     }
 
-    private static func rows(for layout: VirtualKeyboardLayout) -> [[VirtualKeyboardKey]] {
+    private func rows(for layout: VirtualKeyboardLayout) -> [[VirtualKeyboardKey]] {
         switch layout {
         case .latin:
+            let letter: (Character) -> VirtualKeyboardKey = { character in
+                let value = isUppercase ? String(character).uppercased() : String(character)
+                return VirtualKeyboardKey(value)
+            }
             return [
             "1234567890".map { VirtualKeyboardKey(String($0)) },
-            "qwertyuiop".map { VirtualKeyboardKey(String($0)) },
-            "asdfghjkl".map { VirtualKeyboardKey(String($0)) },
-            "zxcvbnm".map { VirtualKeyboardKey(String($0)) },
+            "qwertyuiop".map(letter),
+            "asdfghjkl".map(letter),
+            "zxcvbnm".map(letter),
             [
                 VirtualKeyboardKey("空格", value: " ", kind: .space),
                 VirtualKeyboardKey("刪除", kind: .delete),
                 VirtualKeyboardKey("搜尋", kind: .submit),
+                VirtualKeyboardKey(isUppercase ? "⇧ ABC" : "⇧ abc", kind: .shift),
                 VirtualKeyboardKey("注音", kind: .layoutSwitch),
                 VirtualKeyboardKey("取消", kind: .cancel)
             ]
@@ -231,6 +239,9 @@ public struct VirtualKeyboardState: Equatable, Sendable {
             focusedCandidateIndex = nil
             focusedRow = 0
             focusedColumn = 0
+            return .none
+        case .shift:
+            isUppercase.toggle()
             return .none
         }
     }

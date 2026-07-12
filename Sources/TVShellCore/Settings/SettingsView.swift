@@ -171,7 +171,7 @@ public struct SettingsView: View {
         let configured = [
             appState.youtubeCredentials.isConfigured ? "YouTube" : nil,
             appState.dandanplayCredentials.isConfigured ? "彈幕" : nil,
-            appState.bilibiliCredentials.isConfigured ? "Bilibili" : nil
+            appState.bilibiliCredentials.isAuthenticated ? "Bilibili" : (appState.bilibiliCredentials.isConfigured ? "Bilibili Cookie 不完整" : nil)
         ].compactMap { $0 }
         return configured.isEmpty ? "尚未配置" : configured.joined(separator: "、")
     }

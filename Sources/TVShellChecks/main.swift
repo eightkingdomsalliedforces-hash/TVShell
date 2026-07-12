@@ -261,6 +261,8 @@ struct TVShellChecks {
         let animeManifest = try String(contentsOf: repository.appending(path: "platforms/compose/anime-android-app/src/main/AndroidManifest.xml"))
         try expect(androidManifest.contains("android:icon=\"@mipmap/ic_launcher\""), "Android TV shell declares a launcher icon")
         try expect(animeManifest.contains("android:icon=\"@mipmap/ic_launcher\""), "Android TV anime app declares a launcher icon")
+        try expect(androidManifest.contains("android.permission.INTERNET"), "Android TV shell can load online media")
+        try expect(animeManifest.contains("android.permission.INTERNET"), "Android TV anime app can load online sources")
         let workflow = try String(contentsOf: repository.appending(path: ".github/workflows/release.yml"))
         try expect(workflow.contains("CFBundleIconFile") && workflow.contains("TVShell.icns"), "macOS release bundle installs its icon")
         let desktopGradle = try String(contentsOf: repository.appending(path: "platforms/compose/shared-ui/build.gradle.kts"))
@@ -522,6 +524,7 @@ struct TVShellChecks {
         var keyboard = VirtualKeyboardState()
         try expect(keyboard.focusedKey.label == "1", "virtual keyboard starts at first key")
         try expect(keyboard.rows[1].map(\.label) == Array("qwertyuiop").map(String.init), "English keyboard presents lowercase letters")
+        try expect(keyboard.isUppercase == false, "English keyboard starts lowercase")
         try expect(keyboard.apply(.right) == .none, "virtual keyboard right moves focus")
         try expect(keyboard.focusedKey.label == "2", "virtual keyboard focuses next key")
         try expect(keyboard.apply(.select) == .textChanged, "virtual keyboard select types focused key")
@@ -529,6 +532,13 @@ struct TVShellChecks {
         try expect(keyboard.apply(.back) == .textChanged, "virtual keyboard back deletes text")
         try expect(keyboard.text.isEmpty, "virtual keyboard delete leaves empty text")
         try expect(keyboard.apply(.back) == .cancelled, "virtual keyboard back cancels when empty")
+
+        var caseKeyboard = VirtualKeyboardState()
+        for _ in 0..<4 { _ = caseKeyboard.apply(.down) }
+        for _ in 0..<3 { _ = caseKeyboard.apply(.right) }
+        try expect(caseKeyboard.focusedKey.kind == .shift, "English keyboard exposes a Shift key")
+        try expect(caseKeyboard.apply(.select) == .none, "Shift changes case without typing")
+        try expect(caseKeyboard.isUppercase && caseKeyboard.rows[1].first?.label == "Q", "Shift switches English keys to uppercase")
 
         var submitKeyboard = VirtualKeyboardState(text: "frieren")
         _ = submitKeyboard.apply(.down)
@@ -627,6 +637,8 @@ struct TVShellChecks {
         try expect(webRuntime.contains("* 0.032"), "virtual cursor uses a precise TV-sized movement step")
         let learningView = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Settings/RemoteLearningView.swift"))
         try expect(learningView.contains("ScrollViewReader") && learningView.contains("scrollTo(focusedCommandIndex"), "remote learning follows the focused row while scrolling")
+        let keyboardView = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Input/VirtualKeyboardView.swift"))
+        try expect(keyboardView.contains("keyboard-caret") && keyboardView.contains("sensoryFeedback"), "virtual keyboard provides caret and keypress feedback")
     }
 
     static func checkNetworkRemoteControlServer() throws {
@@ -1033,6 +1045,10 @@ struct TVShellChecks {
         let aniGamerSource = try String(contentsOfFile: "Sources/TVShellCore/Anime/AniGamerOfficialPlayerView.swift")
         try expect(webRuntimeSource.contains("injectionTime: .atDocumentStart") && aniGamerSource.contains("injectionTime: .atDocumentStart"), "all embedded web apps hide scrollbars before first paint")
 
+        let launcherSource = try String(contentsOfFile: "Sources/TVShellCore/Launcher/LauncherView.swift")
+        try expect(launcherSource.contains("ScrollView(.vertical, showsIndicators: false)"), "launcher never creates a vertical scroll indicator")
+        try expect(launcherSource.contains("ScrollView(.horizontal, showsIndicators: false)"), "launcher rows never create horizontal scroll indicators")
+
         let launcherState = AppState(apps: SeedApps.defaultApps)
         let visibleApps = launcherState.apps.filter(\.isVisibleOnHome)
         launcherState.focusedAppID = visibleApps.first?.id
@@ -1092,6 +1108,7 @@ struct TVShellChecks {
         try expect(webRuntime.contains("const moveKeyboardFocus"), "web keyboard moves vertically by nearest key center")
         try expect(webRuntime.contains("candidateIndex"), "web zhuyin keyboard can focus candidates")
         try expect(webRuntime.contains("keyboardState.candidateIndex !== null"), "web zhuyin keyboard commits focused candidates")
+        try expect(webRuntime.contains("['q','w','e','r','t','y','u','i','o','p']") && webRuntime.contains("'SHIFT'"), "web English keyboard starts lowercase and exposes Shift")
         try expect(webRuntime.contains("mode === 'mouse'") && webRuntime.contains("ensureCursor()"), "mouse mode ensures the cursor exists")
 
         let keyboardView = try String(contentsOf: root.appending(path: "Sources/TVShellCore/Input/VirtualKeyboardView.swift"))
@@ -1562,6 +1579,23 @@ struct TVShellChecks {
         try expect(recovered?.bilibili.cookie == "SESSDATA=abc; bili_jct=csrf-token;", "unquoted Bilibili cookie is recovered")
         _ = try JSONDecoder().decode(AppCredentialsSnapshot.self, from: Data(contentsOf: malformedURL))
         try expect(FileManager.default.fileExists(atPath: malformedURL.appendingPathExtension("invalid.bak").path), "malformed credentials keep a backup before normalization")
+
+        let netscapeCookie = """
+        # Netscape HTTP Cookie File
+        #HttpOnly_.bilibili.com\tTRUE\t/\tTRUE\t2147483647\tSESSDATA\tsession-value
+        .bilibili.com\tTRUE\t/\tFALSE\t2147483647\tbili_jct\tcsrf-value
+        .bilibili.com\tTRUE\t/\tFALSE\t2147483647\tDedeUserID\t12345
+        """
+        let importedCookie = BilibiliCredentials(importedText: netscapeCookie)
+        try expect(importedCookie.cookie.contains("SESSDATA=session-value"), "Bilibili imports Netscape browser cookie exports")
+        try expect(importedCookie.isAuthenticated, "Bilibili recognizes a complete login cookie")
+        try expect(BilibiliCredentials(cookie: "DedeUserID=12345").authenticationIssue?.contains("SESSDATA") == true, "Bilibili explains which login cookies are missing")
+        let browserExportJSON = #"{"bilibili":{"cookie":[{"name":"SESSDATA","value":"session"},{"name":"bili_jct","value":"csrf"},{"name":"DedeUserID","value":"123"}]}}"#
+        let browserExport = try JSONDecoder().decode(AppCredentialsSnapshot.self, from: Data(browserExportJSON.utf8))
+        try expect(browserExport.bilibili.isAuthenticated, "credentials file accepts browser-exported Bilibili cookie arrays")
+        let mixedDomains = #"{"bilibili":{"cookie":[{"domain":".bilibili.com","name":"SESSDATA","value":"session"},{"domain":"accounts.example.com","name":"private_token","value":"must-not-leak"}]}}"#
+        let filteredExport = try JSONDecoder().decode(AppCredentialsSnapshot.self, from: Data(mixedDomains.utf8))
+        try expect(filteredExport.bilibili.cookie.contains("private_token") == false, "Bilibili cookie import never forwards another site's credentials")
 
         let generatedURL = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("TVShellChecks-AutoCredentials-\(UUID().uuidString).json")
@@ -2769,6 +2803,9 @@ struct TVShellChecks {
         )
         try expect(hlsVariants.map(\.height) == [1080, 480], "css1 expands HLS master playlists with the highest rendition first")
         try expect(hlsVariants.first?.url.absoluteString == "https://cdn.example/high/index.m3u8", "css1 resolves relative HLS rendition URLs")
+        try expect(CSS1HLSMasterPlaylist.qualityLabel(height: 608) == "720p", "css1 presents non-standard 608-line video as the standard 720p tier")
+        try expect(CSS1HLSMasterPlaylist.qualityLabel(height: 1440) == "1440p", "css1 preserves standard 1440p labels")
+        try expect(CSS1HLSMasterPlaylist.qualityLabel(height: 240) == "240p", "css1 preserves low-resolution labels")
 
         let qualitySubscription = """
         {

@@ -37,6 +37,14 @@ public struct CSS1HLSVariant: Equatable, Sendable {
 }
 
 public enum CSS1HLSMasterPlaylist {
+    public static func qualityLabel(height: Int) -> String {
+        switch height {
+        case 600..<720: "720p"
+        case 1...: "\(height)p"
+        default: "CSS1"
+        }
+    }
+
     public static func variants(in playlist: String, baseURL: URL) -> [CSS1HLSVariant] {
         let lines = playlist.components(separatedBy: .newlines)
         var variants: [CSS1HLSVariant] = []
@@ -313,7 +321,7 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
                 return CSS1StreamResolution(
                     lineIndex: lineIndex,
                     candidates: variants.map { variant in
-                        let quality = variant.height > 0 ? "\(variant.height)p" : css1QualityLabel(sourceName: source.name, streamURL: variant.url)
+                        let quality = variant.height > 0 ? CSS1HLSMasterPlaylist.qualityLabel(height: variant.height) : css1QualityLabel(sourceName: source.name, streamURL: variant.url)
                         return AnimeStreamCandidate(
                             url: variant.url,
                             quality: quality,

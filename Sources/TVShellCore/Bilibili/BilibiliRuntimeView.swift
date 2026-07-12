@@ -372,7 +372,7 @@ final class BilibiliRuntimeController: ObservableObject {
     }
 
     var isAuthenticated: Bool {
-        credentials.isConfigured
+        credentials.isAuthenticated
     }
 
     var bangumiItems: [BilibiliSeason] {
@@ -730,14 +730,14 @@ final class BilibiliRuntimeController: ObservableObject {
             isKeyboardVisible = true
             statusText = "Bilibili 搜尋"
         case .dynamic:
-            guard credentials.isConfigured else {
-                statusText = "Bilibili 動態需要先在設定載入登入 Cookie。"
+            guard credentials.isAuthenticated else {
+                statusText = credentials.authenticationIssue ?? "Bilibili 動態需要先在設定載入登入 Cookie。"
                 return
             }
             Task { await loadDynamics() }
         case .profile:
-            guard credentials.isConfigured else {
-                statusText = "Bilibili 我的頁面需要先在設定載入登入 Cookie。"
+            guard credentials.isAuthenticated else {
+                statusText = credentials.authenticationIssue ?? "Bilibili 我的頁面需要先在設定載入登入 Cookie。"
                 return
             }
             Task { await loadProfile() }

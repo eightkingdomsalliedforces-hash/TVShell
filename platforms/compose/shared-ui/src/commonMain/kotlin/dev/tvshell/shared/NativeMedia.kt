@@ -30,15 +30,16 @@ data class NativeMediaState(
 object NativeMediaParser {
     fun bilibili(payload: String): List<NativeMediaCard> {
         val blocks = Regex("\"bvid\"\\s*:").findAll(payload).map { match ->
-            val start = payload.lastIndexOf("{\"aid\"", match.range.first).takeIf { it >= 0 } ?: match.range.first
+            val starts = listOf("{\"aid\"", "{\"type\"").map { payload.lastIndexOf(it, match.range.first) }
+            val start = starts.maxOrNull()?.takeIf { it >= 0 } ?: match.range.first
             payload.substring(start, (start + 6_000).coerceAtMost(payload.length))
         }.toList()
         return blocks.mapNotNull { block ->
             val id = field(block, "bvid") ?: return@mapNotNull null
             val title = field(block, "title") ?: return@mapNotNull null
             val image = normalizeImage(field(block, "pic").orEmpty())
-            val owner = field(block.substringAfter("\"owner\":", ""), "name") ?: "Bilibili"
-            NativeMediaCard(id, decode(title), decode(owner), image, "https://www.bilibili.com/video/$id")
+            val owner = field(block.substringAfter("\"owner\":", ""), "name") ?: field(block, "author") ?: "Bilibili"
+            NativeMediaCard(id, clean(title), clean(owner), image, "https://www.bilibili.com/video/$id")
         }.distinctBy { it.id }
     }
 
@@ -68,4 +69,6 @@ object NativeMediaParser {
         .replace("\\u0026", "&")
         .replace("\\/", "/")
         .replace("\\\"", "\"")
+
+    private fun clean(value: String): String = decode(value).replace(Regex("<[^>]+>"), "").trim()
 }

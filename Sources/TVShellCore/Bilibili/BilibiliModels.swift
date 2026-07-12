@@ -11,8 +11,34 @@ public enum BilibiliSearchNormalizer {
 public struct BilibiliCredentials: Codable, Equatable, Sendable {
     public var cookie: String
 
+    private enum CodingKeys: String, CodingKey { case cookie }
+    private struct ImportedCookie: Decodable { var domain: String?; var name: String; var value: String }
+
     public init(cookie: String = "") {
-        self.cookie = cookie
+        self.cookie = Self.normalizedCookie(from: cookie)
+    }
+
+    public init(importedText: String) {
+        self.cookie = Self.normalizedCookie(from: importedText)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let text = try? container.decode(String.self, forKey: .cookie) {
+            self.init(importedText: text)
+        } else if let entries = try? container.decode([ImportedCookie].self, forKey: .cookie) {
+            self.init(importedText: entries.filter { entry in
+                guard let domain = entry.domain?.lowercased() else { return true }
+                return domain == "bilibili.com" || domain.hasSuffix(".bilibili.com")
+            }.map { "\($0.name)=\($0.value)" }.joined(separator: "; "))
+        } else {
+            self.init(cookie: "")
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cookie, forKey: .cookie)
     }
 
     public static func environment(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> BilibiliCredentials {
@@ -23,18 +49,68 @@ public struct BilibiliCredentials: Codable, Equatable, Sendable {
         cookie.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 
+    public var isAuthenticated: Bool {
+        authenticationIssue == nil
+    }
+
+    public var authenticationIssue: String? {
+        let names = Set(cookiePairs.keys.map { $0.lowercased() })
+        let missing = ["SESSDATA", "bili_jct", "DedeUserID"].filter { names.contains($0.lowercased()) == false }
+        return missing.isEmpty ? nil : "Cookie 缺少 \(missing.joined(separator: "、"))；請匯出包含 HttpOnly 的完整 bilibili.com Cookie"
+    }
+
     public var requestHeaders: [String: String] {
         isConfigured ? ["Cookie": cookie] : [:]
     }
 
     public var csrfToken: String? {
-        cookie.split(separator: ";").lazy.compactMap { component -> String? in
-            let pair = component.split(separator: "=", maxSplits: 1).map {
-                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        cookiePairs.first { $0.key.caseInsensitiveCompare("bili_jct") == .orderedSame }?.value
+    }
+
+    private var cookiePairs: [String: String] {
+        cookie.split(separator: ";").reduce(into: [String: String]()) { result, component in
+            let pair = component.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            guard pair.count == 2, pair[0].isEmpty == false, pair[1].isEmpty == false else { return }
+            result[pair[0]] = pair[1]
+        }
+    }
+
+    private static func normalizedCookie(from importedText: String) -> String {
+        let trimmed = importedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let data = trimmed.data(using: .utf8),
+           let objects = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            let pairs = objects.compactMap { object -> String? in
+                guard let name = object["name"] as? String, let value = object["value"] as? String else { return nil }
+                if let domain = (object["domain"] as? String)?.lowercased(),
+                   domain != "bilibili.com", domain.hasSuffix(".bilibili.com") == false { return nil }
+                return "\(name)=\(value)"
             }
-            guard pair.count == 2, pair[0] == "bili_jct", pair[1].isEmpty == false else { return nil }
-            return pair[1]
-        }.first
+            if pairs.isEmpty == false { return canonical(pairs) }
+        }
+        let netscapePairs = trimmed.components(separatedBy: .newlines).compactMap { rawLine -> String? in
+            let isHTTPOnly = rawLine.hasPrefix("#HttpOnly_")
+            guard rawLine.hasPrefix("#") == false || isHTTPOnly else { return nil }
+            let line = isHTTPOnly ? String(rawLine.dropFirst("#HttpOnly_".count)) : rawLine
+            let fields = line.split(separator: "\t", omittingEmptySubsequences: false)
+            guard fields.count >= 7 else { return nil }
+            let domain = fields[0].lowercased()
+            guard domain == "bilibili.com" || domain.hasSuffix(".bilibili.com") else { return nil }
+            return "\(fields[5])=\(fields[6])"
+        }
+        if netscapePairs.isEmpty == false { return canonical(netscapePairs) }
+        let withoutHeader = trimmed.replacingOccurrences(of: #"^\s*Cookie\s*:\s*"#, with: "", options: [.regularExpression, .caseInsensitive])
+        let pairs = withoutHeader
+            .replacingOccurrences(of: "\r", with: "")
+            .replacingOccurrences(of: "\n", with: ";")
+            .split(separator: ";")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.contains("=") }
+        return canonical(pairs)
+    }
+
+    private static func canonical(_ pairs: [String]) -> String {
+        guard pairs.isEmpty == false else { return "" }
+        return pairs.joined(separator: "; ") + ";"
     }
 }
 

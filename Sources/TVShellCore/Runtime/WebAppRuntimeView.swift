@@ -255,6 +255,8 @@ public struct WebAppRuntimeView: NSViewRepresentable {
           box-shadow: 0 0 22px rgba(90,200,255,.52) !important;
           transform: scale(1.08) !important;
         }
+        .tv-shell-keyboard-caret { animation: tvShellCaret 1s steps(1) infinite !important; }
+        @keyframes tvShellCaret { 50% { opacity: .16; } }
       `;
       document.documentElement.appendChild(style);
 
@@ -273,10 +275,10 @@ public struct WebAppRuntimeView: NSViewRepresentable {
         ],
         latin: [
           ['1','2','3','4','5','6','7','8','9','0'],
-          ['Q','W','E','R','T','Y','U','I','O','P'],
-          ['A','S','D','F','G','H','J','K','L'],
-          ['Z','X','C','V','B','N','M'],
-          ['SPACE','DELETE','DONE','注音']
+          ['q','w','e','r','t','y','u','i','o','p'],
+          ['a','s','d','f','g','h','j','k','l'],
+          ['z','x','c','v','b','n','m'],
+          ['SPACE','DELETE','DONE','SHIFT','注音']
         ]
       };
       const zhuyinMap = {
@@ -364,7 +366,11 @@ public struct WebAppRuntimeView: NSViewRepresentable {
         'ㄇㄧㄝˋ': ['滅'],
         'ㄖㄣˋ': ['刃']
       };
-      const keyboardRows = () => keyboardLayouts[keyboardState.layout];
+      const keyboardRows = () => {
+        const rows = keyboardLayouts[keyboardState.layout];
+        if (keyboardState.layout !== 'latin' || !keyboardState.uppercase) return rows;
+        return rows.map((row) => row.map((key) => key.length === 1 && /[a-z]/.test(key) ? key.toUpperCase() : key));
+      };
       const zhuyinCandidates = () => {
         if (!keyboardState.composition) return [];
         if (zhuyinMap[keyboardState.composition]) return zhuyinMap[keyboardState.composition];
@@ -379,6 +385,7 @@ public struct WebAppRuntimeView: NSViewRepresentable {
         column: 0,
         target: null,
         layout: 'zhuyin',
+        uppercase: false,
         composition: '',
         lastKey: null,
         candidateIndex: null
@@ -472,7 +479,7 @@ public struct WebAppRuntimeView: NSViewRepresentable {
         const candidates = zhuyinCandidates();
         keyboard.classList.toggle('tv-shell-hidden', !keyboardState.visible);
         keyboard.innerHTML = `
-          <div class="tv-shell-keyboard-preview">${preview || keyboardState.composition || '輸入文字'}</div>
+          <div class="tv-shell-keyboard-preview">${preview || keyboardState.composition || '輸入文字'}<span class="tv-shell-keyboard-caret">▌</span></div>
           ${keyboardState.composition ? `<div class="tv-shell-keyboard-row"><div class="tv-shell-key">${keyboardState.composition}</div>${candidates.map((item, index) => `<div class="tv-shell-key ${keyboardState.candidateIndex === index ? 'tv-shell-focused' : ''}">${item}</div>`).join('')}</div>` : ''}
           ${rows.map((row, rowIndex) => `
             <div class="tv-shell-keyboard-row">
@@ -522,6 +529,12 @@ public struct WebAppRuntimeView: NSViewRepresentable {
           keyboardState.composition = '';
           keyboardState.lastKey = null;
           keyboardState.candidateIndex = null;
+          keyboardState.uppercase = false;
+          renderKeyboard();
+          return true;
+        }
+        if (key === 'SHIFT') {
+          keyboardState.uppercase = !keyboardState.uppercase;
           renderKeyboard();
           return true;
         }
@@ -575,7 +588,7 @@ public struct WebAppRuntimeView: NSViewRepresentable {
 
       const keyboardKeyWidth = (key) => {
         if (key === '空格' || key === 'SPACE') return 150;
-        if (['刪除','完成','ABC','DELETE','DONE','注音'].includes(key)) return 132;
+        if (['刪除','完成','ABC','DELETE','DONE','SHIFT','注音'].includes(key)) return 132;
         return 68;
       };
       const keyboardKeyCenter = (row, index) => {
