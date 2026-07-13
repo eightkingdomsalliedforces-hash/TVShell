@@ -97,7 +97,7 @@ public struct BilibiliRuntimeView: View {
 
     private func seasonBrowser(metrics: TVMetrics, size: CGSize) -> some View {
         ScrollViewReader { scrollProxy in
-            ScrollView(.vertical) {
+            ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 32 * metrics.scale) {
                     TVOSMediaTopNavigation(
                         items: BilibiliTopTab.allCases.map {
@@ -191,7 +191,7 @@ public struct BilibiliRuntimeView: View {
 
     private func detailView(metrics: TVMetrics, size: CGSize) -> some View {
         ScrollViewReader { scrollProxy in
-            ScrollView(.vertical) {
+            ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 30 * metrics.scale) {
                     if let detail = controller.detail {
                         BilibiliReferenceDetailHeader(

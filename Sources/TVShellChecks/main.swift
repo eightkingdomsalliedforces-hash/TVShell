@@ -1049,6 +1049,24 @@ struct TVShellChecks {
         try expect(launcherSource.contains("ScrollView(.vertical, showsIndicators: false)"), "launcher never creates a vertical scroll indicator")
         try expect(launcherSource.contains("ScrollView(.horizontal, showsIndicators: false)"), "launcher rows never create horizontal scroll indicators")
 
+        let sourceRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+            .appending(path: "Sources/TVShellCore")
+        let nativeScrollViews = try FileManager.default
+            .subpathsOfDirectory(atPath: sourceRoot.path)
+            .filter { $0.hasSuffix(".swift") }
+            .flatMap { relativePath -> [String] in
+                let source = try String(contentsOf: sourceRoot.appending(path: relativePath))
+                return source.split(separator: "\n").map(String.init).filter {
+                    $0.contains("ScrollView(") && $0.contains("showsIndicators: false") == false
+                }
+            }
+        try expect(nativeScrollViews.isEmpty, "every native TVShell ScrollView disables its indicator instead of exposing a desktop scrollbar")
+
+        let windowsShell = try String(contentsOfFile: "platforms/compose/shared-ui/src/desktopMain/kotlin/dev/tvshell/desktop/Main.kt")
+        let windowsAnime = try String(contentsOfFile: "platforms/compose/anime-desktop/src/main/kotlin/dev/tvshell/anime/desktop/Main.kt")
+        try expect(windowsShell.contains("java.net.http") == false && windowsAnime.contains("java.net.http") == false, "Windows packages avoid the optional java.net.http module at runtime")
+        try expect(windowsShell.contains("HttpURLConnection") && windowsAnime.contains("HttpURLConnection"), "Windows feeds use the Java base-runtime HTTP implementation")
+
         let launcherState = AppState(apps: SeedApps.defaultApps)
         let visibleApps = launcherState.apps.filter(\.isVisibleOnHome)
         launcherState.focusedAppID = visibleApps.first?.id
@@ -1951,6 +1969,7 @@ struct TVShellChecks {
         let playerSource = try String(contentsOfFile: playerPath)
         try expect(playerSource.contains("WKWebsiteDataStore.default()"), "aniGamer official player preserves login and official session data")
         try expect(playerSource.contains("NSEvent.keyEvent"), "aniGamer remote bridge sends standard keyboard events")
+        try expect(playerSource.contains("WebScrollbarHidingScript.hideNativeScrollbars"), "aniGamer hides the WebKit-native scrollbar as well as page CSS scrollbars")
         try expect(playerSource.contains("currentTime") == false, "aniGamer remote bridge never changes official playback time directly")
         try expect(playerSource.lowercased().contains("m3u8") == false, "aniGamer official player never extracts stream URLs")
         try expect(playerSource.lowercased().contains("skipad") == false, "aniGamer official player never attempts to skip ads")
@@ -1967,11 +1986,13 @@ struct TVShellChecks {
         try expect(AniGamerOfficialPageScript.source.contains("未滿15歲") && AniGamerOfficialPageScript.source.contains("不宜觀賞"), "aniGamer recognizes the visible 15+ warning")
         try expect(AniGamerOfficialPageScript.source.contains("text === '同意'") && AniGamerOfficialPageScript.source.contains("不同意"), "aniGamer clicks only the matching visible consent action")
         try expect(AniGamerOfficialPageScript.source.contains("KeyboardEvent") && AniGamerOfficialPageScript.source.contains("tvShellOfficialKey"), "aniGamer installs a DOM keyboard bridge for its official player")
+        try expect(AniGamerOfficialPageScript.source.contains("if (!player) return false;"), "aniGamer falls back to a standard key event when its current frame has no player")
         try expect(AniGamerOfficialPageScript.source.contains("::-webkit-scrollbar") && AniGamerOfficialPageScript.source.contains("scrollbar-width"), "aniGamer hides browser scrollbars without disabling scrolling")
         try expect(AniGamerOfficialPageScript.source.contains("currentTime") == false, "aniGamer page helper never manipulates playback time")
         try expect(AniGamerOfficialPageScript.source.lowercased().contains("m3u8") == false, "aniGamer page helper never extracts streams")
         let webRuntimeSource = try String(contentsOfFile: "Sources/TVShellCore/Runtime/WebAppRuntimeView.swift")
         try expect(webRuntimeSource.contains("::-webkit-scrollbar") && webRuntimeSource.contains("scrollbar-width"), "third-party web runtimes hide browser scrollbars")
+        try expect(webRuntimeSource.contains("WebScrollbarHidingScript.hideNativeScrollbars"), "third-party web runtimes hide the WebKit-native scrollbar")
         let animeRuntime = try String(contentsOfFile: "Sources/TVShellCore/Anime/AnimeRuntimeView.swift")
         try expect(animeRuntime.contains("officialSourcesBrowser("), "anime app exposes a dedicated official sources page")
         try expect(animeRuntime.contains("AniGamerOfficialPlayerView("), "anime app opens aniGamer results in the official player container")
@@ -2732,7 +2753,14 @@ struct TVShellChecks {
         </section>
         """.data(using: .utf8)!
         let watchHTML = #"<iframe src="/player/frieren-1"></iframe>"#.data(using: .utf8)!
-        let nestedHTML = #"var player = {"url":"https%3A%2F%2Fcdn.example%2Ffrieren-1.mkv%3Ftoken%3Dabc"};"#.data(using: .utf8)!
+        let nestedHTML = #"var player = {"url":"https%3A%2F%2Fcdn.example%2Ffrieren-1.m3u8%3Ftoken%3Dabc"};"#.data(using: .utf8)!
+        let masterPlaylist = """
+        #EXTM3U
+        #EXT-X-STREAM-INF:BANDWIDTH=850000,RESOLUTION=854x480
+        low/index.m3u8
+        #EXT-X-STREAM-INF:BANDWIDTH=5200000,RESOLUTION=1920x1080
+        high/index.m3u8
+        """.data(using: .utf8)!
         let bangumiRequest = try BangumiAPI.searchSubjectsRequest(keyword: "葬送的芙莉蓮")
         let bangumiResponse = """
         {
@@ -2759,6 +2787,7 @@ struct TVShellChecks {
             "https://web.example/show/frieren": detailHTML,
             "https://web.example/watch/frieren-1": watchHTML,
             "https://web.example/player/frieren-1": nestedHTML,
+            "https://cdn.example/frieren-1.m3u8?token=abc": masterPlaylist,
             bangumiRequest.url.absoluteString: bangumiResponse
         ])
         let css1HealthURL = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -2787,7 +2816,8 @@ struct TVShellChecks {
             throw CheckFailure("missing css1 episode")
         }
         let streams = try await provider.streams(for: episode)
-        try expect(streams.first?.url.absoluteString == "https://cdn.example/frieren-1.mkv?token=abc", "css1 provider parses nested encoded video url")
+        try expect(streams.first?.url.absoluteString == "https://cdn.example/frieren-1.m3u8?token=abc", "css1 keeps the authenticated HLS master playlist as its default playback URL")
+        try expect(streams.contains { $0.url.absoluteString == "https://cdn.example/high/index.m3u8" }, "css1 still exposes HLS renditions as explicit quality choices")
         try expect(streams.first?.headers["resolver"] == "web-selector", "css1 stream marks web selector resolver")
         try expect(streams.first?.headers["Referer"] == "https://web.example/", "css1 stream carries video headers from subscription")
 
@@ -3799,6 +3829,9 @@ struct TVShellChecks {
         try expect(workflow.contains("gh release create"), "release workflow publishes GitHub releases after successful builds")
         try expect(workflow.contains("github.event_name != 'pull_request'"), "release workflow skips publishing releases for pull requests")
         try expect(workflow.contains("upload-artifact"), "release workflow uploads build artifacts")
+        try expect(workflow.contains("publish-release:"), "release workflow has one final job that publishes all platform artifacts together")
+        try expect(workflow.contains("actions/download-artifact@v4"), "release workflow collects macOS, Windows, and Android outputs before publishing")
+        try expect(workflow.contains("TVShell-Android-TV") && workflow.contains("TVShell-Windows") && workflow.contains("TVShell-macOS"), "release workflow includes Android TV, Windows, and macOS assets")
 
         let readme = try String(contentsOf: root.appending(path: "README.md"))
         try expect(readme.contains("LGPL-2.1"), "readme documents VLCKit LGPL license")

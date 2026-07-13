@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import WebKit
 
 enum WebScrollbarHidingScript {
     static let source = #"""
@@ -20,4 +22,22 @@ enum WebScrollbarHidingScript {
       document.addEventListener('DOMContentLoaded', install, { once: true });
     })();
     """#
+
+    @MainActor
+    static func hideNativeScrollbars(in webView: WKWebView) {
+        hideNativeScrollbars(in: webView as NSView)
+    }
+
+    @MainActor
+    private static func hideNativeScrollbars(in view: NSView) {
+        if let scrollView = view as? NSScrollView {
+            scrollView.hasVerticalScroller = false
+            scrollView.hasHorizontalScroller = false
+            scrollView.autohidesScrollers = true
+            scrollView.scrollerStyle = .overlay
+        }
+        for child in view.subviews {
+            hideNativeScrollbars(in: child)
+        }
+    }
 }

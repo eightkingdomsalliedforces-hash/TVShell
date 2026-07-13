@@ -25,7 +25,7 @@ public struct AppManagementView: View {
                     )
                 } content: {
                     ScrollViewReader { scrollProxy in
-                        ScrollView(.vertical) {
+                        ScrollView(.vertical, showsIndicators: false) {
                             VStack(alignment: .leading, spacing: 12 * metrics.scale) {
                                 ForEach(appState.apps) { app in
                                     AppManagementRow(

@@ -43,6 +43,7 @@ public struct WebAppRuntimeView: NSViewRepresentable {
         webView.navigationDelegate = context.coordinator
         context.coordinator.attach(to: webView)
         context.coordinator.applyMode(webRemoteMode)
+        WebScrollbarHidingScript.hideNativeScrollbars(in: webView)
 
         if case let .web(url) = app.target {
             webView.load(URLRequest(url: url))
@@ -77,6 +78,7 @@ public struct WebAppRuntimeView: NSViewRepresentable {
         }
 
         public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            WebScrollbarHidingScript.hideNativeScrollbars(in: webView)
             applyMode(currentMode)
         }
 

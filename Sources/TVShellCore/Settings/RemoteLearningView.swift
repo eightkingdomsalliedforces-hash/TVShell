@@ -27,7 +27,7 @@ public struct RemoteLearningView: View {
                     )
                 } content: {
                     ScrollViewReader { scrollProxy in
-                        ScrollView(.vertical) {
+                        ScrollView(.vertical, showsIndicators: false) {
                             VStack(alignment: .leading, spacing: 14 * metrics.scale) {
                             TVOS18SettingsRow(
                                 symbolName: "remote.fill",

@@ -233,47 +233,77 @@ jobs:
           name: TVShell-macOS
           path: dist/TVShell-macOS-${{ github.sha }}.zip
 
+  publish-release:
+    name: Publish macOS, Windows, and Android TV
+    if: github.event_name != 'pull_request'
+    needs:
+      - compose-platforms
+      - windows-compose
+      - build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download macOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: TVShell-macOS
+          path: artifacts/macos
+      - name: Download Windows packages
+        uses: actions/download-artifact@v4
+        with:
+          name: TVShell-Windows
+          path: artifacts/windows
+      - name: Download Android TV packages
+        uses: actions/download-artifact@v4
+        with:
+          name: TVShell-Android-TV
+          path: artifacts/android
+      - name: Prepare release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cp "$(find artifacts/macos -name '*.zip' -print -quit)" release-assets/TVShell-macOS.zip
+          find artifacts/windows -name '*.msi' -exec cp {} release-assets/ \;
+          cp "$(find artifacts/android -path '*/android-app/build/outputs/apk/play/debug/*.apk' -print -quit)" release-assets/TVShell-Android-TV.apk
+          cp "$(find artifacts/android -path '*/android-app/build/outputs/apk/launcher/debug/*.apk' -print -quit)" release-assets/TVShell-Android-TV-Launcher.apk
+          cp "$(find artifacts/android -path '*/anime-android-app/build/outputs/apk/debug/*.apk' -print -quit)" release-assets/TVShell-Anime-Android-TV.apk
       - name: Prepare Release Metadata
-        if: github.event_name != 'pull_request'
         id: release
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
             echo "title=TVShell ${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-            echo "notes=Automated macOS release for ${GITHUB_REF_NAME}." >> "$GITHUB_OUTPUT"
+            echo "notes=Automated macOS, Windows, and Android TV release for ${GITHUB_REF_NAME}." >> "$GITHUB_OUTPUT"
             echo "mode=versioned" >> "$GITHUB_OUTPUT"
           else
             echo "tag=latest" >> "$GITHUB_OUTPUT"
             echo "title=TVShell latest" >> "$GITHUB_OUTPUT"
-            echo "notes=Automated macOS release from main at ${GITHUB_SHA}." >> "$GITHUB_OUTPUT"
+            echo "notes=Automated macOS, Windows, and Android TV release from main at ${GITHUB_SHA}." >> "$GITHUB_OUTPUT"
             echo "mode=rolling" >> "$GITHUB_OUTPUT"
           fi
-
       - name: Publish GitHub Release
-        if: github.event_name != 'pull_request'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           TAG="${{ steps.release.outputs.tag }}"
           TITLE="${{ steps.release.outputs.title }}"
           NOTES="${{ steps.release.outputs.notes }}"
-          ASSET="dist/TVShell-macOS-${{ github.sha }}.zip"
-
+          ASSETS=(release-assets/*)
           if [[ "${{ steps.release.outputs.mode }}" == "rolling" ]]; then
             gh release delete "$TAG" --yes --cleanup-tag || true
-            gh release create "$TAG" "$ASSET" \
+            gh release create "$TAG" "${ASSETS[@]}" \
               --target "${GITHUB_SHA}" \
               --title "$TITLE" \
               --notes "$NOTES" \
               --latest
           elif gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$ASSET" --clobber
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
             gh release edit "$TAG" \
               --title "$TITLE" \
               --notes "$NOTES" \
               --latest
           else
-            gh release create "$TAG" "$ASSET" \
+            gh release create "$TAG" "${ASSETS[@]}" \
               --title "$TITLE" \
               --notes "$NOTES" \
               --latest

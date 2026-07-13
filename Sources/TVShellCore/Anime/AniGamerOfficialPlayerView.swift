@@ -36,6 +36,7 @@ public struct AniGamerOfficialPlayerView: NSViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.allowsMagnification = false
         context.coordinator.attach(to: webView)
+        WebScrollbarHidingScript.hideNativeScrollbars(in: webView)
         webView.load(URLRequest(url: url))
         return webView
     }
@@ -151,6 +152,7 @@ public struct AniGamerOfficialPlayerView: NSViewRepresentable {
 
         public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             webView.window?.makeFirstResponder(webView)
+            WebScrollbarHidingScript.hideNativeScrollbars(in: webView)
             webView.evaluateJavaScript(AniGamerOfficialPageScript.source)
         }
     }

@@ -82,7 +82,7 @@ public struct YouTubeRuntimeView: View {
 
     private func browser(metrics: TVMetrics) -> some View {
         ScrollViewReader { scrollProxy in
-            ScrollView(.vertical) {
+            ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 32 * metrics.scale) {
                     TVOSMediaTopNavigation(
                         items: YouTubeTopTab.allCases.map {

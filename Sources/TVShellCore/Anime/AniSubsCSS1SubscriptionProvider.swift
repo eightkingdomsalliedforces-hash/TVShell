@@ -318,17 +318,28 @@ public struct AniSubsCSS1SubscriptionProvider: AnimeMediaSourceAdapter {
             ].merging(source.videoHeaders, uniquingKeysWith: { _, new in new })
             let variants = await hlsVariants(for: streamURL, source: source)
             if variants.isEmpty == false {
+                let bestVariant = variants[0]
+                let bestQuality = bestVariant.height > 0
+                    ? CSS1HLSMasterPlaylist.qualityLabel(height: bestVariant.height)
+                    : css1QualityLabel(sourceName: source.name, streamURL: bestVariant.url)
+                let automaticCandidate = AnimeStreamCandidate(
+                    url: streamURL,
+                    quality: "自動（最高 \(bestQuality)）",
+                    priority: 1_000 + max(0, 64 - lineIndex),
+                    headers: headers
+                )
+                let renditionCandidates = variants.map { variant in
+                    let quality = variant.height > 0 ? CSS1HLSMasterPlaylist.qualityLabel(height: variant.height) : css1QualityLabel(sourceName: source.name, streamURL: variant.url)
+                    return AnimeStreamCandidate(
+                        url: variant.url,
+                        quality: quality,
+                        priority: css1QualityPriority(quality) + min(variant.bandwidth / 100_000, 80) + max(0, 64 - lineIndex),
+                        headers: headers
+                    )
+                }
                 return CSS1StreamResolution(
                     lineIndex: lineIndex,
-                    candidates: variants.map { variant in
-                        let quality = variant.height > 0 ? CSS1HLSMasterPlaylist.qualityLabel(height: variant.height) : css1QualityLabel(sourceName: source.name, streamURL: variant.url)
-                        return AnimeStreamCandidate(
-                            url: variant.url,
-                            quality: quality,
-                            priority: css1QualityPriority(quality) + min(variant.bandwidth / 100_000, 80) + max(0, 64 - lineIndex),
-                            headers: headers
-                        )
-                    }
+                    candidates: [automaticCandidate] + renditionCandidates
                 )
             }
             let quality = css1QualityLabel(sourceName: source.name, streamURL: streamURL)

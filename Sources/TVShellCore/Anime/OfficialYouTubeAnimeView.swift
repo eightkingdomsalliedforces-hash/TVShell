@@ -30,7 +30,7 @@ public struct OfficialYouTubeAnimeView: View {
             }
             .background(.black)
         } else {
-            ScrollView(.vertical) {
+            ScrollView(.vertical, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 48 * metrics.scale) {
                     VStack(alignment: .leading, spacing: 18 * metrics.scale) {
                         Text("官方 YouTube")

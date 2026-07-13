@@ -26,7 +26,7 @@ public struct PortableDeclarativeRuntimeView: View {
             TVOS18Backdrop(accent: Color(red: 0.16, green: 0.18, blue: 0.22))
                 .overlay {
                     ScrollViewReader { scrollProxy in
-                        ScrollView(.vertical) {
+                        ScrollView(.vertical, showsIndicators: false) {
                             VStack(alignment: .leading, spacing: 34 * metrics.scale) {
                                 HStack(alignment: .firstTextBaseline) {
                                     Text(runtimeState.page.title)

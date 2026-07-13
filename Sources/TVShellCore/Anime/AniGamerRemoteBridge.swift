@@ -107,6 +107,7 @@ public enum AniGamerOfficialPageScript {
       };
       window.tvShellOfficialKey = (key, code) => {
         const player = document.querySelector('video, #ani_video, .video-js, [class*="player"]');
+        if (!player) return false;
         if (player && typeof player.focus === 'function') {
           if (!player.hasAttribute('tabindex')) player.setAttribute('tabindex', '-1');
           player.focus({ preventScroll: true });

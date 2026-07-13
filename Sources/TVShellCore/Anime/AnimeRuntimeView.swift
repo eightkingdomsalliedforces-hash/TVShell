@@ -147,7 +147,7 @@ public struct AnimeRuntimeView: View {
     private func detailBrowser(metrics: TVMetrics) -> some View {
         let title = controller.focusedTitle
 
-        return ScrollView(.vertical) {
+        return ScrollView(.vertical, showsIndicators: false) {
             TVOSMediaHero(
                 eyebrow: title?.detailLine ?? "動畫",
                 title: title?.title ?? "動漫詳情",
@@ -204,7 +204,7 @@ public struct AnimeRuntimeView: View {
 
     private func titleBrowser(metrics: TVMetrics) -> some View {
         ScrollViewReader { scrollProxy in
-            ScrollView(.vertical) {
+            ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 34 * metrics.scale) {
                     TVOSMediaTopNavigation(
                         items: AnimeMainTab.allCases.map { .init(id: $0.rawValue, title: $0.title, symbolName: $0.symbolName) },
@@ -302,7 +302,7 @@ public struct AnimeRuntimeView: View {
 
     private func officialSourcesBrowser(metrics: TVMetrics) -> some View {
         ScrollViewReader { scrollProxy in
-        ScrollView(.vertical) {
+        ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 30 * metrics.scale) {
                 TVOSMediaTopNavigation(
                     items: AnimeOfficialSource.allCases.map { .init(id: $0.rawValue, title: $0.title) },
@@ -388,7 +388,7 @@ public struct AnimeRuntimeView: View {
 
     private func episodeBrowser(metrics: TVMetrics, size: CGSize) -> some View {
         ScrollViewReader { scrollProxy in
-            ScrollView(.vertical) {
+            ScrollView(.vertical, showsIndicators: false) {
                 let columns = episodeGridColumns(for: metrics, size: size)
                 let cardWidth = fixedEpisodeCardWidth(for: metrics, size: size)
                 let rows = AnimeEpisodeGridLayout.rows(itemCount: controller.episodes.count, columns: columns)
@@ -463,7 +463,7 @@ public struct AnimeRuntimeView: View {
                         .tvOS18Surface(role: .panel, cornerRadius: 16 * metrics.scale)
                 } else {
                     ScrollViewReader { scrollProxy in
-                        ScrollView(.vertical) {
+                        ScrollView(.vertical, showsIndicators: false) {
                             LazyVStack(alignment: .leading, spacing: 14 * metrics.scale) {
                                 ForEach(Array(controller.torrentDownloads.enumerated()), id: \.element.id) { index, item in
                                     TorrentDownloadRow(
@@ -1845,7 +1845,7 @@ private struct AnimeStreamPickerView: View {
                     .foregroundStyle(.white.opacity(0.6))
 
                 ScrollViewReader { scrollProxy in
-                    ScrollView(.vertical) {
+                    ScrollView(.vertical, showsIndicators: false) {
                         LazyVStack(alignment: .leading, spacing: 14 * metrics.scale) {
                             ForEach(Array(choices.enumerated()), id: \.element.url.absoluteString) { index, stream in
                                 VStack(alignment: .leading, spacing: 8 * metrics.scale) {

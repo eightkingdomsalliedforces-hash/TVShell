@@ -26,7 +26,7 @@ public struct ControlCenterView: View {
                     }
 
                     ScrollViewReader { scrollProxy in
-                    ScrollView(.vertical) {
+                    ScrollView(.vertical, showsIndicators: false) {
                     LazyVGrid(
                         columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)],
                         spacing: 14

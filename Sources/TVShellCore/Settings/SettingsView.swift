@@ -16,7 +16,7 @@ public struct SettingsView: View {
                     SettingsHero(metrics: metrics)
                 } content: {
                     ScrollViewReader { scrollProxy in
-                        ScrollView(.vertical) {
+                        ScrollView(.vertical, showsIndicators: false) {
                             VStack(alignment: .leading, spacing: 12 * metrics.scale) {
                             SettingsSectionHeader(title: "外觀", metrics: metrics)
                             settingRow(
