@@ -7,6 +7,30 @@ import kotlin.test.assertTrue
 
 class NativeMediaTest {
     @Test
+    fun bilibiliNavigationReachesAuthenticatedDynamicAndProfileTabs() {
+        var state = NativeMediaState(cardCount = 0, tabCount = 5)
+        repeat(4) { state = state.reduce(RemoteCommand.Right) }
+        assertEquals(4, state.focusedTab)
+        assertEquals(BilibiliSection.Profile, BilibiliSection.entries[state.focusedTab])
+    }
+
+    @Test
+    fun bilibiliDynamicAndProfileResponsesUseRealAuthenticatedData() {
+        val dynamic = NativeMediaParser.bilibiliDynamic(
+            """{"code":0,"data":{"items":[{"id_str":"9001","modules":{"module_author":{"name":"UP 主","pub_time":"剛剛"},"module_dynamic":{"major":{"archive":{"bvid":"BV1dynamic","title":"真實動態影片","cover":"https://i0/dynamic.jpg"}}}}}]}}""",
+        )
+        val profile = NativeMediaParser.bilibiliProfile(
+            """{"code":0,"data":{"mid":123,"uname":"測試使用者","face":"https://i0/avatar.jpg","level_info":{"current_level":6},"money":42.5}}""",
+        )
+
+        assertEquals("真實動態影片", dynamic.single().title)
+        assertEquals("UP 主 · 剛剛", dynamic.single().subtitle)
+        assertEquals("測試使用者", profile.single().title)
+        assertTrue(profile.single().subtitle.contains("LV6"))
+        assertEquals("帳號未登入", NativeMediaParser.bilibiliFailureReason("""{"code":-101,"message":"帳號未登入"}"""))
+    }
+
+    @Test
     fun watchHistoryKeepsRecentUniquePlayableCards() {
         val first = NativeMediaCard("first", "第一部", "頻道", "", "https://example.com/first")
         val second = NativeMediaCard("second", "第二部", "頻道", "", "https://example.com/second")

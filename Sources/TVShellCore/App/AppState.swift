@@ -664,7 +664,7 @@ public final class AppState: ObservableObject {
             chooseVideoFile()
             return
         case .credentials:
-            reloadCredentials()
+            chooseCredentialsFile()
             return
         }
         saveSettings()
@@ -726,6 +726,48 @@ public final class AppState: ObservableObject {
         }
 
         updateVideoApp(url: url, label: url.lastPathComponent)
+    }
+
+    private func chooseCredentialsFile() {
+        let panel = NSOpenPanel()
+        panel.title = "匯入 Bilibili Cookie 或 TVShell 憑證"
+        panel.prompt = "匯入並登入"
+        panel.message = "可選擇 credentials.json、瀏覽器 Cookie JSON，或 Netscape cookies.txt；必須包含 SESSDATA、bili_jct、DedeUserID。"
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.json, .plainText]
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            statusMessage = "未選擇 Bilibili Cookie 檔案"
+            return
+        }
+        guard let credentialsStore else {
+            statusMessage = "此版本未設定 credentials store"
+            return
+        }
+        do {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            let current = try credentialsStore.load() ?? AppCredentialsSnapshot(
+                youtube: youtubeCredentials,
+                dandanplay: dandanplayCredentials,
+                bilibili: bilibiliCredentials
+            )
+            let imported = current.importingBilibili(text)
+            guard imported.bilibili.isConfigured else {
+                statusMessage = "匯入失敗：檔案內找不到 bilibili.com Cookie"
+                return
+            }
+            try credentialsStore.save(imported)
+            reloadCredentials()
+            if let issue = imported.bilibili.authenticationIssue {
+                statusMessage = "Bilibili Cookie 不完整：\(issue)"
+            } else {
+                statusMessage = "Bilibili 已登入；動態、我的、按讚與投幣現在可用"
+            }
+        } catch {
+            statusMessage = "Bilibili Cookie 匯入失敗：\(error.localizedDescription)"
+        }
     }
 
     private func updateVideoApp(url: URL, label: String) {

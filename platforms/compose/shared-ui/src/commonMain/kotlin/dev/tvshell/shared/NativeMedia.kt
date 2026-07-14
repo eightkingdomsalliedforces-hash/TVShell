@@ -1,6 +1,15 @@
 package dev.tvshell.shared
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
+
 enum class NativeMediaService { YouTube, Bilibili }
+enum class BilibiliSection(val title: String) {
+    Recommended("推薦"), Popular("熱門"), Ranking("排行榜"), Dynamic("動態"), Profile("我的")
+}
 
 data class NativeMediaCard(
     val id: String,
@@ -23,6 +32,7 @@ enum class NativeMediaPhase { Browser, Player }
 
 data class NativeMediaState(
     val cardCount: Int,
+    val tabCount: Int = 4,
     val gridColumns: Int = 4,
     val phase: NativeMediaPhase = NativeMediaPhase.Browser,
     val focusedTab: Int = 0,
@@ -35,7 +45,7 @@ data class NativeMediaState(
     fun reduce(command: RemoteCommand): NativeMediaState = when (phase) {
         NativeMediaPhase.Browser -> when {
             isTopNavigationFocused && command == RemoteCommand.Left -> copy(focusedTab = (focusedTab - 1).coerceAtLeast(0))
-            isTopNavigationFocused && command == RemoteCommand.Right -> copy(focusedTab = (focusedTab + 1).coerceAtMost(3))
+            isTopNavigationFocused && command == RemoteCommand.Right -> copy(focusedTab = (focusedTab + 1).coerceAtMost((tabCount - 1).coerceAtLeast(0)))
             isTopNavigationFocused && command == RemoteCommand.Down && cardCount > 0 -> copy(isTopNavigationFocused = false)
             !isTopNavigationFocused && command == RemoteCommand.Up && focusedCard < gridColumns -> copy(isTopNavigationFocused = true)
             !isTopNavigationFocused && command == RemoteCommand.Up -> copy(focusedCard = (focusedCard - gridColumns).coerceAtLeast(0))
@@ -58,6 +68,8 @@ data class NativeMediaState(
 }
 
 object NativeMediaParser {
+    private val json = Json { ignoreUnknownKeys = true }
+
     fun bilibiliBangumi(payload: String): List<NativeMediaCard> {
         val blocks = Regex("\\\"season_id\\\"\\s*:").findAll(payload).map { match ->
             val badgeStart = payload.lastIndexOf("{\"badge\"", match.range.first)
@@ -80,6 +92,13 @@ object NativeMediaParser {
                 playbackURL = "https://www.bilibili.com/bangumi/play/ss$seasonID",
             )
         }.distinctBy { it.id }.take(24).toList()
+    }
+
+    fun bilibiliFailureReason(payload: String): String? {
+        val root = runCatching { json.parseToJsonElement(payload) as? JsonObject }.getOrNull() ?: return null
+        val code = root.numberText("code")?.toIntOrNull() ?: return null
+        if (code == 0) return null
+        return root.stringValue("message")?.takeIf(String::isNotBlank) ?: "Bilibili API 錯誤 $code"
     }
 
     fun bilibili(payload: String): List<NativeMediaCard> {
@@ -111,6 +130,47 @@ object NativeMediaParser {
         }.distinctBy { it.id }
     }
 
+    fun bilibiliDynamic(payload: String): List<NativeMediaCard> {
+        val root = runCatching { json.parseToJsonElement(payload) as? JsonObject }.getOrNull() ?: return emptyList()
+        val items = root.objectValue("data")?.get("items") as? JsonArray ?: return emptyList()
+        return items.mapNotNull { element ->
+            val item = element as? JsonObject ?: return@mapNotNull null
+            val modules = item.objectValue("modules") ?: return@mapNotNull null
+            val author = modules.objectValue("module_author")
+            val archive = modules.objectValue("module_dynamic")?.objectValue("major")?.objectValue("archive")
+                ?: return@mapNotNull null
+            val bvid = archive.stringValue("bvid") ?: return@mapNotNull null
+            val title = archive.stringValue("title") ?: return@mapNotNull null
+            val subtitle = listOf(author?.stringValue("name"), author?.stringValue("pub_time"))
+                .filterNotNull().filter(String::isNotBlank).joinToString(" · ").ifBlank { "Bilibili 動態" }
+            NativeMediaCard(
+                id = "dynamic:${item.stringValue("id_str") ?: bvid}",
+                title = title,
+                subtitle = subtitle,
+                thumbnailURL = normalizeImage(archive.stringValue("cover").orEmpty()),
+                playbackURL = "https://www.bilibili.com/video/$bvid",
+            )
+        }.distinctBy(NativeMediaCard::id)
+    }
+
+    fun bilibiliProfile(payload: String): List<NativeMediaCard> {
+        val root = runCatching { json.parseToJsonElement(payload) as? JsonObject }.getOrNull() ?: return emptyList()
+        val data = root.objectValue("data") ?: return emptyList()
+        val name = data.stringValue("uname") ?: return emptyList()
+        val level = data.objectValue("level_info")?.numberText("current_level") ?: "?"
+        val coins = data.numberText("money") ?: "0"
+        val mid = data.numberText("mid") ?: "0"
+        return listOf(
+            NativeMediaCard(
+                id = "profile:$mid",
+                title = name,
+                subtitle = "LV$level · 硬幣 $coins",
+                thumbnailURL = normalizeImage(data.stringValue("face").orEmpty()),
+                playbackURL = "https://space.bilibili.com/$mid",
+            ),
+        )
+    }
+
     private fun field(value: String, name: String): String? =
         Regex("\"${Regex.escape(name)}\"\\s*:\\s*\"([^\"]*)\"").find(value)?.groupValues?.get(1)
 
@@ -128,4 +188,8 @@ object NativeMediaParser {
         .replace("\\\"", "\"")
 
     private fun clean(value: String): String = decode(value).replace(Regex("<[^>]+>"), "").trim()
+
+    private fun JsonObject.objectValue(key: String): JsonObject? = get(key) as? JsonObject
+    private fun JsonObject.stringValue(key: String): String? = get(key)?.jsonPrimitive?.contentOrNull
+    private fun JsonObject.numberText(key: String): String? = get(key)?.jsonPrimitive?.contentOrNull
 }

@@ -22,6 +22,7 @@ kotlin {
             implementation("org.jetbrains.compose.material:material:1.11.1")
             implementation("org.jetbrains.compose.ui:ui:1.11.1")
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
@@ -29,6 +30,12 @@ kotlin {
         val desktopMain by getting {
             dependencies {
                 implementation(compose.desktop.currentOs)
+                implementation("org.jsoup:jsoup:1.21.2")
+            }
+        }
+        val androidMain by getting {
+            dependencies {
+                implementation("org.jsoup:jsoup:1.21.2")
             }
         }
     }

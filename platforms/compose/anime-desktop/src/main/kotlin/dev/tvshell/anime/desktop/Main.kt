@@ -24,10 +24,21 @@ import dev.tvshell.shared.anime.AnimeEpisode
 import dev.tvshell.shared.anime.AnimeStreamCandidate
 import dev.tvshell.shared.anime.BilibiliAnimeParser
 import dev.tvshell.shared.anime.CSS1HtmlParser
+import dev.tvshell.shared.anime.CSS1Resolver
+import dev.tvshell.shared.anime.PlatformCSS1ContentClient
+import dev.tvshell.shared.anime.DandanplayService
+import dev.tvshell.shared.anime.DandanplayCredentials
+import dev.tvshell.shared.anime.DanmakuComment
+import dev.tvshell.shared.anime.ServiceCredentialsParser
+import dev.tvshell.shared.anime.platformSHA256Base64
+import dev.tvshell.shared.anime.platformChooseAndInstallCredentials
+import dev.tvshell.shared.anime.platformCredentialsFile
 import dev.tvshell.shared.anime.DesktopVLCPlayerAdapter
 import java.net.HttpURLConnection
 import java.net.URI
+import java.io.File
 import kotlin.system.exitProcess
+import kotlinx.coroutines.runBlocking
 
 fun main() = application {
     val remoteDispatcher = remember { RemoteCommandDispatcher() }
@@ -50,9 +61,12 @@ fun main() = application {
 
 private object AnimeDesktopAdapter : PlatformAdapter {
     private val animePlayer = DesktopVLCPlayerAdapter()
+    private val css1Resolver = CSS1Resolver(PlatformCSS1ContentClient())
+    private val dandanplay = DandanplayService(PlatformCSS1ContentClient(), ::platformSHA256Base64)
     override fun installedApps(): List<ShellApp> = emptyList()
     override fun launch(app: ShellApp): Result<Unit> = Result.failure(IllegalStateException("請先在動畫 App 內設定來源"))
     override fun openSystemSettings(): Result<Unit> = Result.success(Unit)
+    override fun openCredentialsImporter(): Result<Unit> = runCatching { platformChooseAndInstallCredentials() }
     override fun fetchMediaFeed(service: NativeMediaService): Result<List<NativeMediaCard>> = runCatching {
         val endpoint = when (service) {
             NativeMediaService.YouTube -> "https://www.youtube.com/results?search_query=%E5%AE%98%E6%96%B9%E5%8B%95%E7%95%AB&hl=zh-TW&gl=TW"
@@ -69,7 +83,7 @@ private object AnimeDesktopAdapter : PlatformAdapter {
             AnimeSourceKind.YouTube -> fetchMediaFeed(NativeMediaService.YouTube)
             AnimeSourceKind.Bilibili -> fetchMediaFeed(NativeMediaService.Bilibili)
             AnimeSourceKind.AniGamer -> super<PlatformAdapter>.fetchAnimeFeed(source)
-            AnimeSourceKind.CSS1 -> selectorFeed("TVSHELL_ANISUBS_CSS1_URL", "CSS1")
+            AnimeSourceKind.CSS1 -> fetchMediaFeed(NativeMediaService.Bilibili)
             AnimeSourceKind.AniSubsBT -> rssFeed("TVSHELL_ANISUBS_BT_URL", "ani-subs BT")
             AnimeSourceKind.Mikan -> rssFeed("TVSHELL_MIKAN_RSS_URL", "Mikan")
             AnimeSourceKind.DMHY -> rssFeed("TVSHELL_DMHY_RSS_URL", "動漫花園")
@@ -84,10 +98,9 @@ private object AnimeDesktopAdapter : PlatformAdapter {
             BilibiliAnimeParser.episodes(fetchText("https://api.bilibili.com/pgc/web/season/section?season_id=$seasonID"))
                 .ifEmpty { error("Bilibili 沒有回傳選集") }
         }
-        AnimeSourceKind.CSS1 -> runCatching {
-            CSS1HtmlParser.episodes(fetchText(card.playbackURL), card.playbackURL)
-                .ifEmpty { error("CSS1 找不到選集") }
-        }
+        AnimeSourceKind.CSS1 -> runCatching { runBlocking {
+            css1Resolver.episodes(card.title).ifEmpty { error("CSS1 搜不到：${card.title}") }
+        } }
         else -> super<PlatformAdapter>.fetchAnimeEpisodes(source, card)
     }
     override fun resolveAnimeStreams(source: AnimeSourceKind, episode: AnimeEpisode): Result<List<AnimeStreamCandidate>> = when (source) {
@@ -98,14 +111,9 @@ private object AnimeDesktopAdapter : PlatformAdapter {
             BilibiliAnimeParser.failureReason(payload)?.let(::error)
             BilibiliAnimeParser.streams(payload).ifEmpty { error("Bilibili 沒有可用播放網址，可能需要登入或會員權限") }
         }
-        AnimeSourceKind.CSS1 -> runCatching {
-            CSS1HtmlParser.streams(fetchText(episode.pageURL)).map { candidate ->
-                candidate.copy(headers = candidate.headers + mapOf(
-                    "Referer" to episode.pageURL,
-                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36",
-                ))
-            }.ifEmpty { error("CSS1 選集頁沒有可用播放源") }
-        }
+        AnimeSourceKind.CSS1 -> runCatching { runBlocking {
+            css1Resolver.streams(episode).ifEmpty { error("CSS1 選集解析失敗：沒有可用播放源") }
+        } }
         else -> super<PlatformAdapter>.resolveAnimeStreams(source, episode)
     }
     override fun loadAnimeStream(candidate: AnimeStreamCandidate): Result<Unit> = runCatching {
@@ -121,6 +129,19 @@ private object AnimeDesktopAdapter : PlatformAdapter {
     override fun pauseAnime(): Result<Unit> = runCatching { animePlayer.pause() }
     override fun seekAnimeBy(seconds: Int): Result<Unit> = runCatching { animePlayer.seekBy(seconds) }
     override fun stopAnime(): Result<Unit> = runCatching { animePlayer.release() }
+    override fun fetchAnimeDanmaku(
+        source: AnimeSourceKind,
+        card: NativeMediaCard,
+        episode: AnimeEpisode,
+    ): Result<List<DanmakuComment>> = runCatching { runBlocking {
+        if (source == AnimeSourceKind.Bilibili) {
+            val cid = episode.id.split(':').getOrNull(2) ?: error("Bilibili 選集缺少 cid，無法讀取彈幕")
+            BilibiliAnimeParser.danmaku(fetchText("https://api.bilibili.com/x/v1/dm/list.so?oid=$cid"))
+        } else {
+            val credentials = loadCredentials().dandanplay
+            dandanplay.comments(card.title, episode.number, credentials, (System.currentTimeMillis() / 1_000).toInt())
+        }
+    } }
     override fun playMedia(card: NativeMediaCard): Result<Unit> = runCatching {
         ProcessBuilder("cmd", "/c", "start", "", card.playbackURL).start()
     }
@@ -128,14 +149,6 @@ private object AnimeDesktopAdapter : PlatformAdapter {
     override fun fetchWallpaperURL(): Result<String> = runCatching {
         BingWallpaperMetadata.imageURL(fetchText("https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=zh-TW"))
             ?: error("Bing 沒有回傳圖片")
-    }
-
-    private fun selectorFeed(environmentKey: String, displayName: String): Result<List<NativeMediaCard>> = runCatching {
-        val url = System.getenv(environmentKey)?.takeIf(String::isNotBlank)
-            ?: error("尚未設定 $displayName 訂閱網址（$environmentKey）")
-        CSS1HtmlParser.titles(fetchText(url), url).map { title ->
-            NativeMediaCard(title.id, title.title, displayName, "", title.detailURL)
-        }.ifEmpty { error("$displayName 沒有回傳可用作品") }
     }
 
     private fun rssFeed(environmentKey: String, displayName: String): Result<List<NativeMediaCard>> = runCatching {
@@ -173,5 +186,21 @@ private object AnimeDesktopAdapter : PlatformAdapter {
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun loadCredentials(): dev.tvshell.shared.anime.ServiceCredentials {
+        val environment = DandanplayCredentials(
+            System.getenv("TVSHELL_DANDANPLAY_APP_ID").orEmpty(),
+            System.getenv("TVSHELL_DANDANPLAY_APP_SECRET").orEmpty(),
+        )
+        val files = listOfNotNull(
+            System.getenv("TVSHELL_CREDENTIALS_FILE")?.let(::File),
+            platformCredentialsFile(),
+            File(System.getProperty("user.home"), "credentials.json"),
+            File("credentials.json"),
+        )
+        val stored = files.firstOrNull(File::isFile)?.let { runCatching { ServiceCredentialsParser.decode(it.readText()) }.getOrNull() }
+            ?: dev.tvshell.shared.anime.ServiceCredentials()
+        return if (environment.isConfigured) stored.copy(dandanplay = environment) else stored
     }
 }

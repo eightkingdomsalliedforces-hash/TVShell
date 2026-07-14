@@ -16,6 +16,10 @@ import dev.tvshell.shared.NativeMediaService
 import dev.tvshell.shared.ShellApp
 import dev.tvshell.shared.TVShellApp
 import dev.tvshell.shared.BingWallpaperMetadata
+import dev.tvshell.shared.BilibiliSection
+import dev.tvshell.shared.anime.ServiceCredentialsParser
+import dev.tvshell.shared.anime.platformChooseAndInstallCredentials
+import dev.tvshell.shared.anime.platformCredentialsFile
 import dev.tvshell.shared.RemoteCommandDispatcher
 import dev.tvshell.shared.desktopKeyToRemoteCommand
 import java.io.File
@@ -66,6 +70,10 @@ private class WindowsPlatformAdapter : PlatformAdapter {
         ProcessBuilder("cmd", "/c", "start", "", "ms-settings:").start()
     }
 
+    override fun openCredentialsImporter(): Result<Unit> = runCatching {
+        platformChooseAndInstallCredentials()
+    }
+
     override fun fetchMediaFeed(service: NativeMediaService): Result<List<NativeMediaCard>> = runCatching {
         val url = when (service) {
             NativeMediaService.YouTube -> "https://www.youtube.com/results?search_query=%E5%8B%95%E7%95%AB&hl=zh-TW&gl=TW"
@@ -78,6 +86,32 @@ private class WindowsPlatformAdapter : PlatformAdapter {
         }.ifEmpty { error("服務沒有回傳可顯示的影片") }
     }
 
+    override fun fetchBilibiliSection(section: BilibiliSection): Result<List<NativeMediaCard>> = runCatching {
+        val credentials = loadCredentials()
+        val cookie = credentials.bilibiliCookie
+        val authenticated = cookie.contains("SESSDATA=") && cookie.contains("bili_jct=") && cookie.contains("DedeUserID=")
+        val endpoint = when (section) {
+            BilibiliSection.Recommended -> "https://api.bilibili.com/x/web-interface/index/top/feed/rcmd?fresh_type=3&ps=30"
+            BilibiliSection.Popular -> "https://api.bilibili.com/x/web-interface/popular?ps=30&pn=1"
+            BilibiliSection.Ranking -> "https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all"
+            BilibiliSection.Dynamic -> {
+                require(authenticated) { "Cookie 缺少 SESSDATA、bili_jct 或 DedeUserID；請在 credentials.json 匯入完整 bilibili.com Cookie" }
+                "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all"
+            }
+            BilibiliSection.Profile -> {
+                require(authenticated) { "Cookie 缺少 SESSDATA、bili_jct 或 DedeUserID；請在 credentials.json 匯入完整 bilibili.com Cookie" }
+                "https://api.bilibili.com/x/web-interface/nav"
+            }
+        }
+        val body = fetchText(endpoint, if (cookie.isBlank()) emptyMap() else mapOf("Cookie" to cookie))
+        NativeMediaParser.bilibiliFailureReason(body)?.let(::error)
+        when (section) {
+            BilibiliSection.Dynamic -> NativeMediaParser.bilibiliDynamic(body)
+            BilibiliSection.Profile -> NativeMediaParser.bilibiliProfile(body)
+            else -> NativeMediaParser.bilibili(body)
+        }.ifEmpty { error("Bilibili ${section.title}沒有回傳可顯示內容") }
+    }
+
     override fun playMedia(card: NativeMediaCard): Result<Unit> = runCatching {
         ProcessBuilder("cmd", "/c", "start", "", card.playbackURL).start()
     }
@@ -87,7 +121,7 @@ private class WindowsPlatformAdapter : PlatformAdapter {
             ?: error("Bing 沒有回傳圖片")
     }
 
-    private fun fetchText(url: String): String {
+    private fun fetchText(url: String, headers: Map<String, String> = emptyMap()): String {
         val connection = (URI(url).toURL().openConnection() as HttpURLConnection).apply {
             instanceFollowRedirects = true
             requestMethod = "GET"
@@ -95,6 +129,8 @@ private class WindowsPlatformAdapter : PlatformAdapter {
             readTimeout = 8_000
             setRequestProperty("User-Agent", "Mozilla/5.0 TVShell/1.0")
             setRequestProperty("Accept-Language", "zh-TW,zh;q=0.9,en;q=0.7")
+            setRequestProperty("Referer", "https://www.bilibili.com/")
+            headers.forEach(::setRequestProperty)
         }
         return try {
             val status = connection.responseCode
@@ -104,5 +140,19 @@ private class WindowsPlatformAdapter : PlatformAdapter {
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun loadCredentials(): dev.tvshell.shared.anime.ServiceCredentials {
+        val candidates = listOfNotNull(
+            System.getenv("TVSHELL_CREDENTIALS_FILE")?.let(::File),
+            platformCredentialsFile(),
+            File(System.getProperty("user.home"), "credentials.json"),
+            File("credentials.json"),
+        )
+        val stored = candidates.firstOrNull(File::isFile)?.let {
+            runCatching { ServiceCredentialsParser.decode(it.readText()) }.getOrNull()
+        } ?: dev.tvshell.shared.anime.ServiceCredentials()
+        val environmentCookie = System.getenv("TVSHELL_BILIBILI_COOKIE").orEmpty()
+        return if (environmentCookie.isBlank()) stored else stored.copy(bilibiliCookie = environmentCookie)
     }
 }

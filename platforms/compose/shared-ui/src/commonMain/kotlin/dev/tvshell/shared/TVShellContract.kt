@@ -2,6 +2,7 @@ package dev.tvshell.shared
 
 import dev.tvshell.shared.anime.AnimeEpisode
 import dev.tvshell.shared.anime.AnimeStreamCandidate
+import dev.tvshell.shared.anime.DanmakuComment
 
 object TVShellDesign {
     const val ReferenceWidth = 1920f
@@ -35,8 +36,14 @@ interface PlatformAdapter {
     fun installedApps(): List<ShellApp>
     fun launch(app: ShellApp): Result<Unit>
     fun openSystemSettings(): Result<Unit>
+    fun openCredentialsImporter(): Result<Unit> = openSystemSettings()
     fun fetchMediaFeed(service: NativeMediaService): Result<List<NativeMediaCard>> =
         Result.failure(UnsupportedOperationException("此平台尚未連接媒體服務"))
+    fun fetchBilibiliSection(section: BilibiliSection): Result<List<NativeMediaCard>> = when (section) {
+        BilibiliSection.Recommended, BilibiliSection.Popular, BilibiliSection.Ranking -> fetchMediaFeed(NativeMediaService.Bilibili)
+        BilibiliSection.Dynamic -> Result.failure(IllegalStateException("Bilibili 動態需要先登入"))
+        BilibiliSection.Profile -> Result.failure(IllegalStateException("Bilibili 我的頁面需要先登入"))
+    }
     fun fetchAnimeFeed(source: AnimeSourceKind): Result<List<NativeMediaCard>> = when (source) {
         AnimeSourceKind.YouTube -> fetchMediaFeed(NativeMediaService.YouTube)
         AnimeSourceKind.Bilibili -> fetchMediaFeed(NativeMediaService.Bilibili)
@@ -84,6 +91,11 @@ interface PlatformAdapter {
     fun seekAnimeBy(seconds: Int): Result<Unit> = Result.success(Unit)
     fun adjustAnimeVolume(direction: Int): Result<Unit> = Result.success(Unit)
     fun stopAnime(): Result<Unit> = Result.success(Unit)
+    fun fetchAnimeDanmaku(
+        source: AnimeSourceKind,
+        card: NativeMediaCard,
+        episode: AnimeEpisode,
+    ): Result<List<DanmakuComment>> = Result.failure(IllegalStateException("這個平台尚未連接彈幕服務"))
     fun playMedia(card: NativeMediaCard): Result<Unit> =
         Result.failure(UnsupportedOperationException("此平台尚未連接播放器"))
     fun fetchWallpaperURL(): Result<String> =

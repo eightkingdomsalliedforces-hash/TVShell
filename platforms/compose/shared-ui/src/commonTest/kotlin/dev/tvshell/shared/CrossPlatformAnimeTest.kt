@@ -6,6 +6,16 @@ import dev.tvshell.shared.anime.AnimeStreamCandidate
 import dev.tvshell.shared.anime.BTRssParser
 import dev.tvshell.shared.anime.BilibiliAnimeParser
 import dev.tvshell.shared.anime.CSS1HtmlParser
+import dev.tvshell.shared.anime.CSS1SubscriptionParser
+import dev.tvshell.shared.anime.CSS1Anchor
+import dev.tvshell.shared.anime.CSS1ContentClient
+import dev.tvshell.shared.anime.CSS1Resolver
+import dev.tvshell.shared.anime.DanmakuMotion
+import dev.tvshell.shared.anime.DanmakuTimeline
+import dev.tvshell.shared.anime.DandanplayParser
+import dev.tvshell.shared.anime.DandanplayCredentials
+import dev.tvshell.shared.anime.DandanplayService
+import dev.tvshell.shared.anime.ServiceCredentialsParser
 import dev.tvshell.shared.anime.SourceHealthState
 import dev.tvshell.shared.anime.TorrentCacheEntry
 import dev.tvshell.shared.anime.TorrentCachePolicy
@@ -13,8 +23,149 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlinx.coroutines.runBlocking
 
 class CrossPlatformAnimeTest {
+    @Test
+    fun css1SubscriptionDecodesWebSelectorsInsteadOfTreatingJsonAsAnimeHtml() {
+        val payload = """
+            {"exportedMediaSourceDataList":{"mediaSources":[
+              {"factoryId":"web-selector","arguments":{"name":"測試源","userAgent":"TVShell Test","searchConfig":{
+                "searchUrl":"https://anime.example/search?wd={keyword}",
+                "selectorSubjectFormatA":{"selectLists":".result a"},
+                "selectorChannelFormatFlattened":{"selectEpisodeLists":".playlist","selectEpisodesFromList":"a","selectEpisodeLinksFromList":"","matchEpisodeSortFromName":"第\\\\s*(\\\\d+)\\\\s*集"},
+                "matchVideo":{"enableNestedUrl":false,"matchVideoUrl":"(https?://[^\\\"]+\\\\.m3u8)","addHeadersToVideo":{"referer":"https://anime.example/"}}
+              }}}
+            ]}}
+        """.trimIndent()
+
+        val sources = CSS1SubscriptionParser.decode(payload)
+
+        assertEquals(1, sources.size)
+        assertEquals("測試源", sources.single().name)
+        assertEquals(".result a", sources.single().searchSelector)
+        assertEquals("https://anime.example/", sources.single().videoHeaders["Referer"])
+    }
+
+    @Test
+    fun dandanplayKeepsAllRelatedCommentsAndMovesThemRightToLeft() {
+        val comments = DandanplayParser.comments(
+            """{"comments":[
+              {"p":"1.200,1,25,16777215,0","m":"第一條"},
+              {"p":"2.000,5,25,16711680,source-id","m":"第二條"}
+            ]}""",
+        )
+
+        assertEquals(listOf("第一條", "第二條"), comments.map { it.text })
+        assertEquals("#FF0000", comments[1].colorHex)
+        assertTrue(DanmakuMotion.horizontalOffset(ageSeconds = 2.0, viewportWidth = 1920f, textWidth = 240f, speedScale = 1f) <
+            DanmakuMotion.horizontalOffset(ageSeconds = 1.0, viewportWidth = 1920f, textWidth = 240f, speedScale = 1f))
+        assertTrue(DanmakuMotion.lifetime(1920f, 240f, 1f) > 3.5)
+    }
+
+    @Test
+    fun css1SearchIsDeferredUntilASelectedTitleNeedsEpisodes() = runBlocking {
+        val subscription = """{"exportedMediaSourceDataList":{"mediaSources":[{"factoryId":"web-selector","arguments":{"name":"快源","searchConfig":{"searchUrl":"https://source.example/search?wd={keyword}","selectorSubjectFormatA":{"selectLists":".result a"},"selectorChannelFormatFlattened":{"selectEpisodeLists":".playlist","selectEpisodesFromList":"a"},"matchVideo":{"matchVideoUrl":"(https?://[^\\\"]+\\\\.m3u8)"}}}}]}}"""
+        val client = object : CSS1ContentClient {
+            val requested = mutableListOf<String>()
+            override suspend fun get(url: String, headers: Map<String, String>): String {
+                requested += url
+                return when {
+                    url.endsWith("css1.json") -> subscription
+                    "/search?" in url -> "SEARCH"
+                    url.endsWith("/show/frieren") -> "DETAIL"
+                    url.endsWith("/play/1") -> "https://cdn.example/frieren-1080.m3u8"
+                    else -> error("unexpected $url")
+                }
+            }
+            override fun anchors(html: String, selector: String, baseURL: String): List<CSS1Anchor> = when (html) {
+                "SEARCH" -> listOf(CSS1Anchor("葬送的芙莉蓮", "https://source.example/show/frieren"))
+                "DETAIL" -> listOf(CSS1Anchor("第 1 集", "https://source.example/play/1"))
+                else -> emptyList()
+            }
+            override fun blocks(html: String, selector: String): List<String> = if (html == "DETAIL") listOf(html) else emptyList()
+            override fun encodeQuery(value: String): String = value
+            override fun decodeURL(value: String): String = value
+            override fun resolveURL(baseURL: String, value: String): String = value
+        }
+        val resolver = CSS1Resolver(client, "https://sub.example/css1.json")
+        assertEquals(emptyList(), client.requested)
+
+        val episodes = resolver.episodes("葬送的芙莉蓮")
+        val streams = resolver.streams(episodes.single())
+
+        assertEquals(listOf(1), episodes.map { it.number })
+        assertEquals("https://cdn.example/frieren-1080.m3u8", streams.single().url)
+        assertTrue(client.requested.first().endsWith("css1.json"))
+    }
+
+    @Test
+    fun dandanplaySearchesEpisodeThenLoadsTheFullRelatedCommentSet() = runBlocking {
+        val requests = mutableListOf<Pair<String, Map<String, String>>>()
+        val client = object : CSS1ContentClient {
+            override suspend fun get(url: String, headers: Map<String, String>): String {
+                requests += url to headers
+                return if ("search/episodes" in url) {
+                    """{"animes":[{"episodes":[{"episodeId":123450001,"episodeNumber":"1"}]}]}"""
+                } else {
+                    """{"comments":[{"p":"1.0,1,25,16777215,0","m":"完整彈幕"}]}"""
+                }
+            }
+            override fun anchors(html: String, selector: String, baseURL: String) = emptyList<CSS1Anchor>()
+            override fun blocks(html: String, selector: String) = emptyList<String>()
+            override fun encodeQuery(value: String) = value.replace(" ", "%20")
+            override fun decodeURL(value: String) = value
+            override fun resolveURL(baseURL: String, value: String) = value
+        }
+        val service = DandanplayService(client) { "signed:$it" }
+
+        val comments = service.comments(
+            title = "葬送的芙莉蓮",
+            episode = 1,
+            credentials = DandanplayCredentials("app-id", "app-secret"),
+            timestamp = 123456,
+        )
+
+        assertEquals(listOf("完整彈幕"), comments.map { it.text })
+        assertTrue(requests.first().first.contains("anime=葬送的芙莉蓮"))
+        assertEquals("app-id", requests.first().second["X-AppId"])
+        assertTrue(requests.last().first.endsWith("/123450001?withRelated=true"))
+    }
+
+    @Test
+    fun sharedCredentialsFileKeepsDandanplayAndBilibiliLoginValues() {
+        val credentials = ServiceCredentialsParser.decode(
+            """{"dandanplay":{"appID":"dd-app","appSecret":"dd-secret"},"bilibili":{"cookie":"SESSDATA=session; bili_jct=csrf; DedeUserID=1"}}""",
+        )
+
+        assertEquals("dd-app", credentials.dandanplay.appID)
+        assertEquals("dd-secret", credentials.dandanplay.appSecret)
+        assertTrue(credentials.bilibiliCookie.contains("SESSDATA=session"))
+
+        val netscape = ServiceCredentialsParser.decode(
+            """# Netscape HTTP Cookie File
+            #HttpOnly_.bilibili.com	TRUE	/	TRUE	2147483647	SESSDATA	session
+            .bilibili.com	TRUE	/	FALSE	2147483647	bili_jct	csrf
+            .bilibili.com	TRUE	/	FALSE	2147483647	DedeUserID	123""",
+        )
+        assertTrue(netscape.bilibiliCookie.contains("SESSDATA=session"))
+        assertTrue(netscape.bilibiliCookie.contains("bili_jct=csrf"))
+
+        val browserExport = ServiceCredentialsParser.decode(
+            """{"bilibili":{"cookie":[{"domain":".bilibili.com","name":"SESSDATA","value":"session"},{"domain":"accounts.example.com","name":"private","value":"do-not-import"},{"domain":".bilibili.com","name":"bili_jct","value":"csrf"},{"domain":".bilibili.com","name":"DedeUserID","value":"123"}]}}""",
+        )
+        assertTrue(browserExport.bilibiliCookie.contains("DedeUserID=123"))
+        assertFalse(browserExport.bilibiliCookie.contains("private="))
+    }
+
+    @Test
+    fun danmakuTimelineRetainsACommentUntilItsWholeTextLeavesTheLeftEdge() {
+        val comments = listOf(dev.tvshell.shared.anime.DanmakuComment(1.0, "測試彈幕"))
+
+        assertEquals(1, DanmakuTimeline.active(comments, 2.0, 1920f, 240f, 1f).size)
+        assertEquals(0, DanmakuTimeline.active(comments, 6.0, 1920f, 240f, 1f).size)
+    }
+
     @Test
     fun animeSourceCatalogMatchesTheNativeMacTabs() {
         assertEquals(
@@ -255,6 +406,12 @@ class CrossPlatformAnimeTest {
         assertEquals(1, streams.size)
         assertEquals("1080p", streams.single().quality)
         assertEquals("https://www.bilibili.com/", streams.single().headers["Referer"])
+
+        val danmaku = BilibiliAnimeParser.danmaku(
+            """<i><d p="1.5,1,25,16777215,0,0,0,0">第一條&amp;彈幕</d><d p="3.0,5,25,16711680,0,0,0,0">置頂</d></i>""",
+        )
+        assertEquals(listOf("第一條&彈幕", "置頂"), danmaku.map { it.text })
+        assertEquals("#FF0000", danmaku[1].colorHex)
     }
 
     @Test

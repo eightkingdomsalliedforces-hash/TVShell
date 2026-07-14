@@ -9,6 +9,7 @@ import android.content.Context
 import android.media.AudioManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import dev.tvshell.shared.PlatformAdapter
 import dev.tvshell.shared.AndroidTVKeyMapper
 import dev.tvshell.shared.RemoteCommandDispatcher
@@ -24,16 +25,31 @@ import dev.tvshell.shared.anime.AnimeEpisode
 import dev.tvshell.shared.anime.AnimeStreamCandidate
 import dev.tvshell.shared.anime.BilibiliAnimeParser
 import dev.tvshell.shared.anime.CSS1HtmlParser
+import dev.tvshell.shared.anime.CSS1Resolver
+import dev.tvshell.shared.anime.PlatformCSS1ContentClient
+import dev.tvshell.shared.anime.DandanplayService
+import dev.tvshell.shared.anime.DanmakuComment
+import dev.tvshell.shared.anime.ServiceCredentials
+import dev.tvshell.shared.anime.ServiceCredentialsParser
+import dev.tvshell.shared.anime.platformSHA256Base64
 import java.net.HttpURLConnection
 import java.net.URL
+import java.io.File
+import kotlinx.coroutines.runBlocking
 
 class AnimeActivity : ComponentActivity() {
     private val remoteDispatcher = RemoteCommandDispatcher()
     private var longBackDispatched = false
+    private lateinit var platformAdapter: AnimePlatformAdapter
+    private val credentialsPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null && ::platformAdapter.isInitialized) platformAdapter.importCredentials(uri)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val platformAdapter = AnimePlatformAdapter(this)
+        platformAdapter = AnimePlatformAdapter(this) {
+            credentialsPicker.launch(arrayOf("application/json", "text/plain", "text/*"))
+        }
         setContent { TVShellApp(platformAdapter, animeOnly = true, dispatcher = remoteDispatcher) }
     }
 
@@ -61,13 +77,19 @@ class AnimeActivity : ComponentActivity() {
     }
 }
 
-private class AnimePlatformAdapter(private val activity: ComponentActivity) : PlatformAdapter {
+private class AnimePlatformAdapter(
+    private val activity: ComponentActivity,
+    private val chooseCredentials: () -> Unit,
+) : PlatformAdapter {
     private val animePlayer = AndroidMediaPlayerAdapter(activity)
+    private val css1Resolver = CSS1Resolver(PlatformCSS1ContentClient())
+    private val dandanplay = DandanplayService(PlatformCSS1ContentClient(), ::platformSHA256Base64)
     override fun installedApps(): List<ShellApp> = emptyList()
     override fun launch(app: ShellApp): Result<Unit> = Result.failure(IllegalStateException("請先在動畫 App 內設定來源"))
     override fun openSystemSettings(): Result<Unit> = runCatching {
         activity.startActivity(Intent(Settings.ACTION_SETTINGS))
     }
+    override fun openCredentialsImporter(): Result<Unit> = runCatching { chooseCredentials() }
     override fun fetchMediaFeed(service: NativeMediaService): Result<List<NativeMediaCard>> = runCatching {
         val endpoint = when (service) {
             NativeMediaService.YouTube -> "https://www.youtube.com/results?search_query=%E5%AE%98%E6%96%B9%E5%8B%95%E7%95%AB&hl=zh-TW&gl=TW"
@@ -89,7 +111,9 @@ private class AnimePlatformAdapter(private val activity: ComponentActivity) : Pl
         }.ifEmpty { error("來源沒有回傳可播放內容") }
     }
     override fun fetchAnimeFeed(source: AnimeSourceKind): Result<List<NativeMediaCard>> =
-        super<PlatformAdapter>.fetchAnimeFeed(source).map { cards -> cards.map { it.copy(animeSource = source) } }
+        (if (source == AnimeSourceKind.CSS1) fetchMediaFeed(NativeMediaService.Bilibili)
+        else super<PlatformAdapter>.fetchAnimeFeed(source))
+            .map { cards -> cards.map { it.copy(animeSource = source) } }
     override fun fetchAnimeEpisodes(source: AnimeSourceKind, card: NativeMediaCard): Result<List<AnimeEpisode>> = when (source) {
         AnimeSourceKind.Bilibili -> runCatching {
             val seasonID = card.id.substringAfter("bilibili-season-", "").takeIf(String::isNotBlank)
@@ -98,10 +122,9 @@ private class AnimePlatformAdapter(private val activity: ComponentActivity) : Pl
             BilibiliAnimeParser.episodes(fetchText("https://api.bilibili.com/pgc/web/season/section?season_id=$seasonID"))
                 .ifEmpty { error("Bilibili 沒有回傳選集") }
         }
-        AnimeSourceKind.CSS1 -> runCatching {
-            CSS1HtmlParser.episodes(fetchText(card.playbackURL), card.playbackURL)
-                .ifEmpty { error("CSS1 找不到選集") }
-        }
+        AnimeSourceKind.CSS1 -> runCatching { runBlocking {
+            css1Resolver.episodes(card.title).ifEmpty { error("CSS1 搜不到：${card.title}") }
+        } }
         else -> super<PlatformAdapter>.fetchAnimeEpisodes(source, card)
     }
     override fun resolveAnimeStreams(source: AnimeSourceKind, episode: AnimeEpisode): Result<List<AnimeStreamCandidate>> = when (source) {
@@ -112,14 +135,9 @@ private class AnimePlatformAdapter(private val activity: ComponentActivity) : Pl
             BilibiliAnimeParser.failureReason(payload)?.let(::error)
             BilibiliAnimeParser.streams(payload).ifEmpty { error("Bilibili 沒有可用播放網址，可能需要登入或會員權限") }
         }
-        AnimeSourceKind.CSS1 -> runCatching {
-            CSS1HtmlParser.streams(fetchText(episode.pageURL)).map { candidate ->
-                candidate.copy(headers = candidate.headers + mapOf(
-                    "Referer" to episode.pageURL,
-                    "User-Agent" to "Mozilla/5.0 (Linux; Android TV) AppleWebKit/537.36 Chrome/125 Safari/537.36",
-                ))
-            }.ifEmpty { error("CSS1 選集頁沒有可用播放源") }
-        }
+        AnimeSourceKind.CSS1 -> runCatching { runBlocking {
+            css1Resolver.streams(episode).ifEmpty { error("CSS1 選集解析失敗：沒有可用播放源") }
+        } }
         else -> super<PlatformAdapter>.resolveAnimeStreams(source, episode)
     }
     override fun loadAnimeStream(candidate: AnimeStreamCandidate): Result<Unit> = runCatching {
@@ -143,6 +161,18 @@ private class AnimePlatformAdapter(private val activity: ComponentActivity) : Pl
         )
     }
     override fun stopAnime(): Result<Unit> = runCatching { animePlayer.release() }
+    override fun fetchAnimeDanmaku(
+        source: AnimeSourceKind,
+        card: NativeMediaCard,
+        episode: AnimeEpisode,
+    ): Result<List<DanmakuComment>> = runCatching { runBlocking {
+        if (source == AnimeSourceKind.Bilibili) {
+            val cid = episode.id.split(':').getOrNull(2) ?: error("Bilibili 選集缺少 cid，無法讀取彈幕")
+            BilibiliAnimeParser.danmaku(fetchText("https://api.bilibili.com/x/v1/dm/list.so?oid=$cid"))
+        } else {
+            dandanplay.comments(card.title, episode.number, loadCredentials().dandanplay, (System.currentTimeMillis() / 1_000).toInt())
+        }
+    } }
     override fun playMedia(card: NativeMediaCard): Result<Unit> = runCatching {
         activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(card.playbackURL)))
     }
@@ -172,5 +202,28 @@ private class AnimePlatformAdapter(private val activity: ComponentActivity) : Pl
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun loadCredentials(): ServiceCredentials {
+        val candidates = listOfNotNull(
+            File(activity.filesDir, "credentials.json"),
+            activity.getExternalFilesDir(null)?.let { File(it, "credentials.json") },
+        )
+        return candidates.firstOrNull(File::isFile)?.let {
+            runCatching { ServiceCredentialsParser.decode(it.readText()) }.getOrNull()
+        } ?: ServiceCredentials()
+    }
+
+    fun importCredentials(uri: Uri) {
+        runCatching {
+            val destination = File(activity.filesDir, "credentials.json")
+            activity.contentResolver.openInputStream(uri)?.use { input ->
+                destination.outputStream().use(input::copyTo)
+            } ?: error("無法讀取選擇的憑證檔案")
+            val parsed = ServiceCredentialsParser.decode(destination.readText())
+            require(parsed.bilibiliCookie.isNotBlank() || parsed.dandanplay.isConfigured) {
+                "檔案中找不到 Bilibili Cookie 或 Dandanplay 憑證"
+            }
+        }.onFailure { it.printStackTrace() }
     }
 }

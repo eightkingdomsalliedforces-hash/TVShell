@@ -1,13 +1,19 @@
 package dev.tvshell.shared
 
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -40,7 +46,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -51,7 +56,6 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -59,6 +63,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import dev.tvshell.shared.anime.AnimeEpisode
 import dev.tvshell.shared.anime.AnimeStreamCandidate
+import dev.tvshell.shared.anime.DanmakuComment
+import dev.tvshell.shared.anime.DanmakuMotion
+import dev.tvshell.shared.anime.DanmakuTimeline
 
 @Composable
 fun TVShellApp(
@@ -75,6 +82,9 @@ fun TVShellApp(
     var animeCards by remember { mutableStateOf(emptyList<NativeMediaCard>()) }
     var animeEpisodes by remember { mutableStateOf(emptyList<AnimeEpisode>()) }
     var animeStatus by remember { mutableStateOf("正在載入推薦動畫…") }
+    var animeDanmaku by remember { mutableStateOf(emptyList<DanmakuComment>()) }
+    var animeDanmakuStatus by remember { mutableStateOf("彈幕尚未載入") }
+    var animePlaybackSeconds by remember { mutableStateOf(0.0) }
     var mediaState by remember { mutableStateOf(NativeMediaState(0)) }
     var mediaCards by remember { mutableStateOf(emptyList<NativeMediaCard>()) }
     var mediaStatus by remember { mutableStateOf("正在載入…") }
@@ -123,7 +133,7 @@ fun TVShellApp(
             when (next.pendingAction) {
                 "exit" -> screen = if (animeOnly) ShellScreen.Anime else ShellScreen.Launcher
                 "video-source" -> adapter.openSystemSettings()
-                "credentials" -> adapter.openSystemSettings()
+                "credentials" -> adapter.openCredentialsImporter()
             }
             controlCenterState = next.preferences
             settingsState = next.clearAction()
@@ -180,6 +190,7 @@ fun TVShellApp(
                 }
                 action?.startsWith("seek:") == true -> {
                     val seconds = action.substringAfter(':').toIntOrNull() ?: 0
+                    animePlaybackSeconds = (animePlaybackSeconds + seconds).coerceAtLeast(0.0)
                     animeStatus = adapter.seekAnimeBy(seconds).fold(
                         { if (seconds >= 0) "快轉 ${seconds} 秒" else "倒轉 ${-seconds} 秒" },
                         { "快轉失敗：${it.message}" },
@@ -196,6 +207,8 @@ fun TVShellApp(
                 }
                 action == "stop" -> {
                     adapter.stopAnime()
+                    animeDanmaku = emptyList()
+                    animePlaybackSeconds = 0.0
                     animeStatus = "已回到選集。"
                     animeState = next.clearAction()
                 }
@@ -259,24 +272,38 @@ fun TVShellApp(
             delay(30_000)
         }
     }
-    LaunchedEffect(screen) {
+    LaunchedEffect(screen, mediaState.focusedTab) {
         val service = when (screen) {
             ShellScreen.YouTube -> NativeMediaService.YouTube
             ShellScreen.Bilibili -> NativeMediaService.Bilibili
             else -> null
         } ?: return@LaunchedEffect
-        mediaStatus = "正在載入${if (service == NativeMediaService.YouTube) " YouTube" else " Bilibili"}…"
-        val result = withContext(Dispatchers.Default) { adapter.fetchMediaFeed(service) }
+        val bilibiliSection = if (service == NativeMediaService.Bilibili) {
+            BilibiliSection.entries.getOrElse(mediaState.focusedTab) { BilibiliSection.Recommended }
+        } else null
+        val label = bilibiliSection?.title ?: "YouTube"
+        mediaStatus = "正在載入 $label…"
+        val result = withContext(Dispatchers.Default) {
+            if (bilibiliSection != null) adapter.fetchBilibiliSection(bilibiliSection) else adapter.fetchMediaFeed(service)
+        }
         result.fold(
             onSuccess = { cards ->
                 mediaCards = cards
-                mediaState = NativeMediaState(cards.size)
-                mediaStatus = "已載入 ${cards.size} 部影片"
+                mediaState = NativeMediaState(
+                    cardCount = cards.size,
+                    tabCount = if (service == NativeMediaService.Bilibili) BilibiliSection.entries.size else 4,
+                    focusedTab = mediaState.focusedTab,
+                )
+                mediaStatus = "$label · 已載入 ${cards.size} 筆內容"
             },
             onFailure = {
                 mediaCards = emptyList()
-                mediaState = NativeMediaState(0)
-                mediaStatus = "載入失敗：${it.message}"
+                mediaState = NativeMediaState(
+                    cardCount = 0,
+                    tabCount = if (service == NativeMediaService.Bilibili) BilibiliSection.entries.size else 4,
+                    focusedTab = mediaState.focusedTab,
+                )
+                mediaStatus = "$label 載入失敗：${it.message}"
             },
         )
     }
@@ -381,6 +408,7 @@ fun TVShellApp(
                 val cards = if (animeState.focusedTopTab == AnimeTopTab.History) watchHistory.entries else animeCards
                 cards.getOrNull(animeState.selectedCardIndex)?.let(::recordWatch)
                 animeStatus = "播放源：${candidate.quality}"
+                animePlaybackSeconds = 0.0
                 animeState = animeState.clearAction()
             },
             onFailure = {
@@ -388,6 +416,33 @@ fun TVShellApp(
                 animeState = animeState.copy(phase = CrossPlatformAnimePhase.Episodes, isPlaying = false, pendingAction = null)
             },
         )
+    }
+    LaunchedEffect(screen, animeState.phase, animeState.selectedCardIndex, animeState.focusedEpisode) {
+        if (screen != ShellScreen.Anime || animeState.phase != CrossPlatformAnimePhase.Playing) return@LaunchedEffect
+        val cards = if (animeState.focusedTopTab == AnimeTopTab.History) watchHistory.entries else animeCards
+        val card = cards.getOrNull(animeState.selectedCardIndex) ?: return@LaunchedEffect
+        val episode = animeEpisodes.getOrNull(animeState.focusedEpisode) ?: return@LaunchedEffect
+        val source = card.animeSource
+            ?: animeSourcesFor(animeState.focusedTopTab).getOrNull(animeState.focusedSource)?.kind
+            ?: return@LaunchedEffect
+        animeDanmaku = emptyList()
+        animeDanmakuStatus = "正在載入彈幕…"
+        withContext(Dispatchers.Default) { adapter.fetchAnimeDanmaku(source, card, episode) }.fold(
+            onSuccess = { comments ->
+                animeDanmaku = comments
+                animeDanmakuStatus = if (comments.isEmpty()) "搜不到彈幕" else "彈幕 ${comments.size} 條"
+            },
+            onFailure = {
+                animeDanmaku = emptyList()
+                animeDanmakuStatus = "彈幕未載入：${it.message ?: "未知原因"}"
+            },
+        )
+    }
+    LaunchedEffect(animeState.phase, animeState.isPlaying) {
+        while (animeState.phase == CrossPlatformAnimePhase.Playing && animeState.isPlaying) {
+            delay(50)
+            animePlaybackSeconds += .05
+        }
     }
     LaunchedEffect(animeState.phase, animeState.isPlayerHUDVisible, animeState.pendingAction) {
         if (animeState.phase == CrossPlatformAnimePhase.Playing && animeState.isPlayerHUDVisible) {
@@ -407,12 +462,47 @@ fun TVShellApp(
             .focusRequester(focusRequester)
             .focusable()
         ) {
-        when (screen) {
-            ShellScreen.Launcher -> Launcher(state, watchHistory.entries)
-            ShellScreen.Anime -> AnimeBrowser(animeState, animeCards, watchHistory.entries, animeEpisodes, animeStatus)
-            ShellScreen.YouTube -> NativeMediaRoute("YouTube", listOf("推薦", "熱門", "訂閱", "搜尋"), mediaState, mediaCards, mediaStatus)
-            ShellScreen.Bilibili -> NativeMediaRoute("Bilibili", listOf("推薦", "熱門", "排行榜", "動態"), mediaState, mediaCards, mediaStatus)
-            ShellScreen.Settings -> SettingsScreen(settingsState)
+        AnimatedContent(
+            targetState = screen,
+            transitionSpec = {
+                (fadeIn(tween(TVShellVisual.RuntimeAnimationMilliseconds)) + slideInVertically(
+                    animationSpec = tween(TVShellVisual.RuntimeAnimationMilliseconds),
+                    initialOffsetY = { it / 18 },
+                )).togetherWith(
+                    fadeOut(tween(TVShellVisual.RuntimeAnimationMilliseconds / 2)) + slideOutVertically(
+                        animationSpec = tween(TVShellVisual.RuntimeAnimationMilliseconds / 2),
+                        targetOffsetY = { -it / 28 },
+                    ),
+                )
+            },
+            label = "TVShell screen transition",
+        ) { visibleScreen ->
+            when (visibleScreen) {
+                ShellScreen.Launcher -> Launcher(state, watchHistory.entries)
+                ShellScreen.Anime -> AnimatedContent(
+                    targetState = animeState.phase,
+                    transitionSpec = {
+                        fadeIn(tween(TVShellVisual.RuntimeAnimationMilliseconds))
+                            .togetherWith(fadeOut(tween(TVShellVisual.RuntimeAnimationMilliseconds / 2)))
+                    },
+                    label = "Anime phase transition",
+                ) { visiblePhase ->
+                    AnimeBrowser(
+                        animeState.copy(phase = visiblePhase),
+                        animeCards,
+                        watchHistory.entries,
+                        animeEpisodes,
+                        animeStatus,
+                        animeDanmaku,
+                        animeDanmakuStatus,
+                        animePlaybackSeconds,
+                        controlCenterState.danmaku,
+                    )
+                }
+                ShellScreen.YouTube -> NativeMediaRoute("YouTube", listOf("推薦", "熱門", "訂閱", "搜尋"), mediaState, mediaCards, mediaStatus)
+                ShellScreen.Bilibili -> NativeMediaRoute("Bilibili", BilibiliSection.entries.map(BilibiliSection::title), mediaState, mediaCards, mediaStatus)
+                ShellScreen.Settings -> SettingsScreen(settingsState)
+            }
         }
         if (screen == ShellScreen.Launcher || (animeOnly && screen == ShellScreen.Anime && animeState.phase != CrossPlatformAnimePhase.Playing)) {
             Text(
@@ -566,9 +656,8 @@ private fun NativeMediaPlayer(
 
 @Composable
 private fun MediaTile(card: NativeMediaCard, focused: Boolean) {
-    val scale by animateFloatAsState(if (focused) 1.06f else 1f, tween(TVShellDesign.FocusAnimationMilliseconds))
     val thumbnail = NetworkThumbnailRequest(card.thumbnailURL)
-    Column(Modifier.fillMaxWidth().scale(scale), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(Modifier.fillMaxWidth().tvShellFocus(focused), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Box(
             Modifier.fillMaxWidth().aspectRatio(16f / 9f)
                 .tvShellSurface(TVSurfaceRole.Content, isFocused = focused, cornerRadius = 16f),
@@ -646,13 +735,8 @@ private fun Launcher(state: LauncherState, history: List<NativeMediaCard>) {
 
 @Composable
 private fun AppTile(app: ShellApp, focused: Boolean) {
-    val scale by animateFloatAsState(
-        if (focused) 1.06f else 1f,
-        tween(TVShellDesign.FocusAnimationMilliseconds),
-    )
     Column(
-        Modifier.width(222.dp).scale(scale)
-            .offset { IntOffset(0, if (focused) -10 else 0) },
+        Modifier.width(222.dp).tvShellFocus(focused),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
@@ -836,6 +920,10 @@ private fun AnimeBrowser(
     history: List<NativeMediaCard>,
     episodes: List<AnimeEpisode>,
     status: String,
+    danmaku: List<DanmakuComment>,
+    danmakuStatus: String,
+    playbackSeconds: Double,
+    danmakuSettings: DanmakuSettings,
 ) {
     val sources = animeSourcesFor(state.focusedTopTab)
     val visibleCards = if (state.focusedTopTab == AnimeTopTab.History) history else cards
@@ -860,7 +948,16 @@ private fun AnimeBrowser(
     }
     if (state.phase == CrossPlatformAnimePhase.Playing) {
         Box(Modifier.fillMaxSize()) {
-            AnimePlayerScreen(selectedCard, episodes.getOrNull(state.focusedEpisode), state, status)
+            AnimePlayerScreen(
+                selectedCard,
+                episodes.getOrNull(state.focusedEpisode),
+                state,
+                status,
+                danmaku,
+                danmakuStatus,
+                playbackSeconds,
+                danmakuSettings,
+            )
             if (state.isStreamPickerVisible) AnimeStreamPicker(state, episodes.getOrNull(state.focusedEpisode))
         }
         return
@@ -1036,9 +1133,16 @@ private fun AnimePlayerScreen(
     episode: AnimeEpisode?,
     state: CrossPlatformAnimeBrowserState,
     status: String,
+    danmaku: List<DanmakuComment>,
+    danmakuStatus: String,
+    playbackSeconds: Double,
+    danmakuSettings: DanmakuSettings,
 ) {
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         PlatformAnimeVideoSurface(Modifier.fillMaxSize())
+        if (danmakuSettings.isVisible && danmaku.isNotEmpty()) {
+            DanmakuOverlay(danmaku, playbackSeconds, danmakuSettings)
+        }
         if (state.isPlayerHUDVisible) {
             Column(
                 Modifier.align(Alignment.BottomStart).fillMaxWidth()
@@ -1058,7 +1162,7 @@ private fun AnimePlayerScreen(
             }
         }
         Text(
-            "彈幕 ON  ·  字幕：中文字幕優先",
+            "${if (danmakuSettings.isVisible) "彈幕 ON" else "彈幕 OFF"}  ·  $danmakuStatus",
             color = Color.White,
             fontSize = 19.sp,
             fontWeight = FontWeight.Bold,
@@ -1067,6 +1171,46 @@ private fun AnimePlayerScreen(
                 .padding(horizontal = 18.dp, vertical = 10.dp),
         )
     }
+}
+
+@Composable
+private fun DanmakuOverlay(
+    comments: List<DanmakuComment>,
+    currentTime: Double,
+    settings: DanmakuSettings,
+) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val viewportWidth = maxWidth.value
+        val fontSize = 30f * settings.sizeScale
+        val estimatedWidth = 420f * settings.sizeScale
+        val active = DanmakuTimeline.active(comments, currentTime, viewportWidth, estimatedWidth, settings.speedScale)
+        active.forEach { comment ->
+            val textWidth = (comment.text.length * fontSize * .9f + 44f).coerceAtLeast(120f)
+            val age = (currentTime - comment.time).coerceAtLeast(0.0)
+            val x = DanmakuMotion.horizontalOffset(age, viewportWidth, textWidth, settings.speedScale)
+            val lane = DanmakuMotion.laneIndex("${comment.time}-${comment.text}", settings.density)
+            Text(
+                comment.text,
+                color = danmakuColor(comment.colorHex).copy(alpha = settings.opacity),
+                fontSize = fontSize.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                modifier = Modifier.offset(x = x.dp, y = (52f + lane * (fontSize + 16f)).dp)
+                    .background(Color.Black.copy(alpha = .24f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+        }
+    }
+}
+
+private fun danmakuColor(value: String): Color {
+    val number = value.removePrefix("#").toIntOrNull(16) ?: 0xFFFFFF
+    return Color(
+        red = ((number shr 16) and 0xFF) / 255f,
+        green = ((number shr 8) and 0xFF) / 255f,
+        blue = (number and 0xFF) / 255f,
+        alpha = 1f,
+    )
 }
 
 @Composable
@@ -1124,9 +1268,8 @@ private fun ColumnScope.AnimeEmptyState(title: String, message: String) {
 
 @Composable
 private fun AnimeSourceTile(source: AnimeSourceDefinition, focused: Boolean) {
-    val scale by animateFloatAsState(if (focused) 1.06f else 1f, tween(TVShellDesign.FocusAnimationMilliseconds))
     Column(
-        Modifier.width(330.dp).scale(scale),
+        Modifier.width(330.dp).tvShellFocus(focused),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(

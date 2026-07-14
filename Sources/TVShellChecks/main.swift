@@ -1616,6 +1616,11 @@ struct TVShellChecks {
         let importedCookie = BilibiliCredentials(importedText: netscapeCookie)
         try expect(importedCookie.cookie.contains("SESSDATA=session-value"), "Bilibili imports Netscape browser cookie exports")
         try expect(importedCookie.isAuthenticated, "Bilibili recognizes a complete login cookie")
+        let originalSnapshot = try store.load()!
+        let importedSnapshot = originalSnapshot.importingBilibili(netscapeCookie)
+        try expect(importedSnapshot.youtube == originalSnapshot.youtube, "Bilibili login import preserves YouTube credentials")
+        try expect(importedSnapshot.dandanplay == originalSnapshot.dandanplay, "Bilibili login import preserves Dandanplay credentials")
+        try expect(importedSnapshot.bilibili.isAuthenticated, "Bilibili login import replaces only the Bilibili account")
         try expect(BilibiliCredentials(cookie: "DedeUserID=12345").authenticationIssue?.contains("SESSDATA") == true, "Bilibili explains which login cookies are missing")
         let browserExportJSON = #"{"bilibili":{"cookie":[{"name":"SESSDATA","value":"session"},{"name":"bili_jct","value":"csrf"},{"name":"DedeUserID","value":"123"}]}}"#
         let browserExport = try JSONDecoder().decode(AppCredentialsSnapshot.self, from: Data(browserExportJSON.utf8))

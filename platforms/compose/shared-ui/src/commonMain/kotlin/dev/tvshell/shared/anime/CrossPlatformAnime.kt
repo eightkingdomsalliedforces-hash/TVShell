@@ -149,6 +149,26 @@ object BilibiliAnimeParser {
             ?: "Bilibili API 錯誤 $code"
     }
 
+    fun danmaku(xml: String): List<DanmakuComment> =
+        Regex("""<d\s+p=[\"']([^\"']+)[\"'][^>]*>(.*?)</d>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+            .findAll(xml).mapNotNull { match ->
+                val fields = match.groupValues[1].split(',')
+                val time = fields.getOrNull(0)?.toDoubleOrNull() ?: return@mapNotNull null
+                val mode = when (fields.getOrNull(1)?.toIntOrNull()) {
+                    4 -> DanmakuMode.Bottom
+                    5 -> DanmakuMode.Top
+                    else -> DanmakuMode.Scroll
+                }
+                val color = fields.getOrNull(3)?.toLongOrNull() ?: 0xFFFFFF
+                val text = CSS1HtmlParser.decodeHTML(match.groupValues[2]).replace("&#x27;", "'").trim()
+                if (text.isBlank()) null else DanmakuComment(
+                    time,
+                    text,
+                    "#${color.coerceIn(0, 0xFFFFFF).toString(16).uppercase().padStart(6, '0')}",
+                    mode,
+                )
+            }.sortedBy(DanmakuComment::time).toList()
+
     private fun qualityLabel(value: Int): String = when (value) {
         127 -> "8K"
         126 -> "杜比視界"

@@ -33,6 +33,12 @@ public struct AppCredentialsSnapshot: Codable, Equatable, Sendable {
         bilibili = try container.decodeIfPresent(BilibiliCredentials.self, forKey: .bilibili)
             ?? BilibiliCredentials(cookie: "")
     }
+
+    public func importingBilibili(_ text: String) -> AppCredentialsSnapshot {
+        var snapshot = self
+        snapshot.bilibili = BilibiliCredentials(importedText: text)
+        return snapshot
+    }
 }
 
 public struct AppCredentialsStore: Sendable {
