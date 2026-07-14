@@ -33,7 +33,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -73,9 +72,15 @@ fun TVShellApp(
     var mediaState by remember { mutableStateOf(NativeMediaState(0)) }
     var mediaCards by remember { mutableStateOf(emptyList<NativeMediaCard>()) }
     var mediaStatus by remember { mutableStateOf("正在載入…") }
+    var watchHistory by remember { mutableStateOf(WatchHistoryState()) }
     var controlCenterVisible by remember { mutableStateOf(false) }
     val activeDispatcher = remember(dispatcher) { dispatcher ?: RemoteCommandDispatcher() }
     val focusRequester = remember { FocusRequester() }
+
+    fun recordWatch(card: NativeMediaCard) {
+        watchHistory = watchHistory.record(card)
+        state = state.copy(historyCount = watchHistory.entries.size)
+    }
 
     fun handle(command: RemoteCommand) {
         if (screen == ShellScreen.YouTube || screen == ShellScreen.Bilibili) {
@@ -84,7 +89,7 @@ fun TVShellApp(
             } else if (command == RemoteCommand.Select && !mediaState.isTopNavigationFocused) {
                 mediaCards.getOrNull(mediaState.focusedCard)?.let { card ->
                     mediaStatus = adapter.playMedia(card).fold(
-                        { "正在播放 ${card.title}" },
+                        { recordWatch(card); "正在播放 ${card.title}" },
                         { "播放失敗：${it.message}" },
                     )
                 }
@@ -105,7 +110,7 @@ fun TVShellApp(
                     val index = action.substringAfter(':').toIntOrNull() ?: 0
                     animeCards.getOrNull(index)?.let { card ->
                         animeStatus = adapter.playMedia(card).fold(
-                            { "正在播放 ${card.title}" },
+                            { recordWatch(card); "正在播放 ${card.title}" },
                             { "播放失敗：${it.message}" },
                         )
                     }
@@ -118,21 +123,29 @@ fun TVShellApp(
             return
         }
         when (command) {
-            RemoteCommand.Select -> state.focusedApp?.let { app ->
-                if (app.id == "anime") {
-                    screen = ShellScreen.Anime
-                    return@let
+            RemoteCommand.Select -> when (state.focus) {
+                LauncherFocus.History -> watchHistory.entries.getOrNull(state.focusedHistoryIndex)?.let { card ->
+                    state = state.copy(status = adapter.playMedia(card).fold(
+                        { "正在續播 ${card.title}" },
+                        { "播放失敗：${it.message}" },
+                    ))
                 }
-                if (app.id == "youtube") {
-                    screen = ShellScreen.YouTube
-                    return@let
+                LauncherFocus.Apps -> state.focusedApp?.let { app ->
+                    if (app.id == "anime") {
+                        screen = ShellScreen.Anime
+                        return@let
+                    }
+                    if (app.id == "youtube") {
+                        screen = ShellScreen.YouTube
+                        return@let
+                    }
+                    if (app.id == "bilibili") {
+                        screen = ShellScreen.Bilibili
+                        return@let
+                    }
+                    val result = if (app.isSystemSettings) adapter.openSystemSettings() else adapter.launch(app)
+                    state = state.copy(status = result.fold({ "正在開啟 ${app.name}" }, { "無法開啟 ${app.name}：${it.message}" }))
                 }
-                if (app.id == "bilibili") {
-                    screen = ShellScreen.Bilibili
-                    return@let
-                }
-                val result = if (app.isSystemSettings) adapter.openSystemSettings() else adapter.launch(app)
-                state = state.copy(status = result.fold({ "正在開啟 ${app.name}" }, { "無法開啟 ${app.name}：${it.message}" }))
             }
             RemoteCommand.Menu -> controlCenterVisible = !controlCenterVisible
             RemoteCommand.Home, RemoteCommand.Back -> controlCenterVisible = false
@@ -186,27 +199,24 @@ fun TVShellApp(
         )
     }
 
-    Box(
-        Modifier.fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(Color(0xFF171A20), Color(0xFF0E0F12), Color.Black)
-                )
-            )
+    TVShellBackdrop {
+        Box(
+            Modifier.fillMaxSize()
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 event.key.toRemoteCommand()?.let { handle(it); true } ?: false
             }
             .focusRequester(focusRequester)
             .focusable()
-    ) {
+        ) {
         when (screen) {
-            ShellScreen.Launcher -> Launcher(state)
+            ShellScreen.Launcher -> Launcher(state, watchHistory.entries)
             ShellScreen.Anime -> AnimeBrowser(animeState, animeCards, animeStatus)
             ShellScreen.YouTube -> NativeMediaBrowser("YouTube", listOf("推薦", "熱門", "訂閱", "搜尋"), mediaState, mediaCards, mediaStatus)
             ShellScreen.Bilibili -> NativeMediaBrowser("Bilibili", listOf("推薦", "熱門", "排行榜", "動態"), mediaState, mediaCards, mediaStatus)
         }
         if (controlCenterVisible) ControlCenter(onSettings = { adapter.openSystemSettings() })
+        }
     }
 }
 
@@ -267,9 +277,8 @@ private fun MediaTile(card: NativeMediaCard, focused: Boolean) {
     val shape = RoundedCornerShape(16.dp)
     Column(Modifier.width(300.dp).scale(scale), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Box(
-            Modifier.size(width = 300.dp, height = 169.dp).clip(shape)
-                .background(if (focused) Color(0xFFF0F1F3) else Color.White.copy(alpha = .12f))
-                .border(1.dp, Color.White.copy(alpha = if (focused) .35f else .08f), shape),
+            Modifier.size(width = 300.dp, height = 169.dp)
+                .tvShellSurface(TVSurfaceRole.Content, isFocused = focused, cornerRadius = 16f),
             contentAlignment = Alignment.Center,
         ) {
             Text("▶", color = if (focused) Color.Black else Color.White, fontSize = 40.sp, fontWeight = FontWeight.Bold)
@@ -280,20 +289,26 @@ private fun MediaTile(card: NativeMediaCard, focused: Boolean) {
 }
 
 @Composable
-private fun Launcher(state: LauncherState) {
+private fun Launcher(state: LauncherState, history: List<NativeMediaCard>) {
     val listState = rememberLazyListState()
+    val historyListState = rememberLazyListState()
     LaunchedEffect(state.focusedIndex) {
-        if (state.apps.isNotEmpty()) listState.animateScrollToItem(state.focusedIndex)
+        if (state.focus == LauncherFocus.Apps && state.apps.isNotEmpty()) listState.animateScrollToItem(state.focusedIndex)
+    }
+    LaunchedEffect(state.focusedHistoryIndex, state.focus) {
+        if (state.focus == LauncherFocus.History && history.isNotEmpty()) historyListState.animateScrollToItem(state.focusedHistoryIndex)
     }
     Column(
         Modifier.fillMaxSize().padding(horizontal = 86.dp, vertical = 48.dp),
-        verticalArrangement = Arrangement.SpaceBetween,
     ) {
-        Column {
-            Text("TVShell", color = Color.White, fontSize = 58.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(8.dp))
-            Text(state.focusedApp?.name ?: "App", color = Color.White.copy(alpha = .72f), fontSize = 25.sp)
-        }
+        Spacer(Modifier.weight(1f))
+        Text(
+            state.focusedApp?.name ?: "TVShell",
+            color = Color.White,
+            fontSize = 30.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 30.dp, bottom = 16.dp),
+        )
         LazyRow(
             state = listState,
             horizontalArrangement = Arrangement.spacedBy(42.dp),
@@ -301,10 +316,30 @@ private fun Launcher(state: LauncherState) {
             modifier = Modifier.fillMaxWidth(),
         ) {
             itemsIndexed(state.apps, key = { _, app -> app.id }) { index, app ->
-                AppTile(app, index == state.focusedIndex)
+                AppTile(app, state.focus == LauncherFocus.Apps && index == state.focusedIndex)
             }
         }
-        Text(state.status, color = Color.White.copy(alpha = .62f), fontSize = 22.sp)
+        if (history.isNotEmpty()) {
+            Text(
+                "最近觀看",
+                color = Color.White.copy(alpha = .78f),
+                fontSize = 28.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 34.dp, bottom = 16.dp),
+            )
+            LazyRow(
+                state = historyListState,
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                itemsIndexed(history, key = { _, card -> card.id }) { index, card ->
+                    MediaTile(card, state.focus == LauncherFocus.History && index == state.focusedHistoryIndex)
+                }
+            }
+        }
+        Spacer(Modifier.height(34.dp))
+        Text("方向鍵移動，OK 開啟，長按 Menu 開啟快捷設定。", color = Color.White.copy(alpha = .62f), fontSize = 22.sp)
+        Text(state.status, color = Color.White.copy(alpha = .48f), fontSize = 18.sp, modifier = Modifier.padding(top = 10.dp))
     }
 }
 
@@ -314,7 +349,6 @@ private fun AppTile(app: ShellApp, focused: Boolean) {
         if (focused) 1.06f else 1f,
         tween(TVShellDesign.FocusAnimationMilliseconds),
     )
-    val shape = RoundedCornerShape(18.dp)
     Column(
         Modifier.width(222.dp).scale(scale)
             .offset { IntOffset(0, if (focused) -10 else 0) },
@@ -322,9 +356,7 @@ private fun AppTile(app: ShellApp, focused: Boolean) {
     ) {
         Box(
             Modifier.size(width = 222.dp, height = 143.dp)
-                .clip(shape)
-                .background(if (focused) Color(0xFFF1F2F4) else Color.White.copy(alpha = .13f))
-                .border(1.dp, Color.White.copy(alpha = if (focused) .30f else .08f), shape),
+                .tvShellSurface(TVSurfaceRole.Dock, isFocused = focused, cornerRadius = 24f),
             contentAlignment = Alignment.Center,
         ) {
             Text(
@@ -399,7 +431,9 @@ private fun AnimeBrowser(state: CrossPlatformAnimeBrowserState, cards: List<Nati
 private fun ControlCenter(onSettings: () -> Unit) {
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .38f)), contentAlignment = Alignment.CenterEnd) {
         Column(
-            Modifier.width(480.dp).fillMaxSize().background(Color(0xF2181A1E)).padding(42.dp),
+            Modifier.width(480.dp).fillMaxSize()
+                .tvShellSurface(TVSurfaceRole.Panel, cornerRadius = 0f)
+                .padding(42.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             Text("控制中心", color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Bold)

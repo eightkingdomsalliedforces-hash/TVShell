@@ -5,6 +5,14 @@ import kotlin.test.assertEquals
 
 class NativeMediaTest {
     @Test
+    fun watchHistoryKeepsRecentUniquePlayableCards() {
+        val first = NativeMediaCard("first", "第一部", "頻道", "", "https://example.com/first")
+        val second = NativeMediaCard("second", "第二部", "頻道", "", "https://example.com/second")
+        val history = WatchHistoryState().record(first).record(second).record(first)
+        assertEquals(listOf("first", "second"), history.entries.map { it.id })
+    }
+
+    @Test
     fun bilibiliPopularResponseBecomesRemoteFriendlyCards() {
         val json = """{"data":{"list":[{"aid":42,"title":"葬送的芙莉蓮","pic":"//i0.hdslb.com/a.jpg","owner":{"name":"UP主"},"bvid":"BV123"}]}}"""
         val cards = NativeMediaParser.bilibili(json)

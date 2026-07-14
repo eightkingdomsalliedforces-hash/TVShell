@@ -18,10 +18,23 @@ class LauncherStateTest {
     }
 
     @Test
+    fun launcherMovesBetweenDockAndRecentHistoryLikeMacTvshell() {
+        var state = LauncherState(apps, historyCount = 2)
+        state = state.reduce(RemoteCommand.Down)
+        assertEquals(LauncherFocus.History, state.focus)
+        state = state.reduce(RemoteCommand.Right).reduce(RemoteCommand.Right).reduce(RemoteCommand.Right)
+        assertEquals(1, state.focusedHistoryIndex)
+        state = state.reduce(RemoteCommand.Up)
+        assertEquals(LauncherFocus.Apps, state.focus)
+    }
+
+    @Test
     fun designTokensMatchCanonicalMacLayout() {
         assertEquals(222f, TVShellDesign.AppTileWidth)
         assertEquals(1.55f, TVShellDesign.AppTileAspectRatio)
         assertEquals(86f, TVShellDesign.HorizontalPadding)
+        assertEquals(28f, TVShellVisual.CornerRadius)
+        assertEquals(180, TVShellVisual.FocusAnimationMilliseconds)
     }
 
     @Test

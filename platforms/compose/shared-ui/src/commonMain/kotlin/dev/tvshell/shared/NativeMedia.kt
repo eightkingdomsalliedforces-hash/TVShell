@@ -10,6 +10,14 @@ data class NativeMediaCard(
     val playbackURL: String,
 )
 
+data class WatchHistoryState(
+    val entries: List<NativeMediaCard> = emptyList(),
+) {
+    fun record(card: NativeMediaCard): WatchHistoryState = copy(
+        entries = (listOf(card) + entries.filter { it.id != card.id }).take(8),
+    )
+}
+
 data class NativeMediaState(
     val cardCount: Int,
     val focusedTab: Int = 0,

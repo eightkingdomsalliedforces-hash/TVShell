@@ -39,16 +39,29 @@ interface PlatformAdapter {
     fun exitApp(): Result<Unit> = Result.failure(UnsupportedOperationException("此平台不允許由 App 結束程序"))
 }
 
+enum class LauncherFocus { Apps, History }
+
 data class LauncherState(
     val apps: List<ShellApp>,
+    val historyCount: Int = 0,
+    val focus: LauncherFocus = LauncherFocus.Apps,
     val focusedIndex: Int = 0,
+    val focusedHistoryIndex: Int = 0,
     val status: String = "方向鍵選擇 App，OK 開啟，Menu 進入控制中心。",
 ) {
     val focusedApp: ShellApp? get() = apps.getOrNull(focusedIndex)
 
     fun reduce(command: RemoteCommand): LauncherState = when (command) {
-        RemoteCommand.Left -> copy(focusedIndex = (focusedIndex - 1).coerceAtLeast(0))
-        RemoteCommand.Right -> copy(focusedIndex = (focusedIndex + 1).coerceAtMost((apps.size - 1).coerceAtLeast(0)))
+        RemoteCommand.Left -> when (focus) {
+            LauncherFocus.Apps -> copy(focusedIndex = (focusedIndex - 1).coerceAtLeast(0))
+            LauncherFocus.History -> copy(focusedHistoryIndex = (focusedHistoryIndex - 1).coerceAtLeast(0))
+        }
+        RemoteCommand.Right -> when (focus) {
+            LauncherFocus.Apps -> copy(focusedIndex = (focusedIndex + 1).coerceAtMost((apps.size - 1).coerceAtLeast(0)))
+            LauncherFocus.History -> copy(focusedHistoryIndex = (focusedHistoryIndex + 1).coerceAtMost((historyCount - 1).coerceAtLeast(0)))
+        }
+        RemoteCommand.Down -> if (focus == LauncherFocus.Apps && historyCount > 0) copy(focus = LauncherFocus.History) else this
+        RemoteCommand.Up -> if (focus == LauncherFocus.History) copy(focus = LauncherFocus.Apps) else this
         else -> this
     }
 }
