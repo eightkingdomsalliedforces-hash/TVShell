@@ -4,8 +4,14 @@ import androidx.compose.ui.input.key.Key
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class LauncherStateTest {
+    @Test
+    fun rootDoesNotDispatchASecondCopyWhenWindowOwnsRemoteInput() {
+        assertFalse(shouldHandleRootKeyEvent(hasExternalDispatcher = true))
+        assertTrue(shouldHandleRootKeyEvent(hasExternalDispatcher = false))
+    }
     private val apps = listOf(ShellApp("a", "A"), ShellApp("b", "B"), ShellApp("c", "C"))
 
     @Test

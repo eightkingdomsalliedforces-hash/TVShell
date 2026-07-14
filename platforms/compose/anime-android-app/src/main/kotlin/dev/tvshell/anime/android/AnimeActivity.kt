@@ -5,6 +5,8 @@ import android.os.Bundle
 import android.provider.Settings
 import android.net.Uri
 import android.view.KeyEvent
+import android.content.Context
+import android.media.AudioManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import dev.tvshell.shared.PlatformAdapter
@@ -16,6 +18,12 @@ import dev.tvshell.shared.NativeMediaParser
 import dev.tvshell.shared.NativeMediaService
 import dev.tvshell.shared.TVShellApp
 import dev.tvshell.shared.BingWallpaperMetadata
+import dev.tvshell.shared.AnimeSourceKind
+import dev.tvshell.shared.anime.AndroidMediaPlayerAdapter
+import dev.tvshell.shared.anime.AnimeEpisode
+import dev.tvshell.shared.anime.AnimeStreamCandidate
+import dev.tvshell.shared.anime.BilibiliAnimeParser
+import dev.tvshell.shared.anime.CSS1HtmlParser
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -25,7 +33,8 @@ class AnimeActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { TVShellApp(AnimePlatformAdapter(this), animeOnly = true, dispatcher = remoteDispatcher) }
+        val platformAdapter = AnimePlatformAdapter(this)
+        setContent { TVShellApp(platformAdapter, animeOnly = true, dispatcher = remoteDispatcher) }
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -53,6 +62,7 @@ class AnimeActivity : ComponentActivity() {
 }
 
 private class AnimePlatformAdapter(private val activity: ComponentActivity) : PlatformAdapter {
+    private val animePlayer = AndroidMediaPlayerAdapter(activity)
     override fun installedApps(): List<ShellApp> = emptyList()
     override fun launch(app: ShellApp): Result<Unit> = Result.failure(IllegalStateException("請先在動畫 App 內設定來源"))
     override fun openSystemSettings(): Result<Unit> = runCatching {
@@ -78,6 +88,61 @@ private class AnimePlatformAdapter(private val activity: ComponentActivity) : Pl
             NativeMediaService.Bilibili -> NativeMediaParser.bilibiliBangumi(body)
         }.ifEmpty { error("來源沒有回傳可播放內容") }
     }
+    override fun fetchAnimeFeed(source: AnimeSourceKind): Result<List<NativeMediaCard>> =
+        super<PlatformAdapter>.fetchAnimeFeed(source).map { cards -> cards.map { it.copy(animeSource = source) } }
+    override fun fetchAnimeEpisodes(source: AnimeSourceKind, card: NativeMediaCard): Result<List<AnimeEpisode>> = when (source) {
+        AnimeSourceKind.Bilibili -> runCatching {
+            val seasonID = card.id.substringAfter("bilibili-season-", "").takeIf(String::isNotBlank)
+                ?: card.playbackURL.substringAfter("/ss", "").substringBefore('?').takeIf(String::isNotBlank)
+                ?: error("缺少 Bilibili season_id")
+            BilibiliAnimeParser.episodes(fetchText("https://api.bilibili.com/pgc/web/season/section?season_id=$seasonID"))
+                .ifEmpty { error("Bilibili 沒有回傳選集") }
+        }
+        AnimeSourceKind.CSS1 -> runCatching {
+            CSS1HtmlParser.episodes(fetchText(card.playbackURL), card.playbackURL)
+                .ifEmpty { error("CSS1 找不到選集") }
+        }
+        else -> super<PlatformAdapter>.fetchAnimeEpisodes(source, card)
+    }
+    override fun resolveAnimeStreams(source: AnimeSourceKind, episode: AnimeEpisode): Result<List<AnimeStreamCandidate>> = when (source) {
+        AnimeSourceKind.Bilibili -> runCatching {
+            val fields = episode.id.split(':')
+            require(fields.size >= 3) { "Bilibili 選集識別格式錯誤" }
+            val payload = fetchText("https://api.bilibili.com/pgc/player/web/playurl?ep_id=${fields[1]}&cid=${fields[2]}&qn=80&fnver=0&fnval=0&fourk=0")
+            BilibiliAnimeParser.failureReason(payload)?.let(::error)
+            BilibiliAnimeParser.streams(payload).ifEmpty { error("Bilibili 沒有可用播放網址，可能需要登入或會員權限") }
+        }
+        AnimeSourceKind.CSS1 -> runCatching {
+            CSS1HtmlParser.streams(fetchText(episode.pageURL)).map { candidate ->
+                candidate.copy(headers = candidate.headers + mapOf(
+                    "Referer" to episode.pageURL,
+                    "User-Agent" to "Mozilla/5.0 (Linux; Android TV) AppleWebKit/537.36 Chrome/125 Safari/537.36",
+                ))
+            }.ifEmpty { error("CSS1 選集頁沒有可用播放源") }
+        }
+        else -> super<PlatformAdapter>.resolveAnimeStreams(source, episode)
+    }
+    override fun loadAnimeStream(candidate: AnimeStreamCandidate): Result<Unit> = runCatching {
+        if (candidate.headers["resolver"] == "official") {
+            activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(candidate.url)))
+        } else {
+            require(candidate.url.startsWith("magnet:").not()) { "Android TV BT 邊下邊播仍需完成 torrent 引擎連接" }
+            animePlayer.load(candidate)
+            animePlayer.play()
+        }
+    }
+    override fun playAnime(): Result<Unit> = runCatching { animePlayer.play() }
+    override fun pauseAnime(): Result<Unit> = runCatching { animePlayer.pause() }
+    override fun seekAnimeBy(seconds: Int): Result<Unit> = runCatching { animePlayer.seekBy(seconds) }
+    override fun adjustAnimeVolume(direction: Int): Result<Unit> = runCatching {
+        val manager = activity.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        manager.adjustStreamVolume(
+            AudioManager.STREAM_MUSIC,
+            if (direction >= 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER,
+            AudioManager.FLAG_SHOW_UI,
+        )
+    }
+    override fun stopAnime(): Result<Unit> = runCatching { animePlayer.release() }
     override fun playMedia(card: NativeMediaCard): Result<Unit> = runCatching {
         activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(card.playbackURL)))
     }
@@ -88,5 +153,24 @@ private class AnimePlatformAdapter(private val activity: ComponentActivity) : Pl
         connection.readTimeout = 8_000
         val body = try { connection.inputStream.bufferedReader().use { it.readText() } } finally { connection.disconnect() }
         BingWallpaperMetadata.imageURL(body) ?: error("Bing 沒有回傳圖片")
+    }
+
+    private fun fetchText(url: String): String {
+        val connection = URL(url).openConnection() as HttpURLConnection
+        return try {
+            connection.connectTimeout = 8_000
+            connection.readTimeout = 8_000
+            connection.instanceFollowRedirects = true
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android TV) AppleWebKit/537.36 Chrome/125 Safari/537.36")
+            connection.setRequestProperty("Accept", "application/json,text/html,*/*")
+            connection.setRequestProperty("Accept-Language", "zh-TW,zh;q=0.9,en;q=0.7")
+            if (url.contains("bilibili.com")) connection.setRequestProperty("Referer", "https://www.bilibili.com/")
+            val status = connection.responseCode
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            require(status in 200..299 && stream != null) { "HTTP $status" }
+            stream.bufferedReader().use { it.readText() }
+        } finally {
+            connection.disconnect()
+        }
     }
 }

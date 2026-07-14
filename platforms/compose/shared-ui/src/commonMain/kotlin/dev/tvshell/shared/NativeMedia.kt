@@ -8,6 +8,7 @@ data class NativeMediaCard(
     val subtitle: String,
     val thumbnailURL: String,
     val playbackURL: String,
+    val animeSource: AnimeSourceKind? = null,
 )
 
 data class WatchHistoryState(

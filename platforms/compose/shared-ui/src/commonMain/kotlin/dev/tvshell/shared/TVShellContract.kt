@@ -1,5 +1,8 @@
 package dev.tvshell.shared
 
+import dev.tvshell.shared.anime.AnimeEpisode
+import dev.tvshell.shared.anime.AnimeStreamCandidate
+
 object TVShellDesign {
     const val ReferenceWidth = 1920f
     const val ReferenceHeight = 1080f
@@ -53,11 +56,47 @@ interface PlatformAdapter {
         AnimeSourceKind.Mikan -> Result.failure(IllegalStateException("尚未設定 Mikan RSS"))
         AnimeSourceKind.DMHY -> Result.failure(IllegalStateException("尚未設定動漫花園 RSS"))
     }
+    fun fetchAnimeEpisodes(source: AnimeSourceKind, card: NativeMediaCard): Result<List<AnimeEpisode>> = runCatching {
+        val page = card.playbackURL
+        val id = "${source.name.lowercase()}:${card.id}"
+        listOf(AnimeEpisode(id, "開始播放", 1, page))
+    }
+    fun resolveAnimeStreams(source: AnimeSourceKind, episode: AnimeEpisode): Result<List<AnimeStreamCandidate>> = runCatching {
+        val headers = when (source) {
+            AnimeSourceKind.Bilibili -> mapOf("Referer" to "https://www.bilibili.com/")
+            AnimeSourceKind.CSS1 -> mapOf("Referer" to episode.pageURL)
+            AnimeSourceKind.AniGamer, AnimeSourceKind.YouTube -> mapOf("resolver" to "official")
+            AnimeSourceKind.AniSubsBT, AnimeSourceKind.Mikan, AnimeSourceKind.DMHY -> mapOf("resolver" to "torrent")
+        }
+        listOf(AnimeStreamCandidate(episode.pageURL, officialSourceQuality(source), headers))
+    }
+    fun loadAnimeStream(candidate: AnimeStreamCandidate): Result<Unit> = playMedia(
+        NativeMediaCard(
+            id = candidate.url,
+            title = "動畫播放",
+            subtitle = candidate.quality,
+            thumbnailURL = "",
+            playbackURL = candidate.url,
+        ),
+    )
+    fun playAnime(): Result<Unit> = Result.success(Unit)
+    fun pauseAnime(): Result<Unit> = Result.success(Unit)
+    fun seekAnimeBy(seconds: Int): Result<Unit> = Result.success(Unit)
+    fun adjustAnimeVolume(direction: Int): Result<Unit> = Result.success(Unit)
+    fun stopAnime(): Result<Unit> = Result.success(Unit)
     fun playMedia(card: NativeMediaCard): Result<Unit> =
         Result.failure(UnsupportedOperationException("此平台尚未連接播放器"))
     fun fetchWallpaperURL(): Result<String> =
         Result.failure(UnsupportedOperationException("此平台尚未連接 Bing 壁紙"))
     fun exitApp(): Result<Unit> = Result.failure(UnsupportedOperationException("此平台不允許由 App 結束程序"))
+}
+
+private fun officialSourceQuality(source: AnimeSourceKind): String = when (source) {
+    AnimeSourceKind.AniGamer -> "動畫瘋官方播放器"
+    AnimeSourceKind.YouTube -> "YouTube 官方播放器"
+    AnimeSourceKind.AniSubsBT, AnimeSourceKind.Mikan, AnimeSourceKind.DMHY -> "BT / RSS"
+    AnimeSourceKind.Bilibili -> "Bilibili 官方來源"
+    AnimeSourceKind.CSS1 -> "自動"
 }
 
 enum class LauncherFocus { Apps, History }

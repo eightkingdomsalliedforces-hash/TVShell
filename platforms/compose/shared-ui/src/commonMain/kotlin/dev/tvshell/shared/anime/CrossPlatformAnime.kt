@@ -95,6 +95,85 @@ object BTRssParser {
     }.distinctBy { it.magnet }.toList()
 }
 
+object BilibiliAnimeParser {
+    private val episodeMarker = Regex("\\\"id\\\"\\s*:\\s*(\\d+)")
+
+    fun episodes(payload: String): List<AnimeEpisode> {
+        val matches = episodeMarker.findAll(payload).toList()
+        return matches.mapIndexedNotNull { index, match ->
+            val end = matches.getOrNull(index + 1)?.range?.first ?: payload.length
+            val cidStart = payload.lastIndexOf("\"cid\"", match.range.first).takeIf { it >= 0 } ?: match.range.first
+            val block = payload.substring(cidStart, end.coerceAtMost(cidStart + 8_000))
+            val episodeID = match.groupValues[1]
+            val cid = numberField(block, "cid") ?: return@mapIndexedNotNull null
+            val rawNumber = stringField(block, "title").orEmpty()
+            val number = rawNumber.toIntOrNull() ?: (index + 1)
+            val longTitle = stringField(block, "long_title").orEmpty().trim()
+            val label = buildString {
+                append("第 ").append(rawNumber.ifBlank { number.toString() }).append(" 集")
+                if (longTitle.isNotBlank()) append(" · ").append(longTitle)
+            }
+            AnimeEpisode(
+                id = "bilibili:$episodeID:$cid",
+                title = decodeJSON(label),
+                number = number,
+                pageURL = "https://www.bilibili.com/bangumi/play/ep$episodeID",
+            )
+        }.distinctBy { it.id }
+    }
+
+    fun streams(payload: String): List<AnimeStreamCandidate> {
+        val quality = numberField(payload, "quality")?.toIntOrNull() ?: 0
+        val durl = payload.substringAfter("\"durl\":", "")
+        if (durl.isBlank()) return emptyList()
+        return Regex("\\\"url\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"").findAll(durl.substringBefore("],", durl))
+            .map { match ->
+                AnimeStreamCandidate(
+                    url = decodeJSON(match.groupValues[1]),
+                    quality = qualityLabel(quality),
+                    headers = mapOf(
+                        "Referer" to "https://www.bilibili.com/",
+                        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36",
+                    ),
+                )
+            }
+            .filter { it.url.startsWith("http://") || it.url.startsWith("https://") }
+            .distinctBy { it.url }
+            .toList()
+    }
+
+    fun failureReason(payload: String): String? {
+        val code = Regex("\\\"code\\\"\\s*:\\s*(-?\\d+)").find(payload)?.groupValues?.get(1)?.toIntOrNull()
+        if (code == null || code == 0) return null
+        return stringField(payload, "message")?.let(::decodeJSON)?.takeIf(String::isNotBlank)
+            ?: "Bilibili API 錯誤 $code"
+    }
+
+    private fun qualityLabel(value: Int): String = when (value) {
+        127 -> "8K"
+        126 -> "杜比視界"
+        120 -> "4K"
+        116 -> "1080p60"
+        112 -> "1080p+"
+        80 -> "1080p"
+        64 -> "720p"
+        32 -> "480p"
+        16 -> "360p"
+        else -> if (value > 0) "清晰度 $value" else "自動"
+    }
+
+    private fun stringField(value: String, name: String): String? =
+        Regex("\\\"${Regex.escape(name)}\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"").find(value)?.groupValues?.get(1)
+
+    private fun numberField(value: String, name: String): String? =
+        Regex("\\\"${Regex.escape(name)}\\\"\\s*:\\s*(\\d+)").find(value)?.groupValues?.get(1)
+
+    private fun decodeJSON(value: String): String = value
+        .replace("\\u0026", "&")
+        .replace("\\/", "/")
+        .replace("\\\"", "\"")
+}
+
 data class SourceFailure(val reason: String, val failedAtEpochSeconds: Long)
 
 data class SourceHealthState(val failures: Map<String, SourceFailure> = emptyMap()) {

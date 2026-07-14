@@ -4,6 +4,7 @@ import dev.tvshell.shared.anime.AnimePlayerCommand
 import dev.tvshell.shared.anime.AnimePlayerState
 import dev.tvshell.shared.anime.AnimeStreamCandidate
 import dev.tvshell.shared.anime.BTRssParser
+import dev.tvshell.shared.anime.BilibiliAnimeParser
 import dev.tvshell.shared.anime.CSS1HtmlParser
 import dev.tvshell.shared.anime.SourceHealthState
 import dev.tvshell.shared.anime.TorrentCacheEntry
@@ -71,7 +72,8 @@ class CrossPlatformAnimeTest {
         state = state.loaded(cardCount = 3)
         assertEquals(CrossPlatformAnimePhase.Titles, state.phase)
         state = state.reduce(RemoteCommand.Down).reduce(RemoteCommand.Right).reduce(RemoteCommand.Select)
-        assertEquals("play:1", state.pendingAction)
+        assertEquals(CrossPlatformAnimePhase.Details, state.phase)
+        assertEquals(1, state.selectedCardIndex)
     }
 
     @Test
@@ -168,5 +170,107 @@ class CrossPlatformAnimeTest {
             .reduce(AnimePlayerCommand.ConfirmSource)
         assertEquals("1080p", player.selectedCandidate?.quality)
         assertEquals("load:https://cdn.example/1080.m3u8", player.pendingAction)
+    }
+
+    @Test
+    fun animeJourneyMatchesMacDetailsEpisodesAndPlaybackOrder() {
+        var state = CrossPlatformAnimeBrowserState(gridColumns = 4).loaded(cardCount = 8)
+            .copy(isTopNavigationFocused = false, focusedCard = 2)
+
+        state = state.reduce(RemoteCommand.Select)
+        assertEquals(CrossPlatformAnimePhase.Details, state.phase)
+        assertEquals(2, state.selectedCardIndex)
+
+        state = state.reduce(RemoteCommand.Select)
+        assertEquals(CrossPlatformAnimePhase.EpisodeLoading, state.phase)
+        assertEquals("episodes:2", state.pendingAction)
+
+        state = state.episodesLoaded(episodeCount = 12)
+        assertEquals(CrossPlatformAnimePhase.Episodes, state.phase)
+        assertEquals(0, state.focusedEpisode)
+
+        state = state.reduce(RemoteCommand.Right).reduce(RemoteCommand.Select)
+        assertEquals(CrossPlatformAnimePhase.Resolving, state.phase)
+        assertEquals("streams:1", state.pendingAction)
+    }
+
+    @Test
+    fun multipleAnimePlaybackLinesRequireTheSameExplicitPickerAsMac() {
+        val candidates = listOf(
+            AnimeStreamCandidate("https://cdn.example/master.m3u8", "自動"),
+            AnimeStreamCandidate("https://cdn.example/1080.m3u8", "1080p"),
+        )
+        var state = CrossPlatformAnimeBrowserState().loaded(1)
+            .copy(isTopNavigationFocused = false)
+            .reduce(RemoteCommand.Select)
+            .reduce(RemoteCommand.Select)
+            .episodesLoaded(1)
+            .reduce(RemoteCommand.Select)
+            .streamsLoaded(candidates)
+
+        assertEquals(CrossPlatformAnimePhase.Resolving, state.phase)
+        assertTrue(state.isStreamPickerVisible)
+        state = state.reduce(RemoteCommand.Right).reduce(RemoteCommand.Select)
+        assertEquals(CrossPlatformAnimePhase.Playing, state.phase)
+        assertEquals(1, state.selectedStreamIndex)
+        assertEquals("load:https://cdn.example/1080.m3u8", state.pendingAction)
+    }
+
+    @Test
+    fun animePlayerRemoteCommandsMatchMacHudSeekVolumeAndBack() {
+        val candidate = AnimeStreamCandidate("https://cdn.example/1080.m3u8", "1080p")
+        var state = CrossPlatformAnimeBrowserState().loaded(1)
+            .copy(isTopNavigationFocused = false)
+            .reduce(RemoteCommand.Select)
+            .reduce(RemoteCommand.Select)
+            .episodesLoaded(1)
+            .reduce(RemoteCommand.Select)
+            .streamsLoaded(listOf(candidate))
+            .clearAction()
+
+        state = state.reduce(RemoteCommand.Right)
+        assertEquals(15, state.pendingSeekSeconds)
+        assertEquals("seek:15", state.pendingAction)
+        state = state.clearAction().reduce(RemoteCommand.Up)
+        assertEquals("volume:up", state.pendingAction)
+        state = state.clearAction().reduce(RemoteCommand.PlayPause)
+        assertFalse(state.isPlaying)
+        assertEquals("pause", state.pendingAction)
+        state = state.clearAction().reduce(RemoteCommand.Back)
+        assertEquals(CrossPlatformAnimePhase.Episodes, state.phase)
+        assertEquals("stop", state.pendingAction)
+    }
+
+    @Test
+    fun bilibiliSeasonAndPlaybackResponsesBecomeEpisodesAndCombinedStreams() {
+        val episodes = BilibiliAnimeParser.episodes(
+            """{"result":{"main_section":{"episodes":[{"id":123,"title":"1","long_title":"相遇","cid":456,"bvid":"BV1ABC"},{"id":124,"title":"2","long_title":"出發","cid":457,"bvid":"BV2ABC"}]}}}""",
+        )
+        assertEquals(listOf("第 1 集 · 相遇", "第 2 集 · 出發"), episodes.map { it.title })
+        assertEquals("bilibili:123:456", episodes.first().id)
+
+        val streams = BilibiliAnimeParser.streams(
+            """{"result":{"quality":80,"accept_quality":[80,64],"durl":[{"url":"https://cdn.example/video.flv"}]}}""",
+        )
+        assertEquals(1, streams.size)
+        assertEquals("1080p", streams.single().quality)
+        assertEquals("https://www.bilibili.com/", streams.single().headers["Referer"])
+    }
+
+    @Test
+    fun bilibiliEpisodesRemainUsableWhenTheRealApiOmitsBvid() {
+        val episodes = BilibiliAnimeParser.episodes(
+            """{"result":{"main_section":{"episodes":[{"aid":1806595774,"cid":39787692307,"id":4353829,"long_title":"先行片 PILOT（中文配音）","share_url":"https://www.bilibili.com/bangumi/play/ep4353829","title":"1","vid":""}]}}}""",
+        )
+        assertEquals(1, episodes.size)
+        assertEquals("bilibili:4353829:39787692307", episodes.single().id)
+    }
+
+    @Test
+    fun bilibiliPlaybackFailureKeepsTheRealRegionReason() {
+        assertEquals(
+            "抱歉您所在地区不可观看！",
+            BilibiliAnimeParser.failureReason("""{"code":-10403,"message":"抱歉您所在地区不可观看！"}"""),
+        )
     }
 }

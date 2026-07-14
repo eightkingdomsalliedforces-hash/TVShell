@@ -40,9 +40,9 @@ The standalone Anime MSI is written under `anime-desktop/build/compose/binaries/
 
 ## 動畫播放核心
 
-`shared-ui` 共用 CSS1 選集／畫質解析、BT RSS magnet 正規化、失敗站點略過、播放器命令與自動快取淘汰規則。Android 使用系統 `MediaPlayer` 接收 CSS1 HTTP headers；Windows 使用 VLC RC 介面支援播放、暫停與前後 15 秒跳轉。
+`shared-ui` 共用作品詳情、選集、播放線選擇、播放器 HUD、CSS1 選集／畫質解析、BT RSS magnet 正規化、失敗站點略過、播放器命令與自動快取淘汰規則。Android 使用綁定 `SurfaceView` 的系統 `MediaPlayer` 顯示影片並接收 CSS1 HTTP headers；Windows 使用 VLC RC 介面支援播放、暫停與前後 15 秒跳轉。播放中上下鍵調整音量、Menu 重新開啟播放線選擇器、Back 回到選集，HUD 會在三秒後隱藏。
 
-獨立動畫 App 啟動後會載入 Bilibili 番劇排行，正版來源分頁提供動畫瘋與官方 YouTube；動畫瘋會開啟官方頁面並保留廣告、登入、年齡與地區限制。Windows 訂閱來源可用下列環境變數設定：
+獨立動畫 App 啟動後會載入 Bilibili 番劇排行，選擇作品後透過官方番劇 API 載入選集與可用的合併播放網址；登入、會員或地區限制會顯示 API 回傳的原始原因。正版來源分頁提供動畫瘋與官方 YouTube；動畫瘋會開啟官方頁面並保留廣告、登入、年齡與地區限制。Windows 訂閱來源可用下列環境變數設定：
 
 - `TVSHELL_ANISUBS_CSS1_URL`：ani-subs CSS1 首頁或訂閱入口。
 - `TVSHELL_ANISUBS_BT_URL`：ani-subs BT RSS。

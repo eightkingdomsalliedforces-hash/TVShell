@@ -3,6 +3,7 @@ package dev.tvshell.shared.anime
 import android.content.Context
 import android.media.MediaPlayer
 import android.net.Uri
+import android.view.Surface
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -26,11 +27,17 @@ class AndroidMediaPlayerAdapter(private val context: Context) : AnimePlayerAdapt
     private var player: MediaPlayer? = null
     private var isPrepared = false
     private var playWhenPrepared = false
+    private var surface: Surface? = null
+
+    init {
+        AndroidAnimePlaybackRegistry.player = this
+    }
 
     override fun load(candidate: AnimeStreamCandidate) {
         release()
         isPrepared = false
         player = MediaPlayer().apply {
+            setSurface(surface)
             setDataSource(context, Uri.parse(candidate.url), candidate.headers)
             setOnPreparedListener {
                 isPrepared = true
@@ -60,6 +67,15 @@ class AndroidMediaPlayerAdapter(private val context: Context) : AnimePlayerAdapt
         isPrepared = false
         playWhenPrepared = false
     }
+
+    fun attachSurface(value: Surface?) {
+        surface = value
+        player?.setSurface(value)
+    }
+}
+
+object AndroidAnimePlaybackRegistry {
+    var player: AndroidMediaPlayerAdapter? = null
 }
 
 class AndroidTorrentCacheCleaner(private val root: File) {
