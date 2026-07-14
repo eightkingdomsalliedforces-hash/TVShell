@@ -28,6 +28,7 @@ data class SettingsState(
     val preferences: ControlCenterState = ControlCenterState(),
     val videoSourceLabel: String = "內建示範影片",
     val credentialsSummary: String = "尚未配置",
+    val credentialsLocation: String = "credentials.json",
     val pendingAction: String? = null,
 ) {
     fun reduce(command: RemoteCommand): SettingsState = when (command) {

@@ -37,6 +37,9 @@ interface PlatformAdapter {
     fun launch(app: ShellApp): Result<Unit>
     fun openSystemSettings(): Result<Unit>
     fun openCredentialsImporter(): Result<Unit> = openSystemSettings()
+    fun credentialsLocation(): String = "credentials.json"
+    fun loadPreferences(): Result<ShellPreferences> = Result.success(ShellPreferences())
+    fun savePreferences(preferences: ShellPreferences): Result<Unit> = Result.success(Unit)
     fun fetchMediaFeed(service: NativeMediaService): Result<List<NativeMediaCard>> =
         Result.failure(UnsupportedOperationException("此平台尚未連接媒體服務"))
     fun fetchBilibiliSection(section: BilibiliSection): Result<List<NativeMediaCard>> = when (section) {
@@ -120,6 +123,7 @@ data class LauncherState(
     val focusedIndex: Int = 0,
     val focusedHistoryIndex: Int = 0,
     val status: String = "方向鍵選擇 App，OK 開啟，Menu 進入控制中心。",
+    val pendingAction: String? = null,
 ) {
     val focusedApp: ShellApp? get() = apps.getOrNull(focusedIndex)
 
@@ -134,8 +138,20 @@ data class LauncherState(
         }
         RemoteCommand.Down -> if (focus == LauncherFocus.Apps && historyCount > 0) copy(focus = LauncherFocus.History) else this
         RemoteCommand.Up -> if (focus == LauncherFocus.History) copy(focus = LauncherFocus.Apps) else this
+        RemoteCommand.Menu -> if (focus == LauncherFocus.History && historyCount > 0) {
+            copy(pendingAction = "delete-history:$focusedHistoryIndex")
+        } else this
         else -> this
     }
+
+    fun clearAction(): LauncherState = copy(pendingAction = null)
+
+    fun historyDeleted(remainingCount: Int): LauncherState = copy(
+        historyCount = remainingCount,
+        focus = if (remainingCount == 0) LauncherFocus.Apps else LauncherFocus.History,
+        focusedHistoryIndex = focusedHistoryIndex.coerceAtMost((remainingCount - 1).coerceAtLeast(0)),
+        pendingAction = null,
+    )
 }
 
 data class AnimeState(

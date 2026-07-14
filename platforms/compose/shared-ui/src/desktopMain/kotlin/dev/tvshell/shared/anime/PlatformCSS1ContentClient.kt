@@ -11,6 +11,7 @@ import org.jsoup.Jsoup
 import java.awt.FileDialog
 import java.awt.Frame
 import java.io.File
+import dev.tvshell.shared.platformTVShellDirectory
 
 class PlatformCSS1ContentClient : CSS1ContentClient {
     override suspend fun get(url: String, headers: Map<String, String>): String {
@@ -50,7 +51,7 @@ class PlatformCSS1ContentClient : CSS1ContentClient {
 fun platformSHA256Base64(value: String): String =
     Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(value.toByteArray(StandardCharsets.UTF_8)))
 
-fun platformCredentialsFile(): File = File(System.getProperty("user.home"), ".tvshell/credentials.txt")
+fun platformCredentialsFile(): File = File(platformTVShellDirectory(), "credentials.json")
 
 fun platformInstallCredentials(source: File, destination: File = platformCredentialsFile()): ServiceCredentials {
     val text = source.readText()

@@ -20,6 +20,8 @@ import dev.tvshell.shared.NativeMediaService
 import dev.tvshell.shared.TVShellApp
 import dev.tvshell.shared.BingWallpaperMetadata
 import dev.tvshell.shared.AnimeSourceKind
+import dev.tvshell.shared.ShellPreferences
+import dev.tvshell.shared.ShellPreferencesCodec
 import dev.tvshell.shared.anime.AndroidMediaPlayerAdapter
 import dev.tvshell.shared.anime.AnimeEpisode
 import dev.tvshell.shared.anime.AnimeStreamCandidate
@@ -90,6 +92,17 @@ private class AnimePlatformAdapter(
         activity.startActivity(Intent(Settings.ACTION_SETTINGS))
     }
     override fun openCredentialsImporter(): Result<Unit> = runCatching { chooseCredentials() }
+    override fun credentialsLocation(): String = credentialsFile().absolutePath
+    override fun loadPreferences(): Result<ShellPreferences> = runCatching {
+        preferencesFile().takeIf(File::isFile)?.let { ShellPreferencesCodec.decode(it.readText()) } ?: ShellPreferences()
+    }
+    override fun savePreferences(preferences: ShellPreferences): Result<Unit> = runCatching {
+        val file = preferencesFile()
+        val temporary = File(file.parentFile, "${file.name}.tmp")
+        temporary.writeText(ShellPreferencesCodec.encode(preferences))
+        if (file.exists() && !file.delete()) error("無法更新 TVShell 設定檔")
+        if (!temporary.renameTo(file)) error("無法儲存 TVShell 設定檔")
+    }
     override fun fetchMediaFeed(service: NativeMediaService): Result<List<NativeMediaCard>> = runCatching {
         val endpoint = when (service) {
             NativeMediaService.YouTube -> "https://www.youtube.com/results?search_query=%E5%AE%98%E6%96%B9%E5%8B%95%E7%95%AB&hl=zh-TW&gl=TW"
@@ -214,9 +227,12 @@ private class AnimePlatformAdapter(
         } ?: ServiceCredentials()
     }
 
+    private fun credentialsFile(): File = File(activity.filesDir, "credentials.json")
+    private fun preferencesFile(): File = File(activity.filesDir, "preferences.json")
+
     fun importCredentials(uri: Uri) {
         runCatching {
-            val destination = File(activity.filesDir, "credentials.json")
+            val destination = credentialsFile()
             activity.contentResolver.openInputStream(uri)?.use { input ->
                 destination.outputStream().use(input::copyTo)
             } ?: error("無法讀取選擇的憑證檔案")

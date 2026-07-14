@@ -76,7 +76,15 @@ fun TVShellApp(
 ) {
     val discovered = remember(appsRevision) { adapter.installedApps() }
     val builtIns = remember(animeOnly) { defaultShellApps(animeOnly) }
-    var state by remember(discovered) { mutableStateOf(LauncherState((builtIns + discovered).distinctBy { it.id })) }
+    val restoredPreferences = remember(adapter) { adapter.loadPreferences().getOrDefault(ShellPreferences()) }
+    var state by remember(discovered) {
+        mutableStateOf(
+            LauncherState(
+                (builtIns + discovered).distinctBy { it.id },
+                historyCount = restoredPreferences.history.entries.size,
+            ),
+        )
+    }
     var screen by remember { mutableStateOf<ShellRoute>(if (animeOnly) ShellRoute.Anime else ShellRoute.Launcher) }
     var animeState by remember { mutableStateOf(CrossPlatformAnimeBrowserState().loadingFirstSource()) }
     var animeCards by remember { mutableStateOf(emptyList<NativeMediaCard>()) }
@@ -88,10 +96,18 @@ fun TVShellApp(
     var mediaState by remember { mutableStateOf(NativeMediaState(0)) }
     var mediaCards by remember { mutableStateOf(emptyList<NativeMediaCard>()) }
     var mediaStatus by remember { mutableStateOf("正在載入…") }
-    var watchHistory by remember { mutableStateOf(WatchHistoryState()) }
+    var watchHistory by remember { mutableStateOf(restoredPreferences.history) }
     var controlCenterVisible by remember { mutableStateOf(false) }
-    var controlCenterState by remember { mutableStateOf(ControlCenterState()) }
-    var settingsState by remember { mutableStateOf(SettingsState()) }
+    var controlCenterState by remember { mutableStateOf(restoredPreferences.controlCenter) }
+    var animeSourceSettings by remember { mutableStateOf(restoredPreferences.animeSources) }
+    var settingsState by remember {
+        mutableStateOf(
+            SettingsState(
+                preferences = restoredPreferences.controlCenter,
+                credentialsLocation = adapter.credentialsLocation(),
+            ),
+        )
+    }
     var wallpaperURL by remember { mutableStateOf<String?>(null) }
     var clockLabel by remember { mutableStateOf(currentTVShellTimeLabel()) }
     val activeDispatcher = remember(dispatcher) { dispatcher ?: RemoteCommandDispatcher() }
@@ -101,6 +117,7 @@ fun TVShellApp(
     fun recordWatch(card: NativeMediaCard) {
         watchHistory = watchHistory.record(card)
         state = state.copy(historyCount = watchHistory.entries.size)
+        adapter.savePreferences(ShellPreferences(animeSourceSettings, watchHistory, controlCenterState))
     }
 
     fun handle(command: RemoteCommand) {
@@ -119,9 +136,10 @@ fun TVShellApp(
                 }
             }
             controlCenterState = next.clearAction()
+            adapter.savePreferences(ShellPreferences(animeSourceSettings, watchHistory, controlCenterState))
             return
         }
-        if (command == RemoteCommand.Menu && !(
+        if (command == RemoteCommand.Menu && !(screen == ShellRoute.Launcher && state.focus == LauncherFocus.History) && !(
                 screen == ShellRoute.Anime &&
                     (animeState.phase == CrossPlatformAnimePhase.Playing || animeState.isStreamPickerVisible)
                 )) {
@@ -137,6 +155,7 @@ fun TVShellApp(
             }
             controlCenterState = next.preferences
             settingsState = next.clearAction()
+            adapter.savePreferences(ShellPreferences(animeSourceSettings, watchHistory, controlCenterState))
             return
         }
         if (screen == ShellRoute.RemoteSettings || screen == ShellRoute.AnimeSources ||
@@ -247,7 +266,19 @@ fun TVShellApp(
                 controlCenterVisible = false
                 screen = if (animeOnly) ShellRoute.Anime else ShellRoute.Launcher
             }
-            else -> state = state.reduce(command)
+            else -> {
+                val next = state.reduce(command)
+                if (next.pendingAction?.startsWith("delete-history:") == true) {
+                    val index = next.pendingAction.substringAfter(':').toIntOrNull() ?: -1
+                    watchHistory.entries.getOrNull(index)?.let { entry ->
+                        watchHistory = watchHistory.delete(entry.id)
+                        adapter.savePreferences(ShellPreferences(animeSourceSettings, watchHistory, controlCenterState))
+                    }
+                    state = next.historyDeleted(watchHistory.entries.size)
+                } else {
+                    state = next
+                }
+            }
         }
     }
 
@@ -498,7 +529,7 @@ fun TVShellApp(
                 ShellRoute.Bilibili -> NativeMediaRoute("Bilibili", BilibiliSection.entries.map(BilibiliSection::title), mediaState, mediaCards, mediaStatus)
                 ShellRoute.Settings -> SettingsScreen(settingsState)
                 ShellRoute.RemoteSettings -> RemoteSettingsScreen()
-                ShellRoute.AnimeSources -> AnimeSourceManagementScreen()
+                ShellRoute.AnimeSources -> AnimeSourceManagementScreen(animeSourceSettings)
                 ShellRoute.AppManagement -> AppManagementScreen(state.apps)
                 ShellRoute.Media -> MediaLibraryScreen()
                 is ShellRoute.Browser -> BrowserScreen(visibleScreen.url)
@@ -722,12 +753,36 @@ private fun Launcher(state: LauncherState, history: List<NativeMediaCard>) {
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 itemsIndexed(history, key = { _, card -> card.id }) { index, card ->
-                    MediaTile(card, state.focus == LauncherFocus.History && index == state.focusedHistoryIndex)
+                    HistoryTile(card, state.focus == LauncherFocus.History && index == state.focusedHistoryIndex)
                 }
             }
         }
         Spacer(Modifier.height(34.dp))
         Text(state.status, color = Color.White.copy(alpha = .68f), fontSize = 22.sp)
+    }
+}
+
+@Composable
+private fun HistoryTile(card: NativeMediaCard, focused: Boolean) {
+    Column(
+        Modifier.width(340.dp).height(116.dp).tvShellFocus(focused)
+            .tvShellSurface(TVSurfaceRole.Content, isFocused = focused, cornerRadius = 14f)
+            .padding(horizontal = 22.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            card.title,
+            color = if (focused) Color.Black else Color.White,
+            fontSize = 25.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 2,
+        )
+        Text(
+            card.subtitle,
+            color = if (focused) Color.Black.copy(alpha = .58f) else Color.White.copy(alpha = .58f),
+            fontSize = 18.sp,
+            maxLines = 1,
+        )
     }
 }
 
@@ -803,13 +858,13 @@ private fun RemoteSettingsScreen() {
 }
 
 @Composable
-private fun AnimeSourceManagementScreen() {
+private fun AnimeSourceManagementScreen(settings: AnimeSourceSettings) {
     ReferenceSplitPage(
         glyph = "◆",
         title = "動漫來源",
         subtitle = "管理解析來源、啟用狀態與訂閱網址",
         rows = listOf(
-            "ani-subs CSS1" to "已啟用 · https://sub.creamycake.org/v1/css1.json",
+            "ani-subs CSS1" to "${if (settings.css1Enabled) "已啟用" else "已停用"} · ${settings.css1SubscriptionURL}",
             "動畫瘋" to "官方網站 · 保留廣告與登入",
             "YouTube" to "官方播放器",
             "Bilibili 番劇" to "官方來源與彈幕",
@@ -1016,7 +1071,7 @@ private fun settingsValue(item: SettingsItem, state: SettingsState): String = wh
     SettingsItem.DanmakuSpeed -> state.preferences.danmaku.speedLabel
     SettingsItem.DanmakuOpacity -> state.preferences.danmaku.opacityLabel
     SettingsItem.DanmakuDensity -> state.preferences.danmaku.densityLabel
-    SettingsItem.Credentials -> state.credentialsSummary
+    SettingsItem.Credentials -> "${state.credentialsSummary} · ${state.credentialsLocation}"
 }
 
 private fun settingsGlyph(item: SettingsItem): String = when (item) {

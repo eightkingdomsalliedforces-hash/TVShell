@@ -12,6 +12,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlin.math.max
 
+const val DefaultCSS1SubscriptionURL = "https://sub.creamycake.org/v1/css1.json"
+
 data class CSS1SourceConfig(
     val name: String,
     val searchURLTemplate: String,
@@ -96,8 +98,13 @@ interface CSS1ContentClient {
 
 class CSS1Resolver(
     private val client: CSS1ContentClient,
-    private val subscriptionURL: String = "https://sub.creamycake.org/v1/css1.json",
+    val subscriptionURL: String = DefaultCSS1SubscriptionURL,
 ) {
+    init {
+        require(subscriptionURL.startsWith("https://") || subscriptionURL.startsWith("http://")) {
+            "CSS1 訂閱網址必須使用 http 或 https"
+        }
+    }
     private data class EpisodeLine(
         val number: Int,
         val title: String,

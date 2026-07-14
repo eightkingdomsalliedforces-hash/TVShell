@@ -4,6 +4,7 @@ import androidx.compose.ui.input.key.Key
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class LauncherStateTest {
@@ -33,6 +34,18 @@ class LauncherStateTest {
         state = state.reduce(RemoteCommand.Right).reduce(RemoteCommand.Right).reduce(RemoteCommand.Right)
         assertEquals(1, state.focusedHistoryIndex)
         state = state.reduce(RemoteCommand.Up)
+        assertEquals(LauncherFocus.Apps, state.focus)
+    }
+
+    @Test
+    fun menuDeletesTheFocusedHistoryEntryAndRepairsFocus() {
+        var state = LauncherState(apps, historyCount = 2, focus = LauncherFocus.History, focusedHistoryIndex = 1)
+        state = state.reduce(RemoteCommand.Menu)
+        assertEquals("delete-history:1", state.pendingAction)
+        state = state.historyDeleted(remainingCount = 1)
+        assertEquals(0, state.focusedHistoryIndex)
+        assertEquals(LauncherFocus.History, state.focus)
+        state = state.historyDeleted(remainingCount = 0)
         assertEquals(LauncherFocus.Apps, state.focus)
     }
 
@@ -179,6 +192,34 @@ class LauncherStateTest {
         navigation = ShellNavigationState(ShellRoute.Browser("https://duckduckgo.com"))
             .reduce(RemoteCommand.Home)
         assertEquals(ShellRoute.Launcher, navigation.route)
+    }
+
+    @Test
+    fun composeSettingsExposeTheSameBuiltInCss1URLAsMacOS() {
+        val sources = AnimeSourceSettings()
+        assertEquals("https://sub.creamycake.org/v1/css1.json", sources.css1SubscriptionURL)
+        assertTrue(sources.css1Enabled)
+        assertEquals(sources, sources.withCSS1URL("https://example.com/custom.json").resetCSS1())
+        assertFailsWith<IllegalArgumentException> { sources.withCSS1URL("file:///tmp/css1.json") }
+    }
+
+    @Test
+    fun preferencesRoundTripHistoryAndSettingsWithoutLosingAnimeSourceConfiguration() {
+        val original = ShellPreferences(
+            animeSources = AnimeSourceSettings(css1SubscriptionURL = "https://example.com/css1.json"),
+            history = WatchHistoryState(
+                listOf(NativeMediaCard("id", "作品", "第 3 集", "https://example.com/a.jpg", "https://example.com/play")),
+            ),
+            controlCenter = ControlCenterState(displayScaleIndex = 2, wallpaperIndex = 3),
+        )
+
+        assertEquals(original, ShellPreferencesCodec.decode(ShellPreferencesCodec.encode(original)))
+    }
+
+    @Test
+    fun credentialsPageShowsTheCanonicalPlatformFileLocation() {
+        val state = SettingsState(credentialsLocation = "C:\\Users\\viewer\\AppData\\Roaming\\TVShell\\credentials.json")
+        assertTrue(state.credentialsLocation.endsWith("TVShell\\credentials.json"))
     }
 
     @Test

@@ -26,6 +26,9 @@ data class WatchHistoryState(
     fun record(card: NativeMediaCard): WatchHistoryState = copy(
         entries = (listOf(card) + entries.filter { it.id != card.id }).take(8),
     )
+
+    fun delete(id: String): WatchHistoryState = copy(entries = entries.filterNot { it.id == id })
+    fun clear(): WatchHistoryState = copy(entries = emptyList())
 }
 
 enum class NativeMediaPhase { Browser, Player }

@@ -7,6 +7,16 @@ import kotlin.test.assertTrue
 
 class NativeMediaTest {
     @Test
+    fun historyCanDeleteOneEntryOrClearEverything() {
+        val first = NativeMediaCard("first", "第一部", "第 1 集", "", "https://example.com/1")
+        val second = NativeMediaCard("second", "第二部", "第 2 集", "", "https://example.com/2")
+        val history = WatchHistoryState().record(first).record(second)
+
+        assertEquals(listOf("first"), history.delete("second").entries.map(NativeMediaCard::id))
+        assertTrue(history.clear().entries.isEmpty())
+    }
+
+    @Test
     fun bilibiliNavigationReachesAuthenticatedDynamicAndProfileTabs() {
         var state = NativeMediaState(cardCount = 0, tabCount = 5)
         repeat(4) { state = state.reduce(RemoteCommand.Right) }

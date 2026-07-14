@@ -16,6 +16,9 @@ import dev.tvshell.shared.NativeMediaService
 import dev.tvshell.shared.ShellApp
 import dev.tvshell.shared.TVShellApp
 import dev.tvshell.shared.BingWallpaperMetadata
+import dev.tvshell.shared.ShellPreferences
+import dev.tvshell.shared.platformLoadPreferences
+import dev.tvshell.shared.platformSavePreferences
 import dev.tvshell.shared.AnimeSourceKind
 import dev.tvshell.shared.RemoteCommandDispatcher
 import dev.tvshell.shared.desktopKeyToRemoteCommand
@@ -67,6 +70,9 @@ private object AnimeDesktopAdapter : PlatformAdapter {
     override fun launch(app: ShellApp): Result<Unit> = Result.failure(IllegalStateException("請先在動畫 App 內設定來源"))
     override fun openSystemSettings(): Result<Unit> = Result.success(Unit)
     override fun openCredentialsImporter(): Result<Unit> = runCatching { platformChooseAndInstallCredentials() }
+    override fun credentialsLocation(): String = platformCredentialsFile().absolutePath
+    override fun loadPreferences(): Result<ShellPreferences> = runCatching { platformLoadPreferences() }
+    override fun savePreferences(preferences: ShellPreferences): Result<Unit> = runCatching { platformSavePreferences(preferences) }
     override fun fetchMediaFeed(service: NativeMediaService): Result<List<NativeMediaCard>> = runCatching {
         val endpoint = when (service) {
             NativeMediaService.YouTube -> "https://www.youtube.com/results?search_query=%E5%AE%98%E6%96%B9%E5%8B%95%E7%95%AB&hl=zh-TW&gl=TW"

@@ -17,6 +17,9 @@ import dev.tvshell.shared.ShellApp
 import dev.tvshell.shared.TVShellApp
 import dev.tvshell.shared.BingWallpaperMetadata
 import dev.tvshell.shared.BilibiliSection
+import dev.tvshell.shared.ShellPreferences
+import dev.tvshell.shared.platformLoadPreferences
+import dev.tvshell.shared.platformSavePreferences
 import dev.tvshell.shared.anime.ServiceCredentialsParser
 import dev.tvshell.shared.anime.platformChooseAndInstallCredentials
 import dev.tvshell.shared.anime.platformCredentialsFile
@@ -41,7 +44,8 @@ fun main() = application {
             } ?: false
         },
     ) {
-        TVShellApp(WindowsPlatformAdapter(), dispatcher = remoteDispatcher)
+        val platformAdapter = remember { WindowsPlatformAdapter() }
+        TVShellApp(platformAdapter, dispatcher = remoteDispatcher)
     }
 }
 
@@ -73,6 +77,9 @@ private class WindowsPlatformAdapter : PlatformAdapter {
     override fun openCredentialsImporter(): Result<Unit> = runCatching {
         platformChooseAndInstallCredentials()
     }
+    override fun credentialsLocation(): String = platformCredentialsFile().absolutePath
+    override fun loadPreferences(): Result<ShellPreferences> = runCatching { platformLoadPreferences() }
+    override fun savePreferences(preferences: ShellPreferences): Result<Unit> = runCatching { platformSavePreferences(preferences) }
 
     override fun fetchMediaFeed(service: NativeMediaService): Result<List<NativeMediaCard>> = runCatching {
         val url = when (service) {
