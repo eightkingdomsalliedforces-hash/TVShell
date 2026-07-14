@@ -84,17 +84,23 @@ fun TVShellApp(
 
     fun handle(command: RemoteCommand) {
         if (screen == ShellScreen.YouTube || screen == ShellScreen.Bilibili) {
-            if (command == RemoteCommand.Back || command == RemoteCommand.Home) {
+            if ((command == RemoteCommand.Back || command == RemoteCommand.Home) && mediaState.phase == NativeMediaPhase.Browser) {
                 screen = ShellScreen.Launcher
-            } else if (command == RemoteCommand.Select && !mediaState.isTopNavigationFocused) {
-                mediaCards.getOrNull(mediaState.focusedCard)?.let { card ->
-                    mediaStatus = adapter.playMedia(card).fold(
+            } else {
+                val next = mediaState.reduce(command)
+                val action = next.pendingAction
+                if (action?.startsWith("play:") == true) {
+                    val index = action.substringAfter(':').toIntOrNull() ?: 0
+                    mediaCards.getOrNull(index)?.let { card ->
+                        mediaStatus = adapter.playMedia(card).fold(
                         { recordWatch(card); "正在播放 ${card.title}" },
                         { "播放失敗：${it.message}" },
                     )
+                    }
+                    mediaState = next.clearAction()
+                } else {
+                    mediaState = next
                 }
-            } else {
-                mediaState = mediaState.reduce(command)
             }
             return
         }
@@ -212,8 +218,8 @@ fun TVShellApp(
         when (screen) {
             ShellScreen.Launcher -> Launcher(state, watchHistory.entries)
             ShellScreen.Anime -> AnimeBrowser(animeState, animeCards, animeStatus)
-            ShellScreen.YouTube -> NativeMediaBrowser("YouTube", listOf("推薦", "熱門", "訂閱", "搜尋"), mediaState, mediaCards, mediaStatus)
-            ShellScreen.Bilibili -> NativeMediaBrowser("Bilibili", listOf("推薦", "熱門", "排行榜", "動態"), mediaState, mediaCards, mediaStatus)
+            ShellScreen.YouTube -> NativeMediaRoute("YouTube", listOf("推薦", "熱門", "訂閱", "搜尋"), mediaState, mediaCards, mediaStatus)
+            ShellScreen.Bilibili -> NativeMediaRoute("Bilibili", listOf("推薦", "熱門", "排行榜", "動態"), mediaState, mediaCards, mediaStatus)
         }
         if (controlCenterVisible) ControlCenter(onSettings = { adapter.openSystemSettings() })
         }
@@ -221,6 +227,21 @@ fun TVShellApp(
 }
 
 private enum class ShellScreen { Launcher, Anime, YouTube, Bilibili }
+
+@Composable
+private fun NativeMediaRoute(
+    title: String,
+    tabs: List<String>,
+    state: NativeMediaState,
+    cards: List<NativeMediaCard>,
+    status: String,
+) {
+    if (state.phase == NativeMediaPhase.Player) {
+        NativeMediaPlayer(title, cards.getOrNull(state.focusedCard), state, status)
+    } else {
+        NativeMediaBrowser(title, tabs, state, cards, status)
+    }
+}
 
 @Composable
 private fun NativeMediaBrowser(
@@ -268,6 +289,37 @@ private fun NativeMediaBrowser(
             }
         }
         Text(status, color = Color.White.copy(alpha = .62f), fontSize = 22.sp)
+    }
+}
+
+@Composable
+private fun NativeMediaPlayer(
+    service: String,
+    card: NativeMediaCard?,
+    state: NativeMediaState,
+    status: String,
+) {
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 86.dp, vertical = 48.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(service, color = Color.White.copy(alpha = .72f), fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
+        Box(
+            Modifier.fillMaxWidth().height(760.dp)
+                .tvShellSurface(TVSurfaceRole.Content, cornerRadius = 18f),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                Text(if (state.isPlaying) "▶" else "Ⅱ", color = Color.White, fontSize = 72.sp, fontWeight = FontWeight.Bold)
+                Text(card?.title ?: "正在準備播放", color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    if (state.pendingSeekSeconds == 0) status else "已跳轉 ${if (state.pendingSeekSeconds > 0) "+" else ""}${state.pendingSeekSeconds} 秒",
+                    color = Color.White.copy(alpha = .66f),
+                    fontSize = 22.sp,
+                )
+            }
+        }
+        Text("OK 暫停／播放 · 左右快轉或倒轉 15 秒 · Back 返回影片列表", color = Color.White.copy(alpha = .68f), fontSize = 22.sp)
     }
 }
 

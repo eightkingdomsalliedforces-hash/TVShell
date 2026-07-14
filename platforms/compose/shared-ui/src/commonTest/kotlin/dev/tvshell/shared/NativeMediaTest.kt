@@ -13,6 +13,18 @@ class NativeMediaTest {
     }
 
     @Test
+    fun mediaPlayerStaysInsideTvshellAndRespondsToRemoteCommands() {
+        var state = NativeMediaState(cardCount = 3)
+        state = state.reduce(RemoteCommand.Down).reduce(RemoteCommand.Select)
+        assertEquals(NativeMediaPhase.Player, state.phase)
+        assertEquals("play:0", state.pendingAction)
+        state = state.clearAction().reduce(RemoteCommand.PlayPause).reduce(RemoteCommand.FastForward)
+        assertEquals(false, state.isPlaying)
+        assertEquals(15, state.pendingSeekSeconds)
+        assertEquals(NativeMediaPhase.Browser, state.reduce(RemoteCommand.Back).phase)
+    }
+
+    @Test
     fun bilibiliPopularResponseBecomesRemoteFriendlyCards() {
         val json = """{"data":{"list":[{"aid":42,"title":"葬送的芙莉蓮","pic":"//i0.hdslb.com/a.jpg","owner":{"name":"UP主"},"bvid":"BV123"}]}}"""
         val cards = NativeMediaParser.bilibili(json)

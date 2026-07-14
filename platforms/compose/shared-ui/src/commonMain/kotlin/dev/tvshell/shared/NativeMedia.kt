@@ -18,21 +18,39 @@ data class WatchHistoryState(
     )
 }
 
+enum class NativeMediaPhase { Browser, Player }
+
 data class NativeMediaState(
     val cardCount: Int,
+    val phase: NativeMediaPhase = NativeMediaPhase.Browser,
     val focusedTab: Int = 0,
     val focusedCard: Int = 0,
     val isTopNavigationFocused: Boolean = true,
+    val isPlaying: Boolean = true,
+    val pendingSeekSeconds: Int = 0,
+    val pendingAction: String? = null,
 ) {
-    fun reduce(command: RemoteCommand): NativeMediaState = when {
-        isTopNavigationFocused && command == RemoteCommand.Left -> copy(focusedTab = (focusedTab - 1).coerceAtLeast(0))
-        isTopNavigationFocused && command == RemoteCommand.Right -> copy(focusedTab = (focusedTab + 1).coerceAtMost(3))
-        isTopNavigationFocused && command == RemoteCommand.Down && cardCount > 0 -> copy(isTopNavigationFocused = false)
-        !isTopNavigationFocused && command == RemoteCommand.Up -> copy(isTopNavigationFocused = true)
-        !isTopNavigationFocused && command == RemoteCommand.Left -> copy(focusedCard = (focusedCard - 1).coerceAtLeast(0))
-        !isTopNavigationFocused && command == RemoteCommand.Right -> copy(focusedCard = (focusedCard + 1).coerceAtMost((cardCount - 1).coerceAtLeast(0)))
-        else -> this
+    fun reduce(command: RemoteCommand): NativeMediaState = when (phase) {
+        NativeMediaPhase.Browser -> when {
+            isTopNavigationFocused && command == RemoteCommand.Left -> copy(focusedTab = (focusedTab - 1).coerceAtLeast(0))
+            isTopNavigationFocused && command == RemoteCommand.Right -> copy(focusedTab = (focusedTab + 1).coerceAtMost(3))
+            isTopNavigationFocused && command == RemoteCommand.Down && cardCount > 0 -> copy(isTopNavigationFocused = false)
+            !isTopNavigationFocused && command == RemoteCommand.Up -> copy(isTopNavigationFocused = true)
+            !isTopNavigationFocused && command == RemoteCommand.Left -> copy(focusedCard = (focusedCard - 1).coerceAtLeast(0))
+            !isTopNavigationFocused && command == RemoteCommand.Right -> copy(focusedCard = (focusedCard + 1).coerceAtMost((cardCount - 1).coerceAtLeast(0)))
+            !isTopNavigationFocused && command == RemoteCommand.Select -> copy(phase = NativeMediaPhase.Player, pendingAction = "play:$focusedCard", pendingSeekSeconds = 0, isPlaying = true)
+            else -> this
+        }
+        NativeMediaPhase.Player -> when (command) {
+            RemoteCommand.PlayPause, RemoteCommand.Select -> copy(isPlaying = !isPlaying)
+            RemoteCommand.FastForward, RemoteCommand.Right -> copy(pendingSeekSeconds = pendingSeekSeconds + 15)
+            RemoteCommand.Rewind, RemoteCommand.Left -> copy(pendingSeekSeconds = pendingSeekSeconds - 15)
+            RemoteCommand.Back, RemoteCommand.Home -> copy(phase = NativeMediaPhase.Browser, pendingSeekSeconds = 0, pendingAction = null)
+            else -> this
+        }
     }
+
+    fun clearAction() = copy(pendingAction = null)
 }
 
 object NativeMediaParser {
