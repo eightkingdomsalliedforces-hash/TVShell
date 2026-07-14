@@ -1,5 +1,13 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
+val javafxPlatform = when {
+    System.getProperty("os.name").startsWith("Windows", ignoreCase = true) -> "win"
+    System.getProperty("os.name").startsWith("Mac", ignoreCase = true) && System.getProperty("os.arch") == "aarch64" -> "mac-aarch64"
+    System.getProperty("os.name").startsWith("Mac", ignoreCase = true) -> "mac"
+    System.getProperty("os.arch") == "aarch64" -> "linux-aarch64"
+    else -> "linux"
+}
+
 plugins {
     kotlin("multiplatform")
     id("com.android.kotlin.multiplatform.library")
@@ -31,6 +39,12 @@ kotlin {
             dependencies {
                 implementation(compose.desktop.currentOs)
                 implementation("org.jsoup:jsoup:1.21.2")
+                implementation("org.openjfx:javafx-base:21.0.6:$javafxPlatform")
+                implementation("org.openjfx:javafx-graphics:21.0.6:$javafxPlatform")
+                implementation("org.openjfx:javafx-controls:21.0.6:$javafxPlatform")
+                implementation("org.openjfx:javafx-media:21.0.6:$javafxPlatform")
+                implementation("org.openjfx:javafx-web:21.0.6:$javafxPlatform")
+                implementation("org.openjfx:javafx-swing:21.0.6:$javafxPlatform")
             }
         }
         val androidMain by getting {

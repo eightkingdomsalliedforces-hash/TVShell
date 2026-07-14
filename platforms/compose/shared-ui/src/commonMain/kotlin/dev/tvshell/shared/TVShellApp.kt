@@ -96,6 +96,8 @@ fun TVShellApp(
     var mediaState by remember { mutableStateOf(NativeMediaState(0)) }
     var mediaCards by remember { mutableStateOf(emptyList<NativeMediaCard>()) }
     var mediaStatus by remember { mutableStateOf("正在載入…") }
+    var browserState by remember { mutableStateOf(WebRuntimeState("https://duckduckgo.com")) }
+    var mediaWebState by remember { mutableStateOf(WebRuntimeState("about:blank")) }
     var watchHistory by remember { mutableStateOf(restoredPreferences.history) }
     var controlCenterVisible by remember { mutableStateOf(false) }
     var controlCenterState by remember { mutableStateOf(restoredPreferences.controlCenter) }
@@ -158,8 +160,22 @@ fun TVShellApp(
             adapter.savePreferences(ShellPreferences(animeSourceSettings, watchHistory, controlCenterState))
             return
         }
+        if (screen is ShellRoute.Browser) {
+            val next = browserState.reduce(command)
+            if (next.pendingAction == "exit") screen = if (animeOnly) ShellRoute.Anime else ShellRoute.Launcher
+            browserState = next.clearAction()
+            return
+        }
+        if (screen == ShellRoute.Media) {
+            val next = mediaWebState.reduce(playerWebCommand(command))
+            if (command == RemoteCommand.Back || next.pendingAction == "exit") {
+                screen = if (animeOnly) ShellRoute.Anime else ShellRoute.Launcher
+            }
+            mediaWebState = next.clearAction()
+            return
+        }
         if (screen == ShellRoute.RemoteSettings || screen == ShellRoute.AnimeSources ||
-            screen == ShellRoute.AppManagement || screen == ShellRoute.Media || screen is ShellRoute.Browser
+            screen == ShellRoute.AppManagement
         ) {
             if (command == RemoteCommand.Back || command == RemoteCommand.Home) {
                 screen = if (animeOnly) ShellRoute.Anime else ShellRoute.Launcher
@@ -172,17 +188,19 @@ fun TVShellApp(
             } else {
                 val next = mediaState.reduce(command)
                 val action = next.pendingAction
-                if (action?.startsWith("play:") == true) {
+                if (action?.startsWith("open-internal:") == true) {
                     val index = action.substringAfter(':').toIntOrNull() ?: 0
                     mediaCards.getOrNull(index)?.let { card ->
-                        mediaStatus = adapter.playMedia(card).fold(
-                        { recordWatch(card); "正在播放 ${card.title}" },
-                        { "播放失敗：${it.message}" },
-                    )
+                        mediaWebState = WebRuntimeState(card.playbackURL)
+                        recordWatch(card)
+                        mediaStatus = "正在 TVShell 內建播放器播放 ${card.title}"
                     }
                     mediaState = next.clearAction()
                 } else {
                     mediaState = next
+                    if (mediaState.phase == NativeMediaPhase.Player) {
+                        mediaWebState = mediaWebState.reduce(playerWebCommand(command)).clearAction()
+                    }
                 }
             }
             return
@@ -256,6 +274,10 @@ fun TVShellApp(
                 LauncherFocus.Apps -> state.focusedApp?.let { app ->
                     BuiltInAppRoute.routeFor(app)?.let { route ->
                         screen = route
+                        if (route is ShellRoute.Browser) browserState = WebRuntimeState(route.url)
+                        if (route == ShellRoute.Media) {
+                            mediaWebState = WebRuntimeState("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")
+                        }
                         return@let
                     }
                     val result = if (app.isSystemSettings) adapter.openSystemSettings() else adapter.launch(app)
@@ -525,14 +547,22 @@ fun TVShellApp(
                         controlCenterState.danmaku,
                     )
                 }
-                ShellRoute.YouTube -> NativeMediaRoute("YouTube", listOf("推薦", "熱門", "訂閱", "搜尋"), mediaState, mediaCards, mediaStatus)
-                ShellRoute.Bilibili -> NativeMediaRoute("Bilibili", BilibiliSection.entries.map(BilibiliSection::title), mediaState, mediaCards, mediaStatus)
+                ShellRoute.YouTube -> NativeMediaRoute("YouTube", listOf("推薦", "熱門", "訂閱", "搜尋"), mediaState, mediaCards, mediaStatus, mediaWebState) {
+                    mediaState = mediaState.copy(phase = NativeMediaPhase.Browser)
+                }
+                ShellRoute.Bilibili -> NativeMediaRoute("Bilibili", BilibiliSection.entries.map(BilibiliSection::title), mediaState, mediaCards, mediaStatus, mediaWebState) {
+                    mediaState = mediaState.copy(phase = NativeMediaPhase.Browser)
+                }
                 ShellRoute.Settings -> SettingsScreen(settingsState)
                 ShellRoute.RemoteSettings -> RemoteSettingsScreen()
                 ShellRoute.AnimeSources -> AnimeSourceManagementScreen(animeSourceSettings)
                 ShellRoute.AppManagement -> AppManagementScreen(state.apps)
-                ShellRoute.Media -> MediaLibraryScreen()
-                is ShellRoute.Browser -> BrowserScreen(visibleScreen.url)
+                ShellRoute.Media -> MediaLibraryScreen(mediaWebState) {
+                    screen = if (animeOnly) ShellRoute.Anime else ShellRoute.Launcher
+                }
+                is ShellRoute.Browser -> BrowserScreen(browserState) {
+                    screen = if (animeOnly) ShellRoute.Anime else ShellRoute.Launcher
+                }
             }
         }
         if (screen == ShellRoute.Launcher || (animeOnly && screen == ShellRoute.Anime && animeState.phase != CrossPlatformAnimePhase.Playing)) {
@@ -550,6 +580,15 @@ fun TVShellApp(
         if (controlCenterVisible) ControlCenter(controlCenterState)
         }
     }
+}
+
+private fun playerWebCommand(command: RemoteCommand): RemoteCommand = when (command) {
+    RemoteCommand.Select -> RemoteCommand.PlayPause
+    RemoteCommand.Left -> RemoteCommand.Rewind
+    RemoteCommand.Right -> RemoteCommand.FastForward
+    RemoteCommand.Up -> RemoteCommand.VolumeUp
+    RemoteCommand.Down -> RemoteCommand.VolumeDown
+    else -> command
 }
 
 internal fun shouldHandleRootKeyEvent(hasExternalDispatcher: Boolean): Boolean = !hasExternalDispatcher
@@ -578,9 +617,11 @@ private fun NativeMediaRoute(
     state: NativeMediaState,
     cards: List<NativeMediaCard>,
     status: String,
+    webState: WebRuntimeState,
+    onExitPlayer: () -> Unit,
 ) {
     if (state.phase == NativeMediaPhase.Player) {
-        NativeMediaPlayer(title, cards.getOrNull(state.focusedCard), state, status)
+        NativeMediaPlayer(title, cards.getOrNull(state.focusedCard), state, status, webState, onExitPlayer)
     } else {
         NativeMediaBrowser(title, tabs, state, cards, status)
     }
@@ -658,6 +699,8 @@ private fun NativeMediaPlayer(
     card: NativeMediaCard?,
     state: NativeMediaState,
     status: String,
+    webState: WebRuntimeState,
+    onExitPlayer: () -> Unit,
 ) {
     Column(
         Modifier.fillMaxSize().padding(horizontal = 86.dp, vertical = 48.dp),
@@ -669,15 +712,19 @@ private fun NativeMediaPlayer(
                 .tvShellSurface(TVSurfaceRole.Content, cornerRadius = 18f),
             contentAlignment = Alignment.Center,
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                Text(if (state.isPlaying) "▶" else "Ⅱ", color = Color.White, fontSize = 72.sp, fontWeight = FontWeight.Bold)
-                Text(card?.title ?: "正在準備播放", color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    if (state.pendingSeekSeconds == 0) status else "已跳轉 ${if (state.pendingSeekSeconds > 0) "+" else ""}${state.pendingSeekSeconds} 秒",
-                    color = Color.White.copy(alpha = .66f),
-                    fontSize = 22.sp,
-                )
-            }
+            PlatformWebSurface(
+                url = card?.playbackURL ?: webState.url,
+                signal = webState.signal,
+                onExitRequested = onExitPlayer,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Text(
+                if (state.pendingSeekSeconds == 0) status else "已跳轉 ${if (state.pendingSeekSeconds > 0) "+" else ""}${state.pendingSeekSeconds} 秒",
+                color = Color.White,
+                fontSize = 18.sp,
+                modifier = Modifier.align(Alignment.TopStart).padding(18.dp)
+                    .background(Color.Black.copy(alpha = .56f), RoundedCornerShape(10.dp)).padding(horizontal = 14.dp, vertical = 8.dp),
+            )
         }
         Text("OK 暫停／播放 · 左右快轉或倒轉 15 秒 · Back 返回影片列表", color = Color.White.copy(alpha = .68f), fontSize = 22.sp)
     }
@@ -888,34 +935,34 @@ private fun AppManagementScreen(apps: List<ShellApp>) {
 }
 
 @Composable
-private fun MediaLibraryScreen() {
-    ReferenceSplitPage(
-        glyph = "▤",
-        title = "影片",
-        subtitle = "TVShell 內建播放器",
-        rows = listOf(
-            "示範影片" to "Big Buck Bunny · 內建播放器",
-            "開啟網路影片" to "HTTP、HTTPS、HLS",
-            "播放控制" to "OK 暫停，左右快轉，上下音量",
-        ),
-        hint = "選取影片後會留在 TVShell 內建播放器，不會跳出到系統瀏覽器。",
-    )
+private fun MediaLibraryScreen(state: WebRuntimeState, onExitRequested: () -> Unit) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 86.dp, vertical = 48.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        Text("影片", color = Color.White, fontSize = 48.sp, fontWeight = FontWeight.Bold)
+        Text("TVShell 內建播放器 · Big Buck Bunny", color = Color.White.copy(alpha = .58f), fontSize = 21.sp)
+        PlatformWebSurface(
+            url = state.url,
+            signal = state.signal,
+            onExitRequested = onExitRequested,
+            modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(18.dp)),
+        )
+        Text("OK 暫停／播放，左右快轉，上下調整音量，Back 返回。", color = Color.White.copy(alpha = .62f), fontSize = 22.sp)
+    }
 }
 
 @Composable
-private fun BrowserScreen(url: String) {
+private fun BrowserScreen(state: WebRuntimeState, onExitRequested: () -> Unit) {
     Column(
         Modifier.fillMaxSize().padding(horizontal = 86.dp, vertical = 48.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp),
     ) {
         Text("瀏覽器", color = Color.White, fontSize = 48.sp, fontWeight = FontWeight.Bold)
-        Text(url, color = Color.White.copy(alpha = .58f), fontSize = 21.sp, maxLines = 1)
-        Box(
-            Modifier.fillMaxWidth().weight(1f).tvShellSurface(TVSurfaceRole.Content, cornerRadius = 18f),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("正在啟動 TVShell 內建瀏覽器…", color = Color.White.copy(alpha = .72f), fontSize = 28.sp)
-        }
+        Text(state.url, color = Color.White.copy(alpha = .58f), fontSize = 21.sp, maxLines = 1)
+        PlatformWebSurface(
+            url = state.url,
+            signal = state.signal,
+            onExitRequested = onExitRequested,
+            modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(18.dp)),
+        )
         Text("方向鍵捲動，OK 選取，Back 返回。", color = Color.White.copy(alpha = .62f), fontSize = 22.sp)
     }
 }

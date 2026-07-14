@@ -53,11 +53,27 @@ class NativeMediaTest {
         var state = NativeMediaState(cardCount = 3)
         state = state.reduce(RemoteCommand.Down).reduce(RemoteCommand.Select)
         assertEquals(NativeMediaPhase.Player, state.phase)
-        assertEquals("play:0", state.pendingAction)
+        assertEquals("open-internal:0", state.pendingAction)
         state = state.clearAction().reduce(RemoteCommand.PlayPause).reduce(RemoteCommand.FastForward)
         assertEquals(false, state.isPlaying)
         assertEquals(15, state.pendingSeekSeconds)
         assertEquals(NativeMediaPhase.Browser, state.reduce(RemoteCommand.Back).phase)
+    }
+
+    @Test
+    fun embeddedWebRuntimeOwnsRemoteCommandsAndOnlyHomeForcesShellExit() {
+        var state = WebRuntimeState("https://duckduckgo.com")
+        state = state.reduce(RemoteCommand.Down)
+        assertEquals(WebRuntimeCommand.ScrollDown, state.signal.command)
+        state = state.reduce(RemoteCommand.Select)
+        assertEquals(WebRuntimeCommand.Select, state.signal.command)
+        state = state.reduce(RemoteCommand.PlayPause)
+        assertEquals(WebRuntimeCommand.PlayPause, state.signal.command)
+        state = state.reduce(RemoteCommand.Back)
+        assertEquals(WebRuntimeCommand.Back, state.signal.command)
+        assertEquals(null, state.pendingAction)
+        state = state.reduce(RemoteCommand.Home)
+        assertEquals("exit", state.pendingAction)
     }
 
     @Test
