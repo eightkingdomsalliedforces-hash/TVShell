@@ -128,12 +128,58 @@ object TorrentCachePolicy {
     }
 }
 
-enum class AnimePlayerCommand { PlayPause, Rewind, FastForward }
+enum class AnimePlayerCommand {
+    PlayPause,
+    Rewind,
+    FastForward,
+    OpenSourcePicker,
+    PreviousSource,
+    NextSource,
+    ConfirmSource,
+    Back,
+}
 
-data class AnimePlayerState(val isPlaying: Boolean = false, val pendingSeekSeconds: Int = 0) {
+data class AnimePlayerState(
+    val isPlaying: Boolean = false,
+    val pendingSeekSeconds: Int = 0,
+    val candidates: List<AnimeStreamCandidate> = emptyList(),
+    val selectedCandidateIndex: Int = 0,
+    val focusedCandidateIndex: Int = 0,
+    val isSourcePickerVisible: Boolean = false,
+    val pendingAction: String? = null,
+) {
+    val selectedCandidate: AnimeStreamCandidate? get() = candidates.getOrNull(selectedCandidateIndex)
+
+    fun loaded(master: AnimeStreamCandidate, alternatives: List<AnimeStreamCandidate>): AnimePlayerState = copy(
+        candidates = (listOf(master) + alternatives).distinctBy { it.url },
+        selectedCandidateIndex = 0,
+        focusedCandidateIndex = 0,
+        pendingAction = null,
+    )
+
     fun reduce(command: AnimePlayerCommand): AnimePlayerState = when (command) {
         AnimePlayerCommand.PlayPause -> copy(isPlaying = !isPlaying, pendingSeekSeconds = 0)
         AnimePlayerCommand.Rewind -> copy(pendingSeekSeconds = -15)
         AnimePlayerCommand.FastForward -> copy(pendingSeekSeconds = 15)
+        AnimePlayerCommand.OpenSourcePicker -> copy(
+            isSourcePickerVisible = candidates.isNotEmpty(),
+            focusedCandidateIndex = selectedCandidateIndex,
+            pendingAction = null,
+        )
+        AnimePlayerCommand.PreviousSource -> if (isSourcePickerVisible) copy(
+            focusedCandidateIndex = (focusedCandidateIndex - 1).coerceAtLeast(0),
+        ) else this
+        AnimePlayerCommand.NextSource -> if (isSourcePickerVisible) copy(
+            focusedCandidateIndex = (focusedCandidateIndex + 1).coerceAtMost((candidates.size - 1).coerceAtLeast(0)),
+        ) else this
+        AnimePlayerCommand.ConfirmSource -> if (isSourcePickerVisible && candidates.isNotEmpty()) copy(
+            selectedCandidateIndex = focusedCandidateIndex,
+            isSourcePickerVisible = false,
+            pendingAction = "load:${candidates[focusedCandidateIndex].url}",
+        ) else this
+        AnimePlayerCommand.Back -> if (isSourcePickerVisible) copy(isSourcePickerVisible = false, pendingAction = null)
+        else copy(pendingAction = "exit")
     }
+
+    fun clearAction(): AnimePlayerState = copy(pendingAction = null)
 }

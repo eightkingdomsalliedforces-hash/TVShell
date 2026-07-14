@@ -634,17 +634,20 @@ private fun settingsGlyph(item: SettingsItem): String = when (item) {
 @Composable
 private fun AnimeBrowser(state: CrossPlatformAnimeBrowserState, cards: List<NativeMediaCard>, status: String) {
     val sources = listOf("官方 YouTube 動畫", "Bilibili 動畫")
-    val listState = rememberLazyListState()
+    val sourceListState = rememberLazyListState()
+    val titleGridState = rememberLazyGridState()
     LaunchedEffect(state.focusedSource, state.focusedCard, state.phase) {
-        val target = if (state.phase == CrossPlatformAnimePhase.Titles) state.focusedCard else state.focusedSource
-        if (target >= 0) listState.animateScrollToItem(target)
+        if (state.phase == CrossPlatformAnimePhase.Titles && cards.isNotEmpty()) {
+            titleGridState.animateScrollToItem(state.focusedCard)
+        } else if (sources.isNotEmpty()) {
+            sourceListState.animateScrollToItem(state.focusedSource)
+        }
     }
     Column(
         Modifier.fillMaxSize().padding(horizontal = 86.dp, vertical = 48.dp),
-        verticalArrangement = Arrangement.SpaceBetween,
+        verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(22.dp)) {
-            Text("動畫", color = Color.White, fontSize = 58.sp, fontWeight = FontWeight.Bold)
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             Row(
                 Modifier.clip(RoundedCornerShape(32.dp)).background(Color.Black.copy(alpha = .55f)).padding(6.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -665,23 +668,36 @@ private fun AnimeBrowser(state: CrossPlatformAnimeBrowserState, cards: List<Nati
                 }
             }
         }
-        LazyRow(
-            state = listState,
-            horizontalArrangement = Arrangement.spacedBy(42.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            if (state.phase == CrossPlatformAnimePhase.Titles) {
-                itemsIndexed(cards, key = { _, card -> card.id }) { index, card ->
-                    MediaTile(card, index == state.focusedCard)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("動畫", color = Color.White, fontSize = 48.sp, fontWeight = FontWeight.Bold)
+            Text(status, color = Color.White.copy(alpha = .58f), fontSize = 21.sp, maxLines = 1)
+        }
+        if (state.phase == CrossPlatformAnimePhase.Titles) {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(state.gridColumns),
+                state = titleGridState,
+                horizontalArrangement = Arrangement.spacedBy(28.dp),
+                verticalArrangement = Arrangement.spacedBy(32.dp),
+                modifier = Modifier.fillMaxWidth().weight(1f),
+            ) {
+                gridItemsIndexed(cards, key = { _, card -> card.id }) { index, card ->
+                    MediaTile(card, !state.isTopNavigationFocused && index == state.focusedCard)
                 }
-            } else {
+            }
+        } else {
+            LazyRow(
+                state = sourceListState,
+                horizontalArrangement = Arrangement.spacedBy(42.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().weight(1f),
+            ) {
                 itemsIndexed(sources, key = { _, title -> title }) { index, title ->
                     AppTile(ShellApp("anime-source:$title", title, "可播放正版內容"), !state.isTopNavigationFocused && index == state.focusedSource)
                 }
             }
         }
         Text(
-            status,
+            "方向鍵選作品，OK 開啟，Menu 開啟控制中心，Back 返回。",
             color = Color.White.copy(alpha = .62f),
             fontSize = 22.sp,
         )

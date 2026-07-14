@@ -12,6 +12,7 @@ enum class AnimeTopTab(val title: String) {
 
 data class CrossPlatformAnimeBrowserState(
     val sourceCount: Int,
+    val gridColumns: Int = 4,
     val phase: CrossPlatformAnimePhase = CrossPlatformAnimePhase.Sources,
     val focusedTopTab: AnimeTopTab = AnimeTopTab.Recommended,
     val focusedSource: Int = 0,
@@ -36,11 +37,17 @@ data class CrossPlatformAnimeBrowserState(
             RemoteCommand.Back, RemoteCommand.Home -> backToSources()
             else -> this
         }
-        CrossPlatformAnimePhase.Titles -> when (command) {
-            RemoteCommand.Left -> copy(focusedCard = (focusedCard - 1).coerceAtLeast(0))
-            RemoteCommand.Right -> copy(focusedCard = (focusedCard + 1).coerceAtMost((cardCount - 1).coerceAtLeast(0)))
-            RemoteCommand.Select -> copy(pendingAction = "play:$focusedCard")
-            RemoteCommand.Back -> backToSources()
+        CrossPlatformAnimePhase.Titles -> when {
+            isTopNavigationFocused && command == RemoteCommand.Left -> copy(focusedTopTab = AnimeTopTab.entries[(focusedTopTab.ordinal - 1).coerceAtLeast(0)])
+            isTopNavigationFocused && command == RemoteCommand.Right -> copy(focusedTopTab = AnimeTopTab.entries[(focusedTopTab.ordinal + 1).coerceAtMost(AnimeTopTab.entries.lastIndex)])
+            isTopNavigationFocused && command == RemoteCommand.Down && cardCount > 0 -> copy(isTopNavigationFocused = false)
+            !isTopNavigationFocused && command == RemoteCommand.Up && focusedCard < gridColumns -> copy(isTopNavigationFocused = true)
+            !isTopNavigationFocused && command == RemoteCommand.Up -> copy(focusedCard = (focusedCard - gridColumns).coerceAtLeast(0))
+            !isTopNavigationFocused && command == RemoteCommand.Down -> copy(focusedCard = (focusedCard + gridColumns).coerceAtMost((cardCount - 1).coerceAtLeast(0)))
+            !isTopNavigationFocused && command == RemoteCommand.Left -> copy(focusedCard = (focusedCard - 1).coerceAtLeast(0))
+            !isTopNavigationFocused && command == RemoteCommand.Right -> copy(focusedCard = (focusedCard + 1).coerceAtMost((cardCount - 1).coerceAtLeast(0)))
+            !isTopNavigationFocused && command == RemoteCommand.Select -> copy(pendingAction = "play:$focusedCard")
+            command == RemoteCommand.Back -> backToSources()
             else -> this
         }
     }

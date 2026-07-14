@@ -2,6 +2,7 @@ package dev.tvshell.shared
 
 import dev.tvshell.shared.anime.AnimePlayerCommand
 import dev.tvshell.shared.anime.AnimePlayerState
+import dev.tvshell.shared.anime.AnimeStreamCandidate
 import dev.tvshell.shared.anime.BTRssParser
 import dev.tvshell.shared.anime.CSS1HtmlParser
 import dev.tvshell.shared.anime.SourceHealthState
@@ -44,6 +45,17 @@ class CrossPlatformAnimeTest {
         assertEquals(CrossPlatformAnimePhase.Sources, state.phase)
         val root = CrossPlatformAnimeBrowserState(sourceCount = 2).reduce(RemoteCommand.Back)
         assertEquals("exit", root.pendingAction)
+    }
+
+    @Test
+    fun animeTitleGridMovesLikeTheMacBrowser() {
+        var state = CrossPlatformAnimeBrowserState(sourceCount = 2, gridColumns = 4).loaded(cardCount = 9)
+        state = state.reduce(RemoteCommand.Down)
+        assertEquals(4, state.focusedCard)
+        state = state.reduce(RemoteCommand.Right).reduce(RemoteCommand.Up)
+        assertEquals(1, state.focusedCard)
+        state = state.reduce(RemoteCommand.Up)
+        assertTrue(state.isTopNavigationFocused)
     }
     @Test
     fun css1FiltersMetadataAndRanksPlayableQuality() {
@@ -100,5 +112,22 @@ class CrossPlatformAnimeTest {
         player = player.reduce(AnimePlayerCommand.FastForward)
         assertTrue(player.isPlaying)
         assertEquals(15, player.pendingSeekSeconds)
+    }
+
+    @Test
+    fun animeEpisodeKeepsMasterStreamAndQualityAlternatives() {
+        val master = AnimeStreamCandidate("https://cdn.example/master.m3u8", "自動")
+        val variants = listOf(
+            AnimeStreamCandidate("https://cdn.example/1080.m3u8", "1080p"),
+            AnimeStreamCandidate("https://cdn.example/720.m3u8", "720p"),
+        )
+        var player = AnimePlayerState().loaded(master, variants)
+        assertEquals(master.url, player.selectedCandidate?.url)
+        assertEquals(3, player.candidates.size)
+        player = player.reduce(AnimePlayerCommand.OpenSourcePicker)
+            .reduce(AnimePlayerCommand.NextSource)
+            .reduce(AnimePlayerCommand.ConfirmSource)
+        assertEquals("1080p", player.selectedCandidate?.quality)
+        assertEquals("load:https://cdn.example/1080.m3u8", player.pendingAction)
     }
 }
