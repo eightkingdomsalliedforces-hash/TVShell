@@ -361,14 +361,20 @@ private fun Launcher(state: LauncherState, history: List<NativeMediaCard>) {
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(start = 30.dp, bottom = 16.dp),
         )
-        LazyRow(
-            state = listState,
-            horizontalArrangement = Arrangement.spacedBy(42.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth(),
+        Box(
+            Modifier.fillMaxWidth()
+                .tvShellSurface(TVSurfaceRole.Dock, cornerRadius = TVShellVisual.CornerRadius)
+                .padding(horizontal = TVShellVisual.DockInset.dp, vertical = 26.dp),
         ) {
-            itemsIndexed(state.apps, key = { _, app -> app.id }) { index, app ->
-                AppTile(app, state.focus == LauncherFocus.Apps && index == state.focusedIndex)
+            LazyRow(
+                state = listState,
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                itemsIndexed(state.apps, key = { _, app -> app.id }) { index, app ->
+                    AppTile(app, state.focus == LauncherFocus.Apps && index == state.focusedIndex)
+                }
             }
         }
         if (history.isNotEmpty()) {
@@ -411,16 +417,32 @@ private fun AppTile(app: ShellApp, focused: Boolean) {
                 .tvShellSurface(TVSurfaceRole.Dock, isFocused = focused, cornerRadius = 24f),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                app.name.take(2),
-                color = if (focused) Color(0xFF17181B) else Color.White,
-                fontSize = 34.sp,
-                fontWeight = FontWeight.Bold,
-            )
+            Box(
+                Modifier.size(width = 166.dp, height = 102.dp)
+                    .clip(RoundedCornerShape(TVShellVisual.AppIconCornerRadius.dp))
+                    .background(appAccent(app)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(appGlyph(app), color = Color.White, fontSize = 42.sp, fontWeight = FontWeight.Bold)
+            }
         }
         Spacer(Modifier.height(14.dp))
         Text(app.name, color = Color.White, fontSize = 25.sp, maxLines = 1)
     }
+}
+
+private fun appGlyph(app: ShellApp): String = when (app.id) {
+    "youtube" -> "▶"
+    "bilibili" -> "b"
+    "anime" -> "動"
+    else -> app.name.take(2)
+}
+
+private fun appAccent(app: ShellApp): Color = when (app.id) {
+    "youtube" -> Color(0xFFD92128)
+    "bilibili" -> Color(0xFFEE5486)
+    "anime" -> Color(0xFF6A43B8)
+    else -> Color(0xFF3A3E48)
 }
 
 @Composable

@@ -12,12 +12,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 object TVShellVisual {
     const val CornerRadius = 28f
+    const val DockInset = 34f
+    const val AppIconCornerRadius = 18f
     const val FocusAnimationMilliseconds = TVShellDesign.FocusAnimationMilliseconds
     val BackdropTop = Color(0xFF23252C)
     val BackdropBottom = Color(0xFF090A0D)
@@ -60,4 +63,5 @@ fun Modifier.tvShellSurface(
     return clip(shape)
         .background(color)
         .border(1.dp, Color.White.copy(alpha = if (isFocused) .46f else .12f), shape)
+        .shadow(if (isFocused) 20.dp else 8.dp, shape, clip = false)
 }

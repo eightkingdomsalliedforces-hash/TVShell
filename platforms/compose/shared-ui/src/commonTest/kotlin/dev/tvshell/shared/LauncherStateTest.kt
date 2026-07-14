@@ -35,6 +35,8 @@ class LauncherStateTest {
         assertEquals(86f, TVShellDesign.HorizontalPadding)
         assertEquals(28f, TVShellVisual.CornerRadius)
         assertEquals(180, TVShellVisual.FocusAnimationMilliseconds)
+        assertEquals(34f, TVShellVisual.DockInset)
+        assertEquals(18f, TVShellVisual.AppIconCornerRadius)
     }
 
     @Test
