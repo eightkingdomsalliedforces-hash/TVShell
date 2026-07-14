@@ -32,11 +32,16 @@ object TVShellVisual {
 enum class TVSurfaceRole { Dock, Panel, Content, Alert }
 
 @Composable
-fun TVShellBackdrop(content: @Composable BoxScope.() -> Unit) {
+fun TVShellBackdrop(wallpaperURL: String? = null, content: @Composable BoxScope.() -> Unit) {
     androidx.compose.foundation.layout.Box(
         Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(TVShellVisual.BackdropTop, TVShellVisual.BackdropBottom))),
-        content = content,
-    )
+    ) {
+        if (wallpaperURL != null) {
+            NetworkThumbnail(NetworkThumbnailRequest(wallpaperURL), "Bing 每日圖片", Modifier.fillMaxSize())
+            androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .28f)))
+        }
+        content()
+    }
 }
 
 @Composable

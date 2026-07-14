@@ -15,6 +15,7 @@ import dev.tvshell.shared.NativeMediaCard
 import dev.tvshell.shared.NativeMediaParser
 import dev.tvshell.shared.NativeMediaService
 import dev.tvshell.shared.TVShellApp
+import dev.tvshell.shared.BingWallpaperMetadata
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -76,4 +77,11 @@ private class AnimePlatformAdapter(private val activity: ComponentActivity) : Pl
         activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(card.playbackURL)))
     }
     override fun exitApp(): Result<Unit> = runCatching { activity.finish() }
+    override fun fetchWallpaperURL(): Result<String> = runCatching {
+        val connection = URL("https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=zh-TW").openConnection() as HttpURLConnection
+        connection.connectTimeout = 8_000
+        connection.readTimeout = 8_000
+        val body = try { connection.inputStream.bufferedReader().use { it.readText() } } finally { connection.disconnect() }
+        BingWallpaperMetadata.imageURL(body) ?: error("Bing 沒有回傳圖片")
+    }
 }

@@ -1,5 +1,10 @@
 package dev.tvshell.desktop
 
+import androidx.compose.runtime.remember
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.rememberWindowState
@@ -10,18 +15,29 @@ import dev.tvshell.shared.NativeMediaParser
 import dev.tvshell.shared.NativeMediaService
 import dev.tvshell.shared.ShellApp
 import dev.tvshell.shared.TVShellApp
+import dev.tvshell.shared.BingWallpaperMetadata
+import dev.tvshell.shared.RemoteCommandDispatcher
+import dev.tvshell.shared.desktopKeyToRemoteCommand
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
 
 fun main() = application {
+    val remoteDispatcher = remember { RemoteCommandDispatcher() }
     Window(
         onCloseRequest = ::exitApplication,
         title = "TVShell",
         undecorated = true,
-        state = rememberWindowState(placement = WindowPlacement.Fullscreen),
+        state = rememberWindowState(placement = WindowPlacement.Maximized),
+        onPreviewKeyEvent = { event ->
+            if (event.type != KeyEventType.KeyDown) false
+            else desktopKeyToRemoteCommand(event.key, event.isShiftPressed)?.let {
+                remoteDispatcher.dispatch(it)
+                true
+            } ?: false
+        },
     ) {
-        TVShellApp(WindowsPlatformAdapter())
+        TVShellApp(WindowsPlatformAdapter(), dispatcher = remoteDispatcher)
     }
 }
 
@@ -64,6 +80,11 @@ private class WindowsPlatformAdapter : PlatformAdapter {
 
     override fun playMedia(card: NativeMediaCard): Result<Unit> = runCatching {
         ProcessBuilder("cmd", "/c", "start", "", card.playbackURL).start()
+    }
+
+    override fun fetchWallpaperURL(): Result<String> = runCatching {
+        BingWallpaperMetadata.imageURL(fetchText("https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=zh-TW"))
+            ?: error("Bing 沒有回傳圖片")
     }
 
     private fun fetchText(url: String): String {

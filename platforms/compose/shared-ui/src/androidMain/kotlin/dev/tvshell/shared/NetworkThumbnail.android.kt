@@ -15,6 +15,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Calendar
+import java.util.Date
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -49,3 +51,15 @@ private fun loadAndroidThumbnail(url: String): Bitmap? = runCatching {
         connection.disconnect()
     }
 }.getOrNull()
+
+actual fun currentTVShellTimeLabel(): String {
+    val now = Calendar.getInstance().apply { time = Date() }
+    val weekday = listOf("週日", "週一", "週二", "週三", "週四", "週五", "週六")[now.get(Calendar.DAY_OF_WEEK) - 1]
+    return "%d月%d日 %s %02d:%02d".format(
+        now.get(Calendar.MONTH) + 1,
+        now.get(Calendar.DAY_OF_MONTH),
+        weekday,
+        now.get(Calendar.HOUR_OF_DAY),
+        now.get(Calendar.MINUTE),
+    )
+}

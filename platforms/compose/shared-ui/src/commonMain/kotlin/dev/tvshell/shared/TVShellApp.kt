@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.focus.FocusRequester
@@ -52,6 +53,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 @Composable
@@ -62,14 +64,7 @@ fun TVShellApp(
     dispatcher: RemoteCommandDispatcher? = null,
 ) {
     val discovered = remember(appsRevision) { adapter.installedApps() }
-    val builtIns = remember {
-        if (animeOnly) listOf(ShellApp("anime", "動畫", "正版來源 · 訂閱 · 搜尋"))
-        else listOf(
-            ShellApp("youtube", "YouTube", "官方影片"),
-            ShellApp("bilibili", "Bilibili", "影片 · 動態 · 我的"),
-            ShellApp("anime", "動畫", "正版來源 · 訂閱 · 搜尋"),
-        )
-    }
+    val builtIns = remember(animeOnly) { defaultShellApps(animeOnly) }
     var state by remember(discovered) { mutableStateOf(LauncherState((builtIns + discovered).distinctBy { it.id })) }
     var screen by remember { mutableStateOf(if (animeOnly) ShellScreen.Anime else ShellScreen.Launcher) }
     var animeState by remember { mutableStateOf(CrossPlatformAnimeBrowserState(sourceCount = 2)) }
@@ -82,6 +77,8 @@ fun TVShellApp(
     var controlCenterVisible by remember { mutableStateOf(false) }
     var controlCenterState by remember { mutableStateOf(ControlCenterState()) }
     var settingsState by remember { mutableStateOf(SettingsState()) }
+    var wallpaperURL by remember { mutableStateOf<String?>(null) }
+    var clockLabel by remember { mutableStateOf(currentTVShellTimeLabel()) }
     val activeDispatcher = remember(dispatcher) { dispatcher ?: RemoteCommandDispatcher() }
     val focusRequester = remember { FocusRequester() }
 
@@ -189,6 +186,14 @@ fun TVShellApp(
                         screen = ShellScreen.Bilibili
                         return@let
                     }
+                    if (app.id == "settings" || app.id == "remote" || app.id == "management") {
+                        screen = ShellScreen.Settings
+                        return@let
+                    }
+                    if (app.id == "anime-sources") {
+                        screen = ShellScreen.Anime
+                        return@let
+                    }
                     val result = if (app.isSystemSettings) adapter.openSystemSettings() else adapter.launch(app)
                     state = state.copy(status = result.fold({ "正在開啟 ${app.name}" }, { "無法開啟 ${app.name}：${it.message}" }))
                 }
@@ -204,6 +209,15 @@ fun TVShellApp(
     }
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
+    }
+    LaunchedEffect(Unit) {
+        wallpaperURL = withContext(Dispatchers.Default) { adapter.fetchWallpaperURL().getOrNull() }
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            clockLabel = currentTVShellTimeLabel()
+            delay(30_000)
+        }
     }
     LaunchedEffect(screen) {
         val service = when (screen) {
@@ -244,12 +258,12 @@ fun TVShellApp(
         )
     }
 
-    TVShellBackdrop {
+    TVShellBackdrop(wallpaperURL) {
         Box(
             Modifier.fillMaxSize()
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                event.key.toRemoteCommand()?.let { handle(it); true } ?: false
+                desktopKeyToRemoteCommand(event.key, event.isShiftPressed)?.let { handle(it); true } ?: false
             }
             .focusRequester(focusRequester)
             .focusable()
@@ -261,9 +275,38 @@ fun TVShellApp(
             ShellScreen.Bilibili -> NativeMediaRoute("Bilibili", listOf("推薦", "熱門", "排行榜", "動態"), mediaState, mediaCards, mediaStatus)
             ShellScreen.Settings -> SettingsScreen(settingsState)
         }
+        if (screen == ShellScreen.Launcher) {
+            Text(
+                clockLabel,
+                color = Color.White,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.TopEnd)
+                    .padding(top = 26.dp, end = 32.dp)
+                    .tvShellSurface(TVSurfaceRole.Panel, cornerRadius = 28f)
+                    .padding(horizontal = 22.dp, vertical = 10.dp),
+            )
+        }
         if (controlCenterVisible) ControlCenter(controlCenterState)
         }
     }
+}
+
+internal fun defaultShellApps(animeOnly: Boolean): List<ShellApp> = if (animeOnly) {
+    listOf(ShellApp("anime", "動畫", "正版來源 · 訂閱 · 搜尋"))
+} else {
+    listOf(
+        ShellApp("youtube", "YouTube", "官方影片"),
+        ShellApp("bilibili", "Bilibili", "影片 · 動態 · 我的"),
+        ShellApp("apple", "Apple", "Apple 官方網站", executable = "https://www.apple.com"),
+        ShellApp("browser", "瀏覽器", "網頁瀏覽", executable = "https://duckduckgo.com"),
+        ShellApp("video", "影片", "本機與網路影片"),
+        ShellApp("anime", "動畫", "正版來源 · 訂閱 · 搜尋"),
+        ShellApp("anime-sources", "動漫來源", "管理動畫來源"),
+        ShellApp("remote", "遙控器", "按鍵與遙控器設定"),
+        ShellApp("settings", "設定", "系統、播放與服務設定"),
+        ShellApp("management", "管理", "安裝與管理 App"),
+    )
 }
 
 private enum class ShellScreen { Launcher, Anime, YouTube, Bilibili, Settings }
@@ -457,8 +500,7 @@ private fun Launcher(state: LauncherState, history: List<NativeMediaCard>) {
             }
         }
         Spacer(Modifier.height(34.dp))
-        Text("方向鍵移動，OK 開啟，長按 Menu 開啟快捷設定。", color = Color.White.copy(alpha = .62f), fontSize = 22.sp)
-        Text(state.status, color = Color.White.copy(alpha = .48f), fontSize = 18.sp, modifier = Modifier.padding(top = 10.dp))
+        Text(state.status, color = Color.White.copy(alpha = .68f), fontSize = 22.sp)
     }
 }
 
@@ -475,27 +517,37 @@ private fun AppTile(app: ShellApp, focused: Boolean) {
     ) {
         Box(
             Modifier.size(width = 222.dp, height = 143.dp)
-                .tvShellSurface(TVSurfaceRole.Dock, isFocused = focused, cornerRadius = 24f),
+                .clip(RoundedCornerShape(TVShellVisual.AppIconCornerRadius.dp))
+                .background(appAccent(app))
+                .border(
+                    width = if (focused) 3.dp else 1.dp,
+                    color = Color.White.copy(alpha = if (focused) .72f else .10f),
+                    shape = RoundedCornerShape(TVShellVisual.AppIconCornerRadius.dp),
+                ),
             contentAlignment = Alignment.Center,
         ) {
-            Box(
-                Modifier.size(width = 166.dp, height = 102.dp)
-                    .clip(RoundedCornerShape(TVShellVisual.AppIconCornerRadius.dp))
-                    .background(appAccent(app)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(appGlyph(app), color = Color.White, fontSize = 42.sp, fontWeight = FontWeight.Bold)
-            }
+            Text(appGlyph(app), color = Color.White, fontSize = 42.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(14.dp))
-        Text(app.name, color = Color.White, fontSize = 25.sp, maxLines = 1)
+        Text(
+            app.name,
+            color = Color.White.copy(alpha = if (focused) 1f else 0f),
+            fontSize = 25.sp,
+            maxLines = 1,
+        )
     }
 }
 
 private fun appGlyph(app: ShellApp): String = when (app.id) {
     "youtube" -> "▶"
     "bilibili" -> "b"
-    "anime" -> "動"
+    "anime" -> "✦"
+    "apple", "browser" -> "◉"
+    "video" -> "▤"
+    "anime-sources" -> "◆"
+    "remote" -> "⌁"
+    "settings" -> "⚙"
+    "management" -> "☷"
     else -> app.name.take(2)
 }
 
@@ -503,6 +555,8 @@ private fun appAccent(app: ShellApp): Color = when (app.id) {
     "youtube" -> Color(0xFFD92128)
     "bilibili" -> Color(0xFFEE5486)
     "anime" -> Color(0xFF6A43B8)
+    "video" -> Color(0xFF1F75C9)
+    "anime-sources" -> Color(0xFF168983)
     else -> Color(0xFF3A3E48)
 }
 
@@ -813,7 +867,13 @@ private fun controlCenterGlyph(item: ControlCenterItem): String = when (item) {
     ControlCenterItem.DanmakuDensity -> "≡"
 }
 
-private fun Key.toRemoteCommand(): RemoteCommand? = when (this) {
+fun desktopKeyToRemoteCommand(key: Key, isShiftPressed: Boolean): RemoteCommand? = when {
+    key == Key.F10 && isShiftPressed -> RemoteCommand.Menu
+    key == Key.F10 -> RemoteCommand.Menu
+    else -> key.toBaseRemoteCommand()
+}
+
+private fun Key.toBaseRemoteCommand(): RemoteCommand? = when (this) {
     Key.DirectionUp -> RemoteCommand.Up
     Key.DirectionDown -> RemoteCommand.Down
     Key.DirectionLeft -> RemoteCommand.Left

@@ -1066,6 +1066,15 @@ struct TVShellChecks {
         let windowsAnime = try String(contentsOfFile: "platforms/compose/anime-desktop/src/main/kotlin/dev/tvshell/anime/desktop/Main.kt")
         try expect(windowsShell.contains("java.net.http") == false && windowsAnime.contains("java.net.http") == false, "Windows packages avoid the optional java.net.http module at runtime")
         try expect(windowsShell.contains("HttpURLConnection") && windowsAnime.contains("HttpURLConnection"), "Windows feeds use the Java base-runtime HTTP implementation")
+        try expect(windowsShell.contains("WindowPlacement.Maximized") && windowsAnime.contains("WindowPlacement.Maximized"), "Compose desktop shells start maximized so the TV layout uses the full display")
+        try expect(
+            windowsShell.contains("onPreviewKeyEvent") && windowsAnime.contains("onPreviewKeyEvent") &&
+                windowsShell.contains("RemoteCommandDispatcher") && windowsAnime.contains("RemoteCommandDispatcher"),
+            "Compose desktop windows capture remote keys before child focus handling"
+        )
+
+        let packageManifest = try String(contentsOfFile: "Package.swift")
+        try expect(packageManifest.contains(#".executable(name: "TVShell", targets: ["TVShell"])"#), "the production macOS app remains the native Swift TVShell executable")
 
         let launcherState = AppState(apps: SeedApps.defaultApps)
         let visibleApps = launcherState.apps.filter(\.isVisibleOnHome)

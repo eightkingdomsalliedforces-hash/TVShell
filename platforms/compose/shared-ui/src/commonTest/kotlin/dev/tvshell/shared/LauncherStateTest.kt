@@ -1,5 +1,6 @@
 package dev.tvshell.shared
 
+import androidx.compose.ui.input.key.Key
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -74,6 +75,13 @@ class LauncherStateTest {
     }
 
     @Test
+    fun windowsMenuSupportsApplicationKeyAndF10() {
+        assertEquals(RemoteCommand.Menu, desktopKeyToRemoteCommand(Key.Menu, isShiftPressed = false))
+        assertEquals(RemoteCommand.Menu, desktopKeyToRemoteCommand(Key.F10, isShiftPressed = false))
+        assertEquals(RemoteCommand.Menu, desktopKeyToRemoteCommand(Key.F10, isShiftPressed = true))
+    }
+
+    @Test
     fun controlCenterMatchesMacFocusAndImmediateAdjustments() {
         var state = ControlCenterState()
         state = state.reduce(RemoteCommand.Down)
@@ -115,5 +123,28 @@ class LauncherStateTest {
         assertEquals(0.82f, state.preferences.danmaku.opacity)
         state = state.reduce(RemoteCommand.Back)
         assertEquals("exit", state.pendingAction)
+    }
+
+    @Test
+    fun bingWallpaperMetadataResolvesTheFullImageURL() {
+        val payload = """{"images":[{"url":"/th?id=OHR.TVShellTest_1920x1080.jpg"}]}"""
+        assertEquals(
+            "https://www.bing.com/th?id=OHR.TVShellTest_1920x1080.jpg",
+            BingWallpaperMetadata.imageURL(payload),
+        )
+    }
+
+    @Test
+    fun launcherShipsTheSameCoreAppsAsNativeMacOS() {
+        assertEquals(
+            listOf("YouTube", "Bilibili", "Apple", "瀏覽器", "影片", "動畫", "動漫來源", "遙控器", "設定", "管理"),
+            defaultShellApps(animeOnly = false).map(ShellApp::name),
+        )
+        assertEquals(listOf("動畫"), defaultShellApps(animeOnly = true).map(ShellApp::name))
+    }
+
+    @Test
+    fun statusClockUsesTraditionalChineseWeekday() {
+        assertEquals(true, currentTVShellTimeLabel().contains("週"))
     }
 }
