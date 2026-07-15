@@ -1,8 +1,13 @@
 package dev.tvshell.shared
 
 import dev.tvshell.shared.anime.AnimeEpisode
+import dev.tvshell.shared.anime.AnimePlaybackSnapshot
 import dev.tvshell.shared.anime.AnimeStreamCandidate
 import dev.tvshell.shared.anime.DanmakuComment
+import dev.tvshell.shared.anime.TorrentCachedDownload
+import dev.tvshell.shared.anime.TorrentPlayableStream
+import dev.tvshell.shared.anime.TorrentStartRequest
+import dev.tvshell.shared.anime.TorrentTransferSnapshot
 
 object TVShellDesign {
     const val ReferenceWidth = 1920f
@@ -22,6 +27,11 @@ enum class RemoteCommand {
     Up, Down, Left, Right, Select, Back, Home, Menu,
     PlayPause, Rewind, FastForward, VolumeUp, VolumeDown, Mute
 }
+
+data class ExternalMagnetRequest(
+    val sequence: Long,
+    val magnet: String,
+)
 
 data class ShellApp(
     val id: String,
@@ -90,11 +100,21 @@ interface PlatformAdapter {
             playbackURL = candidate.url,
         ),
     )
+    fun startAnimeTorrent(request: TorrentStartRequest): Result<Long> =
+        Result.failure(UnsupportedOperationException("此平台尚未連接 BT 邊下邊播引擎"))
+    fun animeTorrentSnapshot(): TorrentTransferSnapshot = TorrentTransferSnapshot()
+    fun consumeAnimeTorrentPlayableStream(generation: Long): TorrentPlayableStream? = null
+    fun cancelAnimeTorrentAutoplay(generation: Long) = Unit
+    fun animeTorrentDownloads(): Result<List<TorrentCachedDownload>> = Result.success(emptyList())
+    fun deleteAnimeTorrentDownload(id: String): Result<Unit> =
+        Result.failure(UnsupportedOperationException("此平台尚未連接 BT 快取管理"))
     fun playAnime(): Result<Unit> = Result.success(Unit)
     fun pauseAnime(): Result<Unit> = Result.success(Unit)
     fun seekAnimeBy(seconds: Int): Result<Unit> = Result.success(Unit)
     fun adjustAnimeVolume(direction: Int): Result<Unit> = Result.success(Unit)
+    fun muteAnime(): Result<Unit> = Result.success(Unit)
     fun stopAnime(): Result<Unit> = Result.success(Unit)
+    fun animePlaybackSnapshot(): AnimePlaybackSnapshot = AnimePlaybackSnapshot()
     fun fetchAnimeDanmaku(
         source: AnimeSourceKind,
         card: NativeMediaCard,
@@ -105,6 +125,7 @@ interface PlatformAdapter {
     fun fetchWallpaperURL(): Result<String> =
         Result.failure(UnsupportedOperationException("此平台尚未連接 Bing 壁紙"))
     fun exitApp(): Result<Unit> = Result.failure(UnsupportedOperationException("此平台不允許由 App 結束程序"))
+    fun close() = Unit
 }
 
 private fun officialSourceQuality(source: AnimeSourceKind): String = when (source) {

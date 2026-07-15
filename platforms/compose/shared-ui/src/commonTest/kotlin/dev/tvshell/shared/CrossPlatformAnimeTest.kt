@@ -3,6 +3,8 @@ package dev.tvshell.shared
 import dev.tvshell.shared.anime.AnimePlayerCommand
 import dev.tvshell.shared.anime.AnimePlayerState
 import dev.tvshell.shared.anime.AnimeStreamCandidate
+import dev.tvshell.shared.anime.AniSubsBTSearch
+import dev.tvshell.shared.anime.AniSubsBTSubscriptionParser
 import dev.tvshell.shared.anime.BTRssParser
 import dev.tvshell.shared.anime.BilibiliAnimeParser
 import dev.tvshell.shared.anime.BangumiMetadataParser
@@ -20,13 +22,166 @@ import dev.tvshell.shared.anime.ServiceCredentialsParser
 import dev.tvshell.shared.anime.SourceHealthState
 import dev.tvshell.shared.anime.TorrentCacheEntry
 import dev.tvshell.shared.anime.TorrentCachePolicy
+import dev.tvshell.shared.anime.TorrentByteRange
+import dev.tvshell.shared.anime.TorrentCachedDownload
+import dev.tvshell.shared.anime.TorrentDownloadManagerState
+import dev.tvshell.shared.anime.TorrentFileCandidate
+import dev.tvshell.shared.anime.TorrentFileSelector
+import dev.tvshell.shared.anime.TorrentIdentity
+import dev.tvshell.shared.anime.MagnetLink
+import dev.tvshell.shared.anime.MagnetHistoryReplay
+import dev.tvshell.shared.anime.TorrentReadinessPolicy
+import dev.tvshell.shared.anime.TorrentTransferPhase
+import dev.tvshell.shared.anime.TorrentTransferSnapshot
+import dev.tvshell.shared.anime.TorrentPlaybackUiState
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 
 class CrossPlatformAnimeTest {
+    @Test
+    fun aniSubsBtSubscriptionKeepsOnlyRssSearchTemplates() {
+        val payload = """
+            {"exportedMediaSourceDataList":{"mediaSources":[
+              {"factoryId":"rss","arguments":{"name":"Nyaa","searchConfig":{"searchUrl":"https://nyaa.example/rss?q={keyword}"}}},
+              {"factoryId":"web","arguments":{"name":"Skip","searchConfig":{"searchUrl":"https://skip/{keyword}"}}},
+              {"factoryId":"rss","arguments":{"name":"Broken","searchConfig":{"searchUrl":"https://broken/no-placeholder"}}}
+            ]}}
+        """.trimIndent()
+
+        val sources = AniSubsBTSubscriptionParser.sources(payload)
+        assertEquals(listOf("Nyaa"), sources.map { it.name })
+        assertTrue(sources.single().searchURLTemplate.contains("{keyword}"))
+
+        val releaseTitle = "[字幕組] 葬送的芙莉蓮 - 01 [1080p][HEVC]"
+        val candidate = dev.tvshell.shared.anime.AniSubsBTSearch.candidates(
+            sourceName = "AnimeGarden",
+            rssPayload = """<rss><channel><item><title>$releaseTitle</title><link>magnet:?xt=urn:btih:ABC</link></item></channel></rss>""",
+            episodeNumber = 1,
+        ).single()
+        assertEquals(releaseTitle, candidate.headers["title"])
+        assertEquals("AnimeGarden", candidate.headers["channel"])
+
+        val gardenURL = AniSubsBTSearch.queryURL(
+            "https://garden.example/feed.xml?filter=[{\"type\":\"动画\",\"search\":[\"{keyword}\"]}]",
+            "葬送的芙莉蓮 S2",
+        )
+        assertFalse(gardenURL.any { it in " []{}\"" })
+        assertTrue(gardenURL.contains("%E5%8A%A8%E7%94%BB"))
+        assertTrue(gardenURL.contains("%E8%91%AC%E9%80%81%E7%9A%84"))
+    }
+
+    @Test
+    fun torrentIdentityAndEpisodeSelectionAreStableAcrossSeasonPacks() {
+        val hexMagnet = "magnet:?xt=urn:btih:0000000000000000000000000000000000000000&dn=Example&tr=udp://one"
+        val reorderedMagnet = "magnet:?tr=udp://two&dn=Renamed&xt=urn%3Abtih%3A0000000000000000000000000000000000000000"
+        val base32Magnet = "magnet:?xt=urn:btih:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        assertEquals(TorrentIdentity.stableID(hexMagnet), TorrentIdentity.stableID(reorderedMagnet))
+        assertEquals(TorrentIdentity.stableID(hexMagnet), TorrentIdentity.stableID(base32Magnet))
+        assertEquals(40, TorrentIdentity.stableID(hexMagnet).length)
+
+        val hybridV1 = "1111111111111111111111111111111111111111"
+        val hybridV2 = "1220" + "22".repeat(32)
+        val hybridFirstV1 = "magnet:?xt=urn:btih:$hybridV1&xt=urn:btmh:$hybridV2&dn=Hybrid"
+        val hybridFirstV2 = "magnet:?xt=urn:btmh:$hybridV2&xt=urn:btih:$hybridV1&dn=Hybrid"
+        assertEquals(TorrentIdentity.stableID(hybridFirstV1), TorrentIdentity.stableID(hybridFirstV2))
+        assertEquals("22".repeat(32), TorrentIdentity.stableID(hybridFirstV1))
+
+        val files = listOf(
+            TorrentFileCandidate(0, "Show/[Group] Show - 01 [1080p].mkv", 900_000_000),
+            TorrentFileCandidate(1, "Show/[Group] Show - 10 [1080p].mkv", 910_000_000),
+            TorrentFileCandidate(2, "Show/Show EP12.mp4", 920_000_000),
+            TorrentFileCandidate(3, "Show/Sample 01.mkv", 50_000_000),
+            TorrentFileCandidate(4, "Show/poster.jpg", 4_000_000),
+        )
+
+        assertEquals(0, TorrentFileSelector.select(files, 1)?.index)
+        assertEquals(1, TorrentFileSelector.select(files, 10)?.index)
+        assertEquals(2, TorrentFileSelector.select(files, 12)?.index)
+        assertTrue(TorrentFileSelector.isPlayable("episode.M2TS"))
+        assertFalse(TorrentFileSelector.isPlayable("poster.jpg"))
+
+        val incompleteSeason = files.filter { it.index in 0..1 }
+        assertEquals(null, TorrentFileSelector.select(incompleteSeason, 3))
+        val sampleFirst = listOf(
+            TorrentFileCandidate(0, "Show/[Sample].mkv", 2_000_000_000),
+            TorrentFileCandidate(1, "Show/Movie.mkv", 1_000_000_000),
+        )
+        assertEquals(1, TorrentFileSelector.select(sampleFirst, null)?.index)
+    }
+
+    @Test
+    fun torrentReadinessRequiresContiguousHeadAndTailVerifiedRanges() {
+        val mib = 1024L * 1024L
+        val size = 800L * mib
+        val onlyHead = listOf(TorrentByteRange(0, 48 * mib))
+        val headAndTail = onlyHead + TorrentByteRange(size - 8 * mib, size)
+
+        assertFalse(TorrentReadinessPolicy.isReady(size, onlyHead))
+        assertTrue(TorrentReadinessPolicy.isReady(size, headAndTail))
+        assertTrue(TorrentReadinessPolicy.isReady(10 * mib, listOf(TorrentByteRange(0, 10 * mib))))
+    }
+
+    @Test
+    fun torrentSnapshotFormatsRealProgressAndRejectsAnOldGeneration() {
+        val current = TorrentTransferSnapshot(
+            generation = 7,
+            taskID = "current",
+            magnet = "magnet:?xt=urn:btih:ABC",
+            phase = TorrentTransferPhase.Downloading,
+            selectedPath = "Show EP01.mkv",
+            selectedBytes = 64L * 1024 * 1024,
+            selectedSize = 800L * 1024 * 1024,
+            totalBytes = 70L * 1024 * 1024,
+            downloadRateBytesPerSecond = 3L * 1024 * 1024,
+            peers = 18,
+            completedPieces = 256,
+            totalPieces = 3_200,
+            etaSeconds = 240,
+        )
+        val stale = current.copy(generation = 6, selectedBytes = 1)
+        val ui = TorrentPlaybackUiState(activeGeneration = 7).accept(current).accept(stale)
+
+        assertEquals(64L * 1024 * 1024, ui.snapshot.selectedBytes)
+        assertTrue(current.statusText.contains("64 MB"))
+        assertTrue(current.detailText.contains("3.0 MB/s"))
+        assertTrue(current.detailText.contains("Peer 18"))
+        assertEquals(0.08f, current.progressFraction)
+    }
+
+    @Test
+    fun torrentCacheProtectsActiveIDsAndDownloadManagerFollowsRemoteFocus() {
+        val entries = listOf(
+            TorrentCacheEntry("active", bytes = 800, lastAccessEpochSeconds = 1),
+            TorrentCacheEntry("old", bytes = 700, lastAccessEpochSeconds = 2),
+            TorrentCacheEntry("new", bytes = 600, lastAccessEpochSeconds = 100),
+        )
+        assertEquals(
+            listOf("old"),
+            TorrentCachePolicy.idsToDelete(
+                entries,
+                maxBytes = 1_500,
+                nowEpochSeconds = 120,
+                expirationSeconds = 1_000,
+                protectedIDs = setOf("active"),
+            ),
+        )
+
+        val downloads = entries.map { TorrentCachedDownload(it.id, it.id, "1080p", it.bytes, it.lastAccessEpochSeconds) }
+        var manager = TorrentDownloadManagerState().opened(downloads)
+        manager = manager.reduce(RemoteCommand.Down).reduce(RemoteCommand.Down).reduce(RemoteCommand.Down)
+        assertEquals(2, manager.focusedIndex)
+        manager = manager.reduce(RemoteCommand.Select)
+        assertEquals("delete:new", manager.pendingAction)
+        manager = manager.deleted("new")
+        assertEquals(1, manager.focusedIndex)
+        assertEquals(listOf("active", "old"), manager.items.map { it.id })
+        assertFalse(manager.reduce(RemoteCommand.Back).isVisible)
+    }
+
     @Test
     fun bangumiMetadataKeepsChineseJapaneseAliasesAndEpisodeCount() {
         val subjects = BangumiMetadataParser.subjects(
@@ -267,6 +422,32 @@ class CrossPlatformAnimeTest {
         state = state.reduce(RemoteCommand.Up)
         assertTrue(state.isTopNavigationFocused)
     }
+
+    @Test
+    fun titleEpisodeAndHistoryGridsUseTheSameColumnCountsAsMac() {
+        var titles = CrossPlatformAnimeBrowserState(
+            gridColumns = 8,
+            episodeGridColumns = 7,
+            historyGridColumns = 4,
+        ).loaded(cardCount = 20).copy(isTopNavigationFocused = false)
+        titles = titles.reduce(RemoteCommand.Down)
+        assertEquals(8, titles.focusedCard)
+
+        var episodes = titles.copy(phase = CrossPlatformAnimePhase.Details)
+            .reduce(RemoteCommand.Select)
+            .episodesLoaded(20)
+            .reduce(RemoteCommand.Down)
+        assertEquals(7, episodes.focusedEpisode)
+
+        var history = CrossPlatformAnimeBrowserState(
+            gridColumns = 8,
+            episodeGridColumns = 7,
+            historyGridColumns = 4,
+            focusedTopTab = AnimeTopTab.History,
+        ).loaded(cardCount = 12).copy(isTopNavigationFocused = false)
+        history = history.reduce(RemoteCommand.Down)
+        assertEquals(4, history.focusedCard)
+    }
     @Test
     fun css1FiltersMetadataAndRanksPlayableQuality() {
         val episodes = CSS1HtmlParser.episodes(
@@ -301,6 +482,12 @@ class CrossPlatformAnimeTest {
         )
         assertEquals(1, items.first().episode)
         assertTrue(items.first().magnet.startsWith("magnet:?xt=urn:btih:ABC123"))
+
+        val elementMagnet = BTRssParser.items(
+            """<rss><channel><item><title>[Group] Show [12] [1080p]</title><magneturi>magnet:?xt=urn:btih:DEF456&amp;dn=Show</magneturi></item></channel></rss>""",
+        ).single()
+        assertEquals(12, elementMagnet.episode)
+        assertTrue(elementMagnet.magnet.contains("DEF456"))
 
         var health = SourceHealthState()
         health = health.recordFailure("broken.example", "timeout")
@@ -386,6 +573,184 @@ class CrossPlatformAnimeTest {
     }
 
     @Test
+    fun magnetWaitsForTheEmbeddedEngineBeforeTheInternalPlayerLoads() {
+        val magnet = AnimeStreamCandidate(
+            "magnet:?xt=urn:btih:SEASON",
+            "BT / RSS",
+            mapOf("resolver" to "torrent"),
+        )
+        var state = CrossPlatformAnimeBrowserState().loaded(1)
+            .copy(isTopNavigationFocused = false)
+            .reduce(RemoteCommand.Select)
+            .reduce(RemoteCommand.Select)
+            .episodesLoaded(12)
+            .copy(focusedEpisode = 9)
+            .reduce(RemoteCommand.Select)
+            .streamsLoaded(listOf(magnet))
+
+        assertEquals(CrossPlatformAnimePhase.Buffering, state.phase)
+        assertEquals("torrent:start:0", state.pendingAction)
+        assertEquals(magnet, state.activePlayerCandidate)
+
+        state = state.torrentStarted(42).clearAction()
+        state = state.torrentReady(
+            generation = 42,
+            candidate = AnimeStreamCandidate("http://127.0.0.1:43123/token/stream", "BT · 1080p"),
+        )
+        assertEquals(CrossPlatformAnimePhase.Playing, state.phase)
+        assertEquals("load:http://127.0.0.1:43123/token/stream", state.pendingAction)
+        assertTrue(state.activePlayerCandidate?.url.orEmpty().startsWith("http://127.0.0.1:"))
+    }
+
+    @Test
+    fun externalMagnetIsValidatedNamedAndRoutedIntoTheEmbeddedEngine() {
+        val magnet = MagnetLink.normalize(
+            "  MAGNET:?xt=urn%3Abtih%3A0000000000000000000000000000000000000000&dn=%E8%91%AC%E9%80%81%E7%9A%84%E8%8A%99%E8%8E%89%E8%93%AE%20S01  ",
+        )
+        assertTrue(magnet.startsWith("magnet:?"))
+        assertEquals("葬送的芙莉蓮 S01", MagnetLink.displayName(magnet))
+
+        val candidate = AnimeStreamCandidate(
+            magnet,
+            "Magnet · BT",
+            mapOf("resolver" to "torrent", "source" to "外部 Magnet"),
+        )
+        val state = CrossPlatformAnimeBrowserState().openingMagnet(candidate)
+
+        assertEquals(AnimeTopTab.Subscriptions, state.focusedTopTab)
+        assertEquals(CrossPlatformAnimePhase.Buffering, state.phase)
+        assertEquals("torrent:start:0", state.pendingAction)
+        assertEquals(candidate, state.activePlayerCandidate)
+        assertEquals(1, state.cardCount)
+        assertEquals(1, state.episodeCount)
+
+        val invalid = runCatching { MagnetLink.normalize("https://example.com/video") }
+        assertTrue(invalid.isFailure)
+        val malformedHash = runCatching { MagnetLink.normalize("magnet:?xt=urn:btih:ABC") }
+        assertTrue(malformedHash.isFailure)
+        assertTrue(malformedHash.exceptionOrNull()?.message.orEmpty().contains("格式"))
+    }
+
+    @Test
+    fun magnetWatchHistoryRebuildsOneEpisodeAndRoutesBackThroughTheTorrentEngine() {
+        val magnet = "magnet:?xt=urn:btih:6666666666666666666666666666666666666666&dn=Replay"
+        val card = NativeMediaCard(
+            id = "magnet-${TorrentIdentity.stableID(magnet)}",
+            title = "Replay",
+            subtitle = "外部 Magnet · BT 邊下邊播",
+            thumbnailURL = "",
+            playbackURL = magnet,
+            animeSource = AnimeSourceKind.AniSubsBT,
+            animeEpisodeNumber = 0,
+        )
+
+        val episode = assertNotNull(MagnetHistoryReplay.episode(card))
+        val stream = assertNotNull(MagnetHistoryReplay.stream(episode))
+
+        assertEquals(0, episode.number)
+        assertEquals(magnet, episode.pageURL)
+        assertEquals("torrent", stream.headers["resolver"])
+        assertEquals(magnet, stream.url)
+
+        val historyCard = MagnetHistoryReplay.card(
+            original = card.copy(id = "bangumi-42", playbackURL = "https://bgm.tv/subject/42"),
+            episode = episode.copy(number = 7, title = "Replay 第 7 集"),
+            candidate = stream,
+        )
+        assertEquals(magnet, historyCard.playbackURL)
+        assertEquals(7, historyCard.animeEpisodeNumber)
+        assertEquals(AnimeSourceKind.AniSubsBT, historyCard.animeSource)
+        assertTrue(historyCard.id.startsWith("magnet-"))
+    }
+
+    @Test
+    fun episodeMenuOpensDownloadsAndPickerMenuCannotLeaveAResolvingDeadlock() {
+        var episodes = CrossPlatformAnimeBrowserState().loaded(1)
+            .copy(isTopNavigationFocused = false)
+            .reduce(RemoteCommand.Select)
+            .reduce(RemoteCommand.Select)
+            .episodesLoaded(2)
+            .reduce(RemoteCommand.Menu)
+        assertTrue(episodes.downloadManager.isVisible)
+        assertEquals("downloads:refresh", episodes.pendingAction)
+        episodes = episodes.reduce(RemoteCommand.Back)
+        assertFalse(episodes.downloadManager.isVisible)
+
+        val choices = listOf(
+            AnimeStreamCandidate("https://cdn.example/a.m3u8", "自動"),
+            AnimeStreamCandidate("https://cdn.example/b.m3u8", "1080p"),
+        )
+        val picker = CrossPlatformAnimeBrowserState().loaded(1)
+            .copy(isTopNavigationFocused = false)
+            .reduce(RemoteCommand.Select)
+            .reduce(RemoteCommand.Select)
+            .episodesLoaded(1)
+            .reduce(RemoteCommand.Select)
+            .streamsLoaded(choices)
+            .reduce(RemoteCommand.Menu)
+        assertEquals(CrossPlatformAnimePhase.Episodes, picker.phase)
+        assertFalse(picker.isStreamPickerVisible)
+    }
+
+    @Test
+    fun closingTheSourcePickerDuringPlaybackKeepsTheCurrentPlayerAlive() {
+        val choices = listOf(
+            AnimeStreamCandidate("https://cdn.example/a.m3u8", "自動"),
+            AnimeStreamCandidate("https://cdn.example/b.m3u8", "1080p"),
+        )
+        var state = CrossPlatformAnimeBrowserState().loaded(1)
+            .copy(isTopNavigationFocused = false)
+            .reduce(RemoteCommand.Select)
+            .reduce(RemoteCommand.Select)
+            .episodesLoaded(1)
+            .reduce(RemoteCommand.Select)
+            .streamsLoaded(choices)
+            .reduce(RemoteCommand.Select)
+            .clearAction()
+
+        assertEquals(CrossPlatformAnimePhase.Playing, state.phase)
+        state = state.reduce(RemoteCommand.Menu)
+        assertTrue(state.isStreamPickerVisible)
+        state = state.reduce(RemoteCommand.Back)
+        assertEquals(CrossPlatformAnimePhase.Playing, state.phase)
+        assertFalse(state.isStreamPickerVisible)
+        assertEquals(null, state.pendingAction)
+    }
+
+    @Test
+    fun bufferingMagnetCanOpenCloseAndSwitchTheSourcePicker() {
+        val choices = listOf(
+            AnimeStreamCandidate("magnet:?xt=urn:btih:AAA", "1080p · A", mapOf("resolver" to "torrent")),
+            AnimeStreamCandidate("magnet:?xt=urn:btih:BBB", "1080p · B", mapOf("resolver" to "torrent")),
+        )
+        var state = CrossPlatformAnimeBrowserState().streamsLoaded(choices)
+            .reduce(RemoteCommand.Select)
+            .torrentStarted(42)
+            .clearAction()
+
+        assertEquals(CrossPlatformAnimePhase.Buffering, state.phase)
+        state = state.reduce(RemoteCommand.Menu)
+        assertTrue(state.isStreamPickerVisible)
+        state = state.reduce(RemoteCommand.Back)
+        assertEquals(CrossPlatformAnimePhase.Buffering, state.phase)
+        assertEquals(42, state.activeTorrentGeneration)
+
+        state = state.reduce(RemoteCommand.Menu).reduce(RemoteCommand.Right).reduce(RemoteCommand.Select)
+        assertEquals(CrossPlatformAnimePhase.Buffering, state.phase)
+        assertEquals(1, state.selectedStreamIndex)
+        assertEquals(null, state.activeTorrentGeneration)
+        assertEquals("torrent:start:1", state.pendingAction)
+    }
+
+    @Test
+    fun changingAwayFromAnActiveTorrentMovesItsDownloadToTheBackground() {
+        assertEquals(42L, torrentGenerationToBackground(42L, null, "load:https://cdn.example/video.m3u8"))
+        assertEquals(42L, torrentGenerationToBackground(42L, null, "torrent:start:1"))
+        assertEquals(null, torrentGenerationToBackground(42L, 42L, "load:http://127.0.0.1:1234/stream"))
+        assertEquals(null, torrentGenerationToBackground(42L, null, "pause"))
+    }
+
+    @Test
     fun animePlayerRemoteCommandsMatchMacHudSeekVolumeAndBack() {
         val candidate = AnimeStreamCandidate("https://cdn.example/1080.m3u8", "1080p")
         var state = CrossPlatformAnimeBrowserState().loaded(1)
@@ -398,8 +763,8 @@ class CrossPlatformAnimeTest {
             .clearAction()
 
         state = state.reduce(RemoteCommand.Right)
-        assertEquals(15, state.pendingSeekSeconds)
-        assertEquals("seek:15", state.pendingAction)
+        assertEquals(10, state.pendingSeekSeconds)
+        assertEquals("seek:10", state.pendingAction)
         state = state.clearAction().reduce(RemoteCommand.Up)
         assertEquals("volume:up", state.pendingAction)
         state = state.clearAction().reduce(RemoteCommand.PlayPause)
@@ -408,6 +773,14 @@ class CrossPlatformAnimeTest {
         state = state.clearAction().reduce(RemoteCommand.Back)
         assertEquals(CrossPlatformAnimePhase.Episodes, state.phase)
         assertEquals("stop", state.pendingAction)
+    }
+
+    @Test
+    fun animeHudUsesPlaybackTimeInsteadOfTorrentDownloadProgress() {
+        assertEquals("1:05", animePlaybackTimeLabel(65.4))
+        assertEquals("0:00", animePlaybackTimeLabel(Double.NaN))
+        assertEquals(0f, animePlayerProgress(currentSeconds = 120.0, durationSeconds = 0.0))
+        assertEquals(.5f, animePlayerProgress(currentSeconds = 120.0, durationSeconds = 240.0))
     }
 
     @Test

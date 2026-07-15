@@ -11,6 +11,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.addCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import dev.tvshell.shared.PlatformAdapter
 import dev.tvshell.shared.AndroidTVKeyMapper
 import dev.tvshell.shared.RemoteCommandDispatcher
@@ -19,6 +22,7 @@ import dev.tvshell.shared.NativeMediaCard
 import dev.tvshell.shared.NativeMediaParser
 import dev.tvshell.shared.NativeMediaService
 import dev.tvshell.shared.TVShellApp
+import dev.tvshell.shared.ExternalMagnetRequest
 import dev.tvshell.shared.BingWallpaperMetadata
 import dev.tvshell.shared.AnimeSourceKind
 import dev.tvshell.shared.ShellPreferences
@@ -42,6 +46,8 @@ import kotlinx.coroutines.runBlocking
 
 class AnimeActivity : ComponentActivity() {
     private val remoteDispatcher = RemoteCommandDispatcher()
+    private var externalMagnetRequest by mutableStateOf<ExternalMagnetRequest?>(null)
+    private var magnetSequence = 0L
     private lateinit var platformAdapter: AnimePlatformAdapter
     private val credentialsPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null && ::platformAdapter.isInitialized) platformAdapter.importCredentials(uri)
@@ -49,13 +55,33 @@ class AnimeActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        acceptMagnetIntent(intent)
         platformAdapter = AnimePlatformAdapter(this) {
             credentialsPicker.launch(arrayOf("application/json", "text/plain", "text/*"))
         }
         onBackPressedDispatcher.addCallback(this) {
             remoteDispatcher.dispatch(dev.tvshell.shared.RemoteCommand.Back)
         }
-        setContent { TVShellApp(platformAdapter, animeOnly = true, dispatcher = remoteDispatcher) }
+        setContent {
+            TVShellApp(
+                platformAdapter,
+                animeOnly = true,
+                dispatcher = remoteDispatcher,
+                externalMagnetRequest = externalMagnetRequest,
+            )
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        acceptMagnetIntent(intent)
+    }
+
+    private fun acceptMagnetIntent(intent: Intent?) {
+        val magnet = intent?.dataString?.takeIf { it.startsWith("magnet:?", ignoreCase = true) } ?: return
+        magnetSequence += 1
+        externalMagnetRequest = ExternalMagnetRequest(magnetSequence, magnet)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
@@ -115,16 +141,25 @@ private class AnimePlatformAdapter(
     override fun fetchAnimeEpisodes(source: AnimeSourceKind, card: NativeMediaCard): Result<List<AnimeEpisode>> = animeServices.episodes(source, card)
     override fun resolveAnimeStreams(source: AnimeSourceKind, episode: AnimeEpisode): Result<List<AnimeStreamCandidate>> = animeServices.streams(source, episode)
     override fun loadAnimeStream(candidate: AnimeStreamCandidate): Result<Unit> = animeServices.load(candidate)
+    override fun startAnimeTorrent(request: dev.tvshell.shared.anime.TorrentStartRequest): Result<Long> = animeServices.startTorrent(request)
+    override fun animeTorrentSnapshot(): dev.tvshell.shared.anime.TorrentTransferSnapshot = animeServices.torrentSnapshot()
+    override fun consumeAnimeTorrentPlayableStream(generation: Long): dev.tvshell.shared.anime.TorrentPlayableStream? = animeServices.consumeTorrentPlayableStream(generation)
+    override fun cancelAnimeTorrentAutoplay(generation: Long) = animeServices.cancelTorrentAutoplay(generation)
+    override fun animeTorrentDownloads(): Result<List<dev.tvshell.shared.anime.TorrentCachedDownload>> = animeServices.torrentDownloads()
+    override fun deleteAnimeTorrentDownload(id: String): Result<Unit> = animeServices.deleteTorrentDownload(id)
     override fun playAnime(): Result<Unit> = animeServices.play()
     override fun pauseAnime(): Result<Unit> = animeServices.pause()
     override fun seekAnimeBy(seconds: Int): Result<Unit> = animeServices.seekBy(seconds)
     override fun adjustAnimeVolume(direction: Int): Result<Unit> = animeServices.volume(direction)
+    override fun muteAnime(): Result<Unit> = animeServices.mute()
     override fun stopAnime(): Result<Unit> = animeServices.stop()
+    override fun animePlaybackSnapshot(): dev.tvshell.shared.anime.AnimePlaybackSnapshot = animeServices.playbackSnapshot()
     override fun fetchAnimeDanmaku(
         source: AnimeSourceKind,
         card: NativeMediaCard,
         episode: AnimeEpisode,
     ): Result<List<DanmakuComment>> = animeServices.danmaku(source, card, episode)
+    override fun close() = animeServices.close()
     override fun playMedia(card: NativeMediaCard): Result<Unit> = Result.success(Unit)
     override fun exitApp(): Result<Unit> = runCatching { activity.finish() }
     override fun fetchWallpaperURL(): Result<String> = runCatching {

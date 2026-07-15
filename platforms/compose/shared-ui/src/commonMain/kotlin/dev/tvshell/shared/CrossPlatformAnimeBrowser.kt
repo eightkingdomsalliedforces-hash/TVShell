@@ -1,6 +1,8 @@
 package dev.tvshell.shared
 
 import dev.tvshell.shared.anime.AnimeStreamCandidate
+import dev.tvshell.shared.anime.TorrentCachedDownload
+import dev.tvshell.shared.anime.TorrentDownloadManagerState
 
 enum class CrossPlatformAnimePhase {
     Sources,
@@ -10,6 +12,7 @@ enum class CrossPlatformAnimePhase {
     EpisodeLoading,
     Episodes,
     Resolving,
+    Buffering,
     Playing,
 }
 
@@ -56,7 +59,9 @@ fun animeSourcesFor(tab: AnimeTopTab): List<AnimeSourceDefinition> =
 
 data class CrossPlatformAnimeBrowserState(
     val sourceCount: Int = animeSourcesFor(AnimeTopTab.Recommended).size,
-    val gridColumns: Int = 4,
+    val gridColumns: Int = 8,
+    val episodeGridColumns: Int = 7,
+    val historyGridColumns: Int = 4,
     val phase: CrossPlatformAnimePhase = CrossPlatformAnimePhase.Sources,
     val focusedTopTab: AnimeTopTab = AnimeTopTab.Recommended,
     val focusedSource: Int = 0,
@@ -68,6 +73,9 @@ data class CrossPlatformAnimeBrowserState(
     val streamCandidates: List<AnimeStreamCandidate> = emptyList(),
     val focusedStreamIndex: Int = 0,
     val selectedStreamIndex: Int = 0,
+    val resolvedPlaybackCandidate: AnimeStreamCandidate? = null,
+    val activeTorrentGeneration: Long? = null,
+    val downloadManager: TorrentDownloadManagerState = TorrentDownloadManagerState(),
     val isStreamPickerVisible: Boolean = false,
     val isPlaying: Boolean = true,
     val isPlayerHUDVisible: Boolean = true,
@@ -75,7 +83,16 @@ data class CrossPlatformAnimeBrowserState(
     val isTopNavigationFocused: Boolean = true,
     val pendingAction: String? = null,
 ) {
+    val activePlayerCandidate: AnimeStreamCandidate?
+        get() = resolvedPlaybackCandidate ?: streamCandidates.getOrNull(selectedStreamIndex)
+    val activeTitleGridColumns: Int
+        get() = if (focusedTopTab == AnimeTopTab.History) historyGridColumns else gridColumns
+
     fun reduce(command: RemoteCommand): CrossPlatformAnimeBrowserState {
+        if (downloadManager.isVisible) {
+            val manager = downloadManager.reduce(command)
+            return copy(downloadManager = manager, pendingAction = manager.pendingAction)
+        }
         if (isStreamPickerVisible) {
             return when (command) {
                 RemoteCommand.Left, RemoteCommand.Up -> copy(
@@ -86,22 +103,21 @@ data class CrossPlatformAnimeBrowserState(
                     focusedStreamIndex = (focusedStreamIndex + 1).coerceAtMost((streamCandidates.size - 1).coerceAtLeast(0)),
                     pendingAction = null,
                 )
-                RemoteCommand.Select -> streamCandidates.getOrNull(focusedStreamIndex)?.let { candidate ->
-                    copy(
-                        phase = CrossPlatformAnimePhase.Playing,
-                        selectedStreamIndex = focusedStreamIndex,
-                        isStreamPickerVisible = false,
-                        isPlaying = true,
-                        isPlayerHUDVisible = true,
-                        pendingAction = "load:${candidate.url}",
-                    )
-                } ?: this
-                RemoteCommand.Back, RemoteCommand.Home -> copy(
+                RemoteCommand.Select -> selectStream(focusedStreamIndex)
+                RemoteCommand.Back, RemoteCommand.Menu -> copy(
+                    phase = if (phase == CrossPlatformAnimePhase.Playing || phase == CrossPlatformAnimePhase.Buffering) {
+                        phase
+                    } else {
+                        CrossPlatformAnimePhase.Episodes
+                    },
+                    isStreamPickerVisible = false,
+                    pendingAction = null,
+                )
+                RemoteCommand.Home -> copy(
                     phase = CrossPlatformAnimePhase.Episodes,
                     isStreamPickerVisible = false,
-                    pendingAction = "stop",
+                    pendingAction = "home",
                 )
-                RemoteCommand.Menu -> copy(isStreamPickerVisible = false, pendingAction = null)
                 else -> this
             }
         }
@@ -125,9 +141,9 @@ data class CrossPlatformAnimeBrowserState(
             isTopNavigationFocused && command == RemoteCommand.Left -> selectingTopTab(focusedTopTab.ordinal - 1)
             isTopNavigationFocused && command == RemoteCommand.Right -> selectingTopTab(focusedTopTab.ordinal + 1)
             isTopNavigationFocused && command == RemoteCommand.Down && cardCount > 0 -> copy(isTopNavigationFocused = false)
-            !isTopNavigationFocused && command == RemoteCommand.Up && focusedCard < gridColumns -> copy(isTopNavigationFocused = true)
-            !isTopNavigationFocused && command == RemoteCommand.Up -> copy(focusedCard = (focusedCard - gridColumns).coerceAtLeast(0))
-            !isTopNavigationFocused && command == RemoteCommand.Down -> copy(focusedCard = (focusedCard + gridColumns).coerceAtMost((cardCount - 1).coerceAtLeast(0)))
+            !isTopNavigationFocused && command == RemoteCommand.Up && focusedCard < activeTitleGridColumns -> copy(isTopNavigationFocused = true)
+            !isTopNavigationFocused && command == RemoteCommand.Up -> copy(focusedCard = (focusedCard - activeTitleGridColumns).coerceAtLeast(0))
+            !isTopNavigationFocused && command == RemoteCommand.Down -> copy(focusedCard = (focusedCard + activeTitleGridColumns).coerceAtMost((cardCount - 1).coerceAtLeast(0)))
             !isTopNavigationFocused && command == RemoteCommand.Left -> copy(focusedCard = (focusedCard - 1).coerceAtLeast(0))
             !isTopNavigationFocused && command == RemoteCommand.Right -> copy(focusedCard = (focusedCard + 1).coerceAtMost((cardCount - 1).coerceAtLeast(0)))
             !isTopNavigationFocused && command == RemoteCommand.Select && cardCount > 0 -> copy(
@@ -158,13 +174,18 @@ data class CrossPlatformAnimeBrowserState(
         CrossPlatformAnimePhase.Episodes -> when (command) {
             RemoteCommand.Left -> copy(focusedEpisode = (focusedEpisode - 1).coerceAtLeast(0))
             RemoteCommand.Right -> copy(focusedEpisode = (focusedEpisode + 1).coerceAtMost((episodeCount - 1).coerceAtLeast(0)))
-            RemoteCommand.Up -> copy(focusedEpisode = (focusedEpisode - gridColumns).coerceAtLeast(0))
-            RemoteCommand.Down -> copy(focusedEpisode = (focusedEpisode + gridColumns).coerceAtMost((episodeCount - 1).coerceAtLeast(0)))
+            RemoteCommand.Up -> copy(focusedEpisode = (focusedEpisode - episodeGridColumns).coerceAtLeast(0))
+            RemoteCommand.Down -> copy(focusedEpisode = (focusedEpisode + episodeGridColumns).coerceAtMost((episodeCount - 1).coerceAtLeast(0)))
             RemoteCommand.Select -> if (episodeCount > 0) copy(
                 phase = CrossPlatformAnimePhase.Resolving,
                 pendingAction = "streams:$focusedEpisode",
             ) else this
             RemoteCommand.Back -> copy(phase = CrossPlatformAnimePhase.Details, pendingAction = null)
+            RemoteCommand.Menu -> copy(
+                downloadManager = downloadManager.opened(emptyList()),
+                pendingAction = "downloads:refresh",
+            )
+            RemoteCommand.Home -> copy(pendingAction = "home")
             else -> this
         }
         CrossPlatformAnimePhase.Resolving -> when (command) {
@@ -175,6 +196,22 @@ data class CrossPlatformAnimeBrowserState(
             )
             else -> this
         }
+        CrossPlatformAnimePhase.Buffering -> when (command) {
+            RemoteCommand.Menu -> if (streamCandidates.size > 1) copy(
+                isStreamPickerVisible = true,
+                focusedStreamIndex = selectedStreamIndex,
+                isPlayerHUDVisible = true,
+                pendingAction = null,
+            ) else copy(isPlayerHUDVisible = true, pendingAction = null)
+            RemoteCommand.Back -> copy(
+                phase = CrossPlatformAnimePhase.Episodes,
+                isPlaying = false,
+                isPlayerHUDVisible = false,
+                pendingAction = activeTorrentGeneration?.let { "torrent:background:$it" } ?: "torrent:cancel",
+            )
+            RemoteCommand.Home -> copy(pendingAction = "home")
+            else -> copy(isPlayerHUDVisible = true)
+        }
         CrossPlatformAnimePhase.Playing -> when (command) {
             RemoteCommand.Select, RemoteCommand.PlayPause -> copy(
                 isPlaying = !isPlaying,
@@ -182,14 +219,14 @@ data class CrossPlatformAnimeBrowserState(
                 pendingAction = if (isPlaying) "pause" else "play",
             )
             RemoteCommand.Left, RemoteCommand.Rewind -> copy(
-                pendingSeekSeconds = -15,
+                pendingSeekSeconds = -10,
                 isPlayerHUDVisible = true,
-                pendingAction = "seek:-15",
+                pendingAction = "seek:-10",
             )
             RemoteCommand.Right, RemoteCommand.FastForward -> copy(
-                pendingSeekSeconds = 15,
+                pendingSeekSeconds = 10,
                 isPlayerHUDVisible = true,
-                pendingAction = "seek:15",
+                pendingAction = "seek:10",
             )
             RemoteCommand.Up, RemoteCommand.VolumeUp -> copy(isPlayerHUDVisible = true, pendingAction = "volume:up")
             RemoteCommand.Down, RemoteCommand.VolumeDown -> copy(isPlayerHUDVisible = true, pendingAction = "volume:down")
@@ -200,12 +237,13 @@ data class CrossPlatformAnimeBrowserState(
                 isPlayerHUDVisible = true,
                 pendingAction = null,
             ) else copy(isPlayerHUDVisible = true, pendingAction = null)
-            RemoteCommand.Back, RemoteCommand.Home -> copy(
+            RemoteCommand.Back -> copy(
                 phase = CrossPlatformAnimePhase.Episodes,
                 isPlaying = false,
                 isPlayerHUDVisible = false,
                 pendingAction = "stop",
             )
+            RemoteCommand.Home -> copy(pendingAction = "home")
         }
     }
     }
@@ -228,7 +266,11 @@ data class CrossPlatformAnimeBrowserState(
     )
 
     fun failed() = backToSources()
-    fun clearAction() = copy(pendingAction = null, pendingSeekSeconds = 0)
+    fun clearAction() = copy(
+        pendingAction = null,
+        pendingSeekSeconds = 0,
+        downloadManager = downloadManager.clearAction(),
+    )
 
     fun episodesLoaded(episodeCount: Int) = copy(
         phase = if (episodeCount > 0) CrossPlatformAnimePhase.Episodes else CrossPlatformAnimePhase.Details,
@@ -241,16 +283,7 @@ data class CrossPlatformAnimeBrowserState(
         val choices = candidates.distinctBy { it.url }
         return when (choices.size) {
             0 -> copy(phase = CrossPlatformAnimePhase.Episodes, streamCandidates = emptyList(), pendingAction = null)
-            1 -> copy(
-                phase = CrossPlatformAnimePhase.Playing,
-                streamCandidates = choices,
-                selectedStreamIndex = 0,
-                focusedStreamIndex = 0,
-                isStreamPickerVisible = false,
-                isPlaying = true,
-                isPlayerHUDVisible = true,
-                pendingAction = "load:${choices.first().url}",
-            )
+            1 -> copy(streamCandidates = choices).selectStream(0)
             else -> copy(
                 phase = CrossPlatformAnimePhase.Resolving,
                 streamCandidates = choices,
@@ -262,6 +295,69 @@ data class CrossPlatformAnimeBrowserState(
         }
     }
 
+    fun torrentStarted(generation: Long): CrossPlatformAnimeBrowserState = if (phase == CrossPlatformAnimePhase.Buffering) {
+        copy(activeTorrentGeneration = generation, pendingAction = null)
+    } else this
+
+    fun openingMagnet(candidate: AnimeStreamCandidate): CrossPlatformAnimeBrowserState {
+        require(candidate.url.startsWith("magnet:?", ignoreCase = true)) { "外部播放來源不是 magnet" }
+        val subscriptionSources = animeSourcesFor(AnimeTopTab.Subscriptions)
+        val sourceIndex = subscriptionSources.indexOfFirst { it.kind == AnimeSourceKind.AniSubsBT }.coerceAtLeast(0)
+        return copy(
+            sourceCount = subscriptionSources.size,
+            phase = CrossPlatformAnimePhase.Buffering,
+            focusedTopTab = AnimeTopTab.Subscriptions,
+            focusedSource = sourceIndex,
+            focusedCard = 0,
+            cardCount = 1,
+            selectedCardIndex = 0,
+            episodeCount = 1,
+            focusedEpisode = 0,
+            streamCandidates = listOf(candidate),
+            focusedStreamIndex = 0,
+            selectedStreamIndex = 0,
+            resolvedPlaybackCandidate = null,
+            activeTorrentGeneration = null,
+            downloadManager = TorrentDownloadManagerState(),
+            isStreamPickerVisible = false,
+            isPlaying = false,
+            isPlayerHUDVisible = true,
+            pendingSeekSeconds = 0,
+            isTopNavigationFocused = false,
+            pendingAction = "torrent:start:0",
+        )
+    }
+
+    fun torrentReady(generation: Long, candidate: AnimeStreamCandidate): CrossPlatformAnimeBrowserState =
+        if (phase == CrossPlatformAnimePhase.Buffering && activeTorrentGeneration == generation) {
+            copy(
+                phase = CrossPlatformAnimePhase.Playing,
+                resolvedPlaybackCandidate = candidate,
+                isPlaying = true,
+                isPlayerHUDVisible = true,
+                pendingAction = "load:${candidate.url}",
+            )
+        } else this
+
+    fun torrentFailed(generation: Long): CrossPlatformAnimeBrowserState =
+        if (activeTorrentGeneration == generation) copy(
+            phase = CrossPlatformAnimePhase.Episodes,
+            resolvedPlaybackCandidate = null,
+            activeTorrentGeneration = null,
+            isPlaying = false,
+            pendingAction = null,
+        ) else this
+
+    fun downloadsLoaded(items: List<TorrentCachedDownload>): CrossPlatformAnimeBrowserState = copy(
+        downloadManager = downloadManager.opened(items),
+        pendingAction = null,
+    )
+
+    fun torrentDownloadDeleted(id: String): CrossPlatformAnimeBrowserState = copy(
+        downloadManager = downloadManager.deleted(id),
+        pendingAction = null,
+    )
+
     fun hidePlayerHUD() = if (phase == CrossPlatformAnimePhase.Playing) copy(isPlayerHUDVisible = false) else this
 
     fun backToSources() = copy(
@@ -272,6 +368,9 @@ data class CrossPlatformAnimeBrowserState(
         episodeCount = 0,
         focusedEpisode = 0,
         streamCandidates = emptyList(),
+        resolvedPlaybackCandidate = null,
+        activeTorrentGeneration = null,
+        downloadManager = TorrentDownloadManagerState(),
         isStreamPickerVisible = false,
         pendingAction = null,
     )
@@ -287,5 +386,35 @@ data class CrossPlatformAnimeBrowserState(
             cardCount = 0,
             pendingAction = null,
         )
+    }
+
+    private fun selectStream(index: Int): CrossPlatformAnimeBrowserState {
+        val candidate = streamCandidates.getOrNull(index) ?: return this
+        val torrent = candidate.url.startsWith("magnet:", ignoreCase = true) || candidate.headers["resolver"] == "torrent"
+        return if (torrent) {
+            copy(
+                phase = CrossPlatformAnimePhase.Buffering,
+                selectedStreamIndex = index,
+                focusedStreamIndex = index,
+                resolvedPlaybackCandidate = null,
+                activeTorrentGeneration = null,
+                isStreamPickerVisible = false,
+                isPlaying = false,
+                isPlayerHUDVisible = true,
+                pendingAction = "torrent:start:$index",
+            )
+        } else {
+            copy(
+                phase = CrossPlatformAnimePhase.Playing,
+                selectedStreamIndex = index,
+                focusedStreamIndex = index,
+                resolvedPlaybackCandidate = null,
+                activeTorrentGeneration = null,
+                isStreamPickerVisible = false,
+                isPlaying = true,
+                isPlayerHUDVisible = true,
+                pendingAction = "load:${candidate.url}",
+            )
+        }
     }
 }

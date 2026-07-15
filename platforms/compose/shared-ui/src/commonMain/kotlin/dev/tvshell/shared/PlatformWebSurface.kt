@@ -16,6 +16,7 @@ enum class WebRuntimeCommand {
     FastForward,
     VolumeUp,
     VolumeDown,
+    Mute,
 }
 
 data class WebRuntimeSignal(
@@ -41,6 +42,7 @@ data class WebRuntimeState(
         RemoteCommand.FastForward -> signaled(WebRuntimeCommand.FastForward)
         RemoteCommand.VolumeUp -> signaled(WebRuntimeCommand.VolumeUp)
         RemoteCommand.VolumeDown -> signaled(WebRuntimeCommand.VolumeDown)
+        RemoteCommand.Mute -> signaled(WebRuntimeCommand.Mute)
         else -> this
     }
 

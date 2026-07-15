@@ -1,9 +1,90 @@
 package dev.tvshell.shared.anime
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
+
 data class AnimeTitle(val id: String, val title: String, val detailURL: String)
 data class AnimeEpisode(val id: String, val title: String, val number: Int, val pageURL: String)
 data class AnimeStreamCandidate(val url: String, val quality: String, val headers: Map<String, String> = emptyMap())
 data class BTRssItem(val title: String, val episode: Int?, val quality: String?, val magnet: String)
+data class AniSubsRSSSource(val name: String, val searchURLTemplate: String)
+
+object AniSubsBTSubscriptionParser {
+    private val json = Json { ignoreUnknownKeys = true }
+
+    fun sources(payload: String): List<AniSubsRSSSource> {
+        val root = runCatching { json.parseToJsonElement(payload) as? JsonObject }.getOrNull() ?: return emptyList()
+        val exported = root["exportedMediaSourceDataList"] as? JsonObject ?: return emptyList()
+        val sources = exported["mediaSources"] as? JsonArray ?: return emptyList()
+        return sources.mapNotNull { element ->
+            val source = element as? JsonObject ?: return@mapNotNull null
+            if (source.string("factoryId") != "rss") return@mapNotNull null
+            val arguments = source["arguments"] as? JsonObject ?: return@mapNotNull null
+            val name = arguments.string("name")?.trim()?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+            val search = arguments["searchConfig"] as? JsonObject ?: return@mapNotNull null
+            val template = search.string("searchUrl")?.trim()?.takeIf { "{keyword}" in it } ?: return@mapNotNull null
+            AniSubsRSSSource(name, template)
+        }.distinctBy { it.searchURLTemplate }
+    }
+
+    private fun JsonObject.string(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
+}
+
+object AniSubsBTSearch {
+    fun queryURL(template: String, keyword: String): String = encodeUnsafeURLCharacters(
+        template.replace("{keyword}", keyword.trim()),
+    )
+
+    fun candidates(sourceName: String, rssPayload: String, episodeNumber: Int): List<AnimeStreamCandidate> {
+        val items = BTRssParser.items(rssPayload)
+        val exact = items.filter { it.episode == episodeNumber }
+        val seasonPacks = items.filter { it.episode == null }
+        return (exact + seasonPacks).distinctBy(BTRssItem::magnet).take(12).map { item ->
+            AnimeStreamCandidate(
+                url = item.magnet,
+                quality = listOfNotNull(item.quality, sourceName, "BT").joinToString(" · "),
+                headers = mapOf(
+                    "resolver" to "torrent",
+                    "source" to sourceName,
+                    "channel" to sourceName,
+                    "title" to item.title,
+                ),
+            )
+        }
+    }
+
+    private fun encodeUnsafeURLCharacters(value: String): String = buildString {
+        val bytes = value.encodeToByteArray()
+        var index = 0
+        while (index < bytes.size) {
+            val unsigned = bytes[index].toInt() and 0xff
+            val character = unsigned.toChar()
+            val validEscape = character == '%' && index + 2 < bytes.size &&
+                bytes[index + 1].toInt().toChar().isHexDigit() && bytes[index + 2].toInt().toChar().isHexDigit()
+            when {
+                validEscape -> {
+                    append('%')
+                    append(bytes[index + 1].toInt().toChar().uppercaseChar())
+                    append(bytes[index + 2].toInt().toChar().uppercaseChar())
+                    index += 3
+                    continue
+                }
+                character.isLetterOrDigit() && unsigned < 128 || character in "-._~:/?&=,+;@!$'()*" -> append(character)
+                else -> {
+                    append('%')
+                    append("0123456789ABCDEF"[unsigned ushr 4])
+                    append("0123456789ABCDEF"[unsigned and 0xf])
+                }
+            }
+            index += 1
+        }
+    }
+
+    private fun Char.isHexDigit(): Boolean = this in '0'..'9' || lowercaseChar() in 'a'..'f'
+}
 
 interface AnimeHTTPTransport {
     suspend fun get(url: String, headers: Map<String, String> = emptyMap()): String
@@ -82,14 +163,21 @@ object BTRssParser {
     private val item = Regex("""<item\b[^>]*>(.*?)</item>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
     private val title = Regex("""<title\b[^>]*>(?:<!\[CDATA\[)?(.*?)(?:]]>)?</title>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
     private val enclosure = Regex("""<enclosure\b[^>]*url\s*=\s*(['\"])(.*?)\1""", RegexOption.IGNORE_CASE)
+    private val magnetElement = Regex("""<(?:magnet|magneturi|link)\b[^>]*>\s*(?:<!\[CDATA\[)?(magnet:\?[^<\s]+)(?:]]>)?\s*</(?:magnet|magneturi|link)>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
 
     fun items(xml: String): List<BTRssItem> = item.findAll(xml).mapNotNull { match ->
         val body = match.groupValues[1]
         val titleValue = title.find(body)?.groupValues?.getOrNull(1)?.trim() ?: return@mapNotNull null
-        val magnet = enclosure.find(body)?.groupValues?.getOrNull(2)?.let(CSS1HtmlParser::decodeHTML)
+        val magnet = (enclosure.find(body)?.groupValues?.getOrNull(2)
+            ?: magnetElement.find(body)?.groupValues?.getOrNull(1))?.let(CSS1HtmlParser::decodeHTML)
             ?.takeIf { it.startsWith("magnet:?") } ?: return@mapNotNull null
-        val episode = Regex("""(?:\s-\s*|E)(\d{1,4})(?:\s|\D)""", RegexOption.IGNORE_CASE)
-            .find(titleValue)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        val episode = listOf(
+            Regex("""(?:\s-\s*|(?:EP|E)\s*)(\d{1,4})(?!\d)""", RegexOption.IGNORE_CASE),
+            Regex("""第\s*(\d{1,4})\s*[話话集]""", RegexOption.IGNORE_CASE),
+            Regex("""[\[(【]\s*(\d{1,3})\s*[\])】]""", RegexOption.IGNORE_CASE),
+        ).firstNotNullOfOrNull { pattern ->
+            pattern.find(titleValue)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        }
         val quality = Regex("""(\d{3,4}p)""", RegexOption.IGNORE_CASE).find(titleValue)?.groupValues?.getOrNull(1)
         BTRssItem(titleValue, episode, quality, magnet)
     }.distinctBy { it.magnet }.toList()
@@ -211,14 +299,16 @@ object TorrentCachePolicy {
         maxBytes: Long,
         nowEpochSeconds: Long,
         expirationSeconds: Long,
+        protectedIDs: Set<String> = emptySet(),
     ): List<String> {
         val sorted = entries.sortedBy { it.lastAccessEpochSeconds }
         val removed = linkedSetOf<String>()
-        sorted.filter { nowEpochSeconds - it.lastAccessEpochSeconds > expirationSeconds }.forEach { removed += it.id }
+        sorted.filter { it.id !in protectedIDs && nowEpochSeconds - it.lastAccessEpochSeconds > expirationSeconds }
+            .forEach { removed += it.id }
         var remainingBytes = sorted.filterNot { it.id in removed }.sumOf { it.bytes }
         for (entry in sorted) {
             if (remainingBytes <= maxBytes) break
-            if (entry.id !in removed) {
+            if (entry.id !in removed && entry.id !in protectedIDs) {
                 removed += entry.id
                 remainingBytes -= entry.bytes
             }

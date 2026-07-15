@@ -11,6 +11,9 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 
 class AndroidAnimeService(
@@ -22,6 +25,7 @@ class AndroidAnimeService(
     private val client = PlatformCSS1ContentClient()
     private val player = AndroidMediaPlayerAdapter(context)
     private val dandanplay = DandanplayService(client, ::platformSHA256Base64)
+    private val torrentEngine: TorrentPlaybackEngine = AndroidTorrentPlaybackEngine(File(context.cacheDir, "TVShell/Torrents"))
     private var resolverURL: String? = null
     private var css1Resolver: CSS1Resolver? = null
 
@@ -32,9 +36,10 @@ class AndroidAnimeService(
         AnimeSourceKind.Bilibili -> publicFeed(source, "https://api.bilibili.com/pgc/web/rank/list?season_type=1&day=3") {
             NativeMediaParser.bilibiliBangumi(it)
         }
-        AnimeSourceKind.BangumiYouTube -> runCatching {
+        AnimeSourceKind.BangumiYouTube, AnimeSourceKind.AniSubsBT -> runCatching {
             BangumiMetadataParser.calendar(fetchText("https://api.bgm.tv/calendar"))
                 .map(BangumiSubjectMetadata::asCard).ifEmpty { error("Bangumi 沒有回傳本週動畫資料") }
+                .map { it.copy(animeSource = source) }
         }
         AnimeSourceKind.CSS1 -> if (!preferences().animeSources.css1Enabled) {
             Result.failure(IllegalStateException("CSS1 已在動漫來源設定中停用"))
@@ -51,7 +56,6 @@ class AndroidAnimeService(
                 source,
             ),
         ))
-        AnimeSourceKind.AniSubsBT -> rssFeed(source, "TVSHELL_ANISUBS_BT_URL", "ani-subs BT")
         AnimeSourceKind.Mikan -> rssFeed(source, "TVSHELL_MIKAN_RSS_URL", "Mikan")
         AnimeSourceKind.DMHY -> rssFeed(source, "TVSHELL_DMHY_RSS_URL", "動漫花園")
     }
@@ -79,7 +83,18 @@ class AndroidAnimeService(
             val count = (metadata?.episodeCount ?: card.episodeCount ?: 1).coerceAtLeast(1)
             (1..count).map { number -> AnimeEpisode("${card.id}:$number", "${metadata?.title ?: card.title} 第 $number 話", number, card.playbackURL) }
         }
-        else -> Result.success(listOf(AnimeEpisode("${source.name.lowercase()}:${card.id}", "開始播放", 1, card.playbackURL)))
+        AnimeSourceKind.AniSubsBT -> runCatching {
+            MagnetHistoryReplay.episode(card)?.let(::listOf) ?: run {
+                val subjectID = card.id.substringAfter("bangumi-").toIntOrNull() ?: error("Bangumi 作品識別格式錯誤")
+                val metadata = BangumiMetadataParser.subject(fetchText("https://api.bgm.tv/v0/subjects/$subjectID"))
+                val count = (metadata?.episodeCount ?: card.episodeCount ?: 1).coerceAtLeast(1)
+                (1..count).map { number -> AnimeEpisode("${card.id}:$number", "${metadata?.title ?: card.title} 第 $number 話", number, card.playbackURL) }
+            }
+        }
+        else -> {
+            val number = card.animeEpisodeNumber ?: 1
+            Result.success(listOf(AnimeEpisode("${source.name.lowercase()}:${card.id}", "第 $number 集", number, card.playbackURL)))
+        }
     }
 
     override fun streams(source: AnimeSourceKind, episode: AnimeEpisode): Result<List<AnimeStreamCandidate>> = when (source) {
@@ -103,18 +118,28 @@ class AndroidAnimeService(
                 mapOf("resolver" to "official"),
             ),
         ))
-        AnimeSourceKind.AniSubsBT, AnimeSourceKind.Mikan, AnimeSourceKind.DMHY -> Result.success(
+        AnimeSourceKind.AniSubsBT -> MagnetHistoryReplay.stream(episode)?.let { Result.success(listOf(it)) }
+            ?: aniSubsStreams(episode)
+        AnimeSourceKind.Mikan, AnimeSourceKind.DMHY -> Result.success(
             listOf(AnimeStreamCandidate(episode.pageURL, "BT / RSS", mapOf("resolver" to "torrent"))),
         )
     }
 
     override fun load(candidate: AnimeStreamCandidate): Result<Unit> = runCatching {
+        require(candidate.url.startsWith("magnet:", ignoreCase = true).not() && candidate.headers["resolver"] != "torrent") {
+            "magnet 必須先由內建 BT 引擎解析，不能直接交給播放器"
+        }
         if (candidate.headers["resolver"] != "official") {
-            require(candidate.url.startsWith("magnet:").not()) { "Android TV BT 邊下邊播仍需完成 torrent 引擎連接" }
             player.load(candidate)
             player.play()
         }
     }
+    override fun startTorrent(request: TorrentStartRequest): Result<Long> = torrentEngine.start(request)
+    override fun torrentSnapshot(): TorrentTransferSnapshot = torrentEngine.snapshot()
+    override fun consumeTorrentPlayableStream(generation: Long): TorrentPlayableStream? = torrentEngine.consumeReadyStream(generation)
+    override fun cancelTorrentAutoplay(generation: Long) = torrentEngine.cancelAutoplay(generation)
+    override fun torrentDownloads(): Result<List<TorrentCachedDownload>> = runCatching { torrentEngine.cachedDownloads() }
+    override fun deleteTorrentDownload(id: String): Result<Unit> = torrentEngine.deleteCachedDownload(id)
     override fun play(): Result<Unit> = runCatching { player.play() }
     override fun pause(): Result<Unit> = runCatching { player.pause() }
     override fun seekBy(seconds: Int): Result<Unit> = runCatching { player.seekBy(seconds) }
@@ -126,7 +151,16 @@ class AndroidAnimeService(
             AudioManager.FLAG_SHOW_UI,
         )
     }
+    override fun mute(): Result<Unit> = runCatching {
+        val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_TOGGLE_MUTE, AudioManager.FLAG_SHOW_UI)
+    }
     override fun stop(): Result<Unit> = runCatching { player.release() }
+    override fun playbackSnapshot(): AnimePlaybackSnapshot = player.snapshot()
+    override fun close() {
+        player.release()
+        torrentEngine.close()
+    }
 
     override fun danmaku(
         source: AnimeSourceKind,
@@ -165,8 +199,27 @@ class AndroidAnimeService(
                 "",
                 item.magnet,
                 source,
+                animeEpisodeNumber = item.episode,
             )
         }.ifEmpty { error("$displayName 沒有回傳可用項目") }
+    }
+
+    private fun aniSubsStreams(episode: AnimeEpisode): Result<List<AnimeStreamCandidate>> = runCatching {
+        val sources = AniSubsBTSubscriptionParser.sources(fetchText(ANISUBS_BT_SUBSCRIPTION_URL))
+        require(sources.isNotEmpty()) { "ani-subs BT 訂閱沒有可用 RSS 搜尋來源" }
+        val keyword = episode.title.replace(Regex("\\s*第\\s*\\d+\\s*[集話话].*$"), "").trim()
+        runBlocking {
+            sources.map { source ->
+                async(Dispatchers.IO) {
+                    runCatching {
+                        val url = AniSubsBTSearch.queryURL(source.searchURLTemplate, keyword)
+                        AniSubsBTSearch.candidates(source.name, fetchText(url), episode.number)
+                    }.getOrDefault(emptyList())
+                }
+            }.awaitAll().flatten()
+        }.distinctBy(AnimeStreamCandidate::url).ifEmpty {
+            error("ani-subs BT 搜不到第 ${episode.number} 集")
+        }
     }
 
     private fun fetchText(url: String): String {
@@ -218,3 +271,5 @@ class AndroidAnimeService(
         } ?: ServiceCredentials()
     }
 }
+
+private const val ANISUBS_BT_SUBSCRIPTION_URL = "https://sub.creamycake.org/v1/bt1.json"

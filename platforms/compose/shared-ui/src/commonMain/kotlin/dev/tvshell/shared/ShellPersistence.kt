@@ -57,6 +57,7 @@ object ShellPreferencesCodec {
                         card.alternateTitles.forEach { add(JsonPrimitive(it)) }
                     })
                     card.episodeCount?.let { put("episodeCount", it) }
+                    card.animeEpisodeNumber?.let { put("animeEpisodeNumber", it) }
                 })
             }
         })
@@ -97,6 +98,7 @@ object ShellPreferencesCodec {
                 animeSource = item.string("animeSource")?.let { runCatching { AnimeSourceKind.valueOf(it) }.getOrNull() },
                 alternateTitles = (item["alternateTitles"] as? JsonArray).orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull },
                 episodeCount = item.int("episodeCount"),
+                animeEpisodeNumber = item.int("animeEpisodeNumber"),
             )
         }
         val controls = root["controlCenter"] as? JsonObject

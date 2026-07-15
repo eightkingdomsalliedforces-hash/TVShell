@@ -67,7 +67,7 @@ swift run TVShellChecks
 
 ## GitHub Release
 
-GitHub Actions 會在 push / PR 時自動執行檢查與 release build。每次 push 到 `main` 並建置成功後，workflow 會自動建立或更新 `latest` GitHub Release，並上傳 `TVShell` zip。
+GitHub Actions 會在 push / PR 時自動執行檢查與 release build。每次 push 到 `main` 並建置成功後，workflow 會自動建立或更新 `latest` GitHub Release，並上傳 macOS App ZIP、Windows TVShell／動畫 MSI、兩個 Windows 免安裝 ZIP、一般／Launcher／動畫三個 Android TV APK，以及 Windows 播放核心的對應原始碼包。
 
 若要發布固定版本，建立並推送 `v*` tag：
 
@@ -93,6 +93,12 @@ TVShell.app/Contents/Frameworks/VLCKit.framework
 
 若本機開發版尚未打包 framework，但已安裝全域 `/Library/Frameworks/VLCKit.framework` 或 VLC.app 內含 VLCKit，也會作為 fallback。遙控器的播放/暫停、OK、左右快轉/倒退會同步控制 VLC surface。
 
+Windows 與 Android TV 版內嵌 jlibtorrent 2.0.12.9。BT／RSS 播放線會在 TVShell 內取得 metadata、選擇目前集數並優先下載片頭與片尾；內建播放器只接收 `127.0.0.1` 的 piece-aware Range 串流，不會把 magnet 交給外部 App，也不會把尚未驗證的稀疏檔案區段當成影片資料。選集頁按 Menu 可查看及刪除 BT 快取。
+
+Android TV 可直接從其他 App 開啟 `magnet:` 連結；TVShell 與獨立動畫 App 都會進入同一個內建播放器流程。Windows 免安裝版也可用 `TVShell.exe "magnet:?xt=…"` 或 `TVShell Anime.exe "magnet:?xt=…"` 直接播放。播放器開始前仍會先驗證 magnet、取得 metadata、選擇影片並準備足夠的已驗證片段，原始 magnet 不會直接交給 MediaPlayer 或 libVLC。
+
+BitTorrent 連線並非匿名：Tracker、DHT 與其他 Peer 可以看到公開 IP，下載時也可能上傳已取得的 piece。Windows 快取位於 `%LOCALAPPDATA%\TVShell\Cache\Torrents`，Android 位於 App 私有的 `cacheDir/TVShell/Torrents`；非活躍快取預設七天淘汰，總量上限 20 GiB，也可從選集頁按 Menu 手動刪除。
+
 ### 播放與正版來源遙控
 
 - 動畫、YouTube、Bilibili 播放時，方向鍵上／下調整音量；左右快轉／倒退。
@@ -109,6 +115,10 @@ TVShell.app/Contents/Frameworks/VLCKit.framework
 - 控制中心的彈幕變更立即套用並寫入設定，動畫與 Bilibili 播放共用同一份設定。
 
 VLCKit 由 VideoLAN 發布，採用 `LGPL-2.1-or-later`。Release app 會在 `Contents/Resources/ThirdPartyNotices.txt` 保留來源與授權資訊。來源：[`VideoLAN VLCKit`](https://code.videolan.org/videolan/VLCKit)。
+
+jlibtorrent 由 FrostWire 發布，Java wrapper 採用 MIT License；其內含的 libtorrent 原生核心採 BSD 3-Clause License。Windows 免安裝包與 Android TV APK 會一併封裝相符架構的原生程式庫。來源：[`FrostWire jlibtorrent`](https://github.com/frostwire/frostwire-jlibtorrent)、[`libtorrent`](https://github.com/arvidn/libtorrent)。
+
+Windows libVLC runtime 內保留的 FFmpeg 解碼／chroma 模組含 GPL-2.0-or-later 程式碼。每次 Windows Release 會在同一頁附上 `TVShell-Windows-Corresponding-Sources.zip`，包含相符的 VLC 3.0.23、FFmpeg 4.4.5、其靜態相依來源及建置規則／patch；應用程式內也保留來源與授權說明。套件只複製固定正向清單中的播放插件，不包含 x264 編碼器、Lua、Dolby-surround 與 headphone-mixer 插件。
 
 ## API、登入與 credentials.json
 

@@ -10,6 +10,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
@@ -28,10 +29,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -47,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -67,6 +71,20 @@ import dev.tvshell.shared.anime.AnimeStreamCandidate
 import dev.tvshell.shared.anime.DanmakuComment
 import dev.tvshell.shared.anime.DanmakuMotion
 import dev.tvshell.shared.anime.DanmakuTimeline
+import dev.tvshell.shared.anime.TorrentStartRequest
+import dev.tvshell.shared.anime.TorrentTransferPhase
+import dev.tvshell.shared.anime.TorrentTransferSnapshot
+import dev.tvshell.shared.anime.MagnetLink
+import dev.tvshell.shared.anime.TorrentIdentity
+
+internal fun torrentGenerationToBackground(
+    previousGeneration: Long?,
+    nextGeneration: Long?,
+    action: String?,
+): Long? = previousGeneration?.takeIf {
+    it != nextGeneration &&
+        (action?.startsWith("load:") == true || action?.startsWith("torrent:start:") == true)
+}
 
 @Composable
 fun TVShellApp(
@@ -74,7 +92,13 @@ fun TVShellApp(
     animeOnly: Boolean = false,
     appsRevision: Int = 0,
     dispatcher: RemoteCommandDispatcher? = null,
+    externalMagnetRequest: ExternalMagnetRequest? = null,
 ) {
+    val initialMagnet = remember {
+        externalMagnetRequest?.let { request ->
+            runCatching { externalMagnetPlayback(request.magnet) }.getOrNull()
+        }
+    }
     val discovered = remember(appsRevision) { adapter.installedApps() }
     val builtIns = remember(animeOnly) { defaultShellApps(animeOnly) }
     val restoredPreferences = remember(adapter) { adapter.loadPreferences().getOrDefault(ShellPreferences()) }
@@ -86,14 +110,23 @@ fun TVShellApp(
             ),
         )
     }
-    var screen by remember { mutableStateOf<ShellRoute>(if (animeOnly) ShellRoute.Anime else ShellRoute.Launcher) }
-    var animeState by remember { mutableStateOf(CrossPlatformAnimeBrowserState().loadingFirstSource()) }
-    var animeCards by remember { mutableStateOf(emptyList<NativeMediaCard>()) }
-    var animeEpisodes by remember { mutableStateOf(emptyList<AnimeEpisode>()) }
-    var animeStatus by remember { mutableStateOf("正在載入推薦動畫…") }
+    var screen by remember { mutableStateOf<ShellRoute>(if (animeOnly || initialMagnet != null) ShellRoute.Anime else ShellRoute.Launcher) }
+    var animeState by remember {
+        mutableStateOf(
+            initialMagnet?.let { CrossPlatformAnimeBrowserState().openingMagnet(it.candidate) }
+                ?: CrossPlatformAnimeBrowserState().loadingFirstSource(),
+        )
+    }
+    var animeCards by remember { mutableStateOf(initialMagnet?.let { listOf(it.card) }.orEmpty()) }
+    var animeEpisodes by remember { mutableStateOf(initialMagnet?.let { listOf(it.episode) }.orEmpty()) }
+    var animeStatus by remember {
+        mutableStateOf(initialMagnet?.let { "Magnet：正在啟動 ${it.card.title}…" } ?: "正在載入推薦動畫…")
+    }
     var animeDanmaku by remember { mutableStateOf(emptyList<DanmakuComment>()) }
     var animeDanmakuStatus by remember { mutableStateOf("彈幕尚未載入") }
     var animePlaybackSeconds by remember { mutableStateOf(0.0) }
+    var animePlaybackDurationSeconds by remember { mutableStateOf(0.0) }
+    var animeTorrentSnapshot by remember { mutableStateOf(TorrentTransferSnapshot()) }
     var animeWebState by remember { mutableStateOf(WebRuntimeState("about:blank")) }
     var mediaState by remember { mutableStateOf(NativeMediaState(0)) }
     var mediaCards by remember { mutableStateOf(emptyList<NativeMediaCard>()) }
@@ -117,6 +150,7 @@ fun TVShellApp(
     }
     var wallpaperURL by remember { mutableStateOf<String?>(null) }
     var clockLabel by remember { mutableStateOf(currentTVShellTimeLabel()) }
+    var handledMagnetSequence by remember { mutableStateOf(initialMagnet?.let { externalMagnetRequest?.sequence }) }
     val activeDispatcher = remember(dispatcher) { dispatcher ?: RemoteCommandDispatcher() }
     val handleRootKeyEvents = shouldHandleRootKeyEvent(dispatcher != null)
     val focusRequester = remember { FocusRequester() }
@@ -125,6 +159,21 @@ fun TVShellApp(
         watchHistory = watchHistory.record(card)
         state = state.copy(historyCount = watchHistory.entries.size)
         adapter.savePreferences(ShellPreferences(animeSourceSettings, watchHistory, controlCenterState))
+    }
+
+    fun openExternalMagnet(rawMagnet: String): Result<Unit> = runCatching {
+        val playback = externalMagnetPlayback(rawMagnet)
+        animeState.activeTorrentGeneration?.let(adapter::cancelAnimeTorrentAutoplay)
+        adapter.stopAnime()
+        screen = ShellRoute.Anime
+        animeCards = listOf(playback.card)
+        animeEpisodes = listOf(playback.episode)
+        animeDanmaku = emptyList()
+        animePlaybackSeconds = 0.0
+        animePlaybackDurationSeconds = 0.0
+        animeTorrentSnapshot = TorrentTransferSnapshot()
+        animeState = animeState.openingMagnet(playback.candidate)
+        animeStatus = "Magnet：正在啟動 ${playback.card.title}…"
     }
 
     fun handle(command: RemoteCommand) {
@@ -151,7 +200,11 @@ fun TVShellApp(
         }
         if (command == RemoteCommand.Menu && !(screen == ShellRoute.Launcher && state.focus == LauncherFocus.History) && !(
                 screen == ShellRoute.Anime &&
-                    (animeState.phase == CrossPlatformAnimePhase.Playing || animeState.isStreamPickerVisible)
+                    (animeState.phase == CrossPlatformAnimePhase.Playing ||
+                        animeState.phase == CrossPlatformAnimePhase.Buffering ||
+                        animeState.phase == CrossPlatformAnimePhase.Episodes ||
+                        animeState.isStreamPickerVisible ||
+                        animeState.downloadManager.isVisible)
                 )) {
             controlCenterVisible = true
             return
@@ -250,6 +303,7 @@ fun TVShellApp(
             return
         }
         if (screen == ShellRoute.Anime) {
+            val previousTorrentGeneration = animeState.activeTorrentGeneration
             var next = animeState.reduce(command)
             val tabChanged = next.focusedTopTab != animeState.focusedTopTab
             if (tabChanged) {
@@ -264,6 +318,11 @@ fun TVShellApp(
                 }
             }
             val action = next.pendingAction
+            torrentGenerationToBackground(
+                previousGeneration = previousTorrentGeneration,
+                nextGeneration = next.activeTorrentGeneration,
+                action = action,
+            )?.let(adapter::cancelAnimeTorrentAutoplay)
             when {
                 action == "exit" -> {
                     animeState = next.clearAction()
@@ -298,11 +357,40 @@ fun TVShellApp(
                     animeWebState = animeWebState.reduce(if (direction > 0) RemoteCommand.VolumeUp else RemoteCommand.VolumeDown).clearAction()
                     animeState = next.clearAction()
                 }
+                action == "volume:mute" -> {
+                    animeStatus = adapter.muteAnime().fold(
+                        { "已切換靜音" },
+                        { "靜音失敗：${it.message}" },
+                    )
+                    animeWebState = animeWebState.reduce(RemoteCommand.Mute).clearAction()
+                    animeState = next.clearAction()
+                }
                 action == "stop" -> {
+                    next.activeTorrentGeneration?.let(adapter::cancelAnimeTorrentAutoplay)
                     adapter.stopAnime()
                     animeDanmaku = emptyList()
                     animePlaybackSeconds = 0.0
+                    animePlaybackDurationSeconds = 0.0
                     animeStatus = "已回到選集。"
+                    animeState = next.clearAction()
+                }
+                action == "home" -> {
+                    next.activeTorrentGeneration?.let(adapter::cancelAnimeTorrentAutoplay)
+                    adapter.stopAnime()
+                    animeDanmaku = emptyList()
+                    animePlaybackSeconds = 0.0
+                    animePlaybackDurationSeconds = 0.0
+                    animeState = next.copy(phase = CrossPlatformAnimePhase.Episodes).clearAction()
+                    if (animeOnly) adapter.exitApp() else screen = ShellRoute.Launcher
+                }
+                action?.startsWith("torrent:background:") == true -> {
+                    val generation = action.substringAfterLast(':').toLongOrNull()
+                    if (generation != null) adapter.cancelAnimeTorrentAutoplay(generation)
+                    animeStatus = "BT 已留在背景下載，可從 Menu 的下載管理查看。"
+                    animeTorrentSnapshot = adapter.animeTorrentSnapshot()
+                    animeState = next.clearAction()
+                }
+                action == "torrent:cancel" -> {
                     animeState = next.clearAction()
                 }
                 else -> {
@@ -314,6 +402,12 @@ fun TVShellApp(
         when (command) {
             RemoteCommand.Select -> when (state.focus) {
                 LauncherFocus.History -> watchHistory.entries.getOrNull(state.focusedHistoryIndex)?.let { card ->
+                    if (card.playbackURL.trim().startsWith("magnet:?", ignoreCase = true)) {
+                        openExternalMagnet(card.playbackURL).onFailure {
+                            state = state.copy(status = "Magnet 無法開啟：${it.message ?: "格式錯誤"}")
+                        }
+                        return@let
+                    }
                     mediaWebState = WebRuntimeState(card.playbackURL)
                     state = state.copy(status = "正在 TVShell 內建播放器續播 ${card.title}")
                     screen = ShellRoute.Media
@@ -355,8 +449,23 @@ fun TVShellApp(
         val unsubscribe = activeDispatcher.subscribe(::handle)
         onDispose(unsubscribe)
     }
+    DisposableEffect(adapter) {
+        onDispose(adapter::close)
+    }
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
+    }
+    LaunchedEffect(externalMagnetRequest?.sequence, externalMagnetRequest?.magnet) {
+        val request = externalMagnetRequest ?: return@LaunchedEffect
+        if (handledMagnetSequence == request.sequence) return@LaunchedEffect
+        handledMagnetSequence = request.sequence
+        openExternalMagnet(request.magnet).fold(
+            onSuccess = {},
+            onFailure = { error ->
+                screen = ShellRoute.Anime
+                animeStatus = "Magnet 無法開啟：${error.message ?: "格式錯誤"}"
+            },
+        )
     }
     LaunchedEffect(Unit) {
         wallpaperURL = withContext(Dispatchers.Default) { adapter.fetchWallpaperURL().getOrNull() }
@@ -494,22 +603,137 @@ fun TVShellApp(
         )
     }
     LaunchedEffect(screen, animeState.phase, animeState.pendingAction, animeState.selectedStreamIndex) {
+        if (screen != ShellRoute.Anime || animeState.phase != CrossPlatformAnimePhase.Buffering) return@LaunchedEffect
+        val action = animeState.pendingAction ?: return@LaunchedEffect
+        if (!action.startsWith("torrent:start:")) return@LaunchedEffect
+        val index = action.substringAfterLast(':').toIntOrNull() ?: animeState.selectedStreamIndex
+        val candidate = animeState.streamCandidates.getOrNull(index) ?: return@LaunchedEffect
+        val cards = if (animeState.focusedTopTab == AnimeTopTab.History) watchHistory.entries else animeCards
+        val card = cards.getOrNull(animeState.selectedCardIndex)
+        val episode = animeEpisodes.getOrNull(animeState.focusedEpisode)
+        animeWebState = WebRuntimeState("about:blank")
+        animeTorrentSnapshot = TorrentTransferSnapshot()
+        animeStatus = "BT：正在啟動內建磁力引擎…"
+        val request = TorrentStartRequest(
+            magnet = candidate.url,
+            episodeNumber = episode?.number,
+            title = card?.title ?: "動畫",
+            subtitle = episode?.title ?: candidate.quality,
+            quality = candidate.quality,
+        )
+        // startAnimeTorrent only schedules native work and returns its generation.
+        // Keep this ownership hand-off on the UI dispatcher so Back/Home cannot
+        // race between starting a task and recording the generation that owns it.
+        adapter.startAnimeTorrent(request).fold(
+            onSuccess = { generation ->
+                animeState = animeState.torrentStarted(generation)
+                animeTorrentSnapshot = adapter.animeTorrentSnapshot()
+                animeStatus = animeTorrentSnapshot.statusText
+            },
+            onFailure = {
+                animeStatus = "BT 啟動失敗：${it.message ?: "未知原因"}"
+                animeState = animeState.copy(
+                    phase = CrossPlatformAnimePhase.Episodes,
+                    isPlaying = false,
+                    pendingAction = null,
+                )
+            },
+        )
+    }
+    LaunchedEffect(screen, animeState.phase, animeState.activeTorrentGeneration) {
+        val generation = animeState.activeTorrentGeneration ?: return@LaunchedEffect
+        if (screen != ShellRoute.Anime || animeState.phase !in setOf(CrossPlatformAnimePhase.Buffering, CrossPlatformAnimePhase.Playing)) {
+            return@LaunchedEffect
+        }
+        while (animeState.activeTorrentGeneration == generation &&
+            animeState.phase in setOf(CrossPlatformAnimePhase.Buffering, CrossPlatformAnimePhase.Playing)) {
+            val snapshot = withContext(Dispatchers.Default) { adapter.animeTorrentSnapshot() }
+            if (snapshot.generation == generation) {
+                animeTorrentSnapshot = snapshot
+                if (animeState.phase == CrossPlatformAnimePhase.Buffering) animeStatus = snapshot.statusText
+                if (snapshot.phase == TorrentTransferPhase.Failed) {
+                    animeStatus = snapshot.statusText
+                    animeState = animeState.torrentFailed(generation)
+                    break
+                }
+                val playable = adapter.consumeAnimeTorrentPlayableStream(generation)
+                if (playable != null && animeState.phase == CrossPlatformAnimePhase.Buffering) {
+                    val resolved = AnimeStreamCandidate(
+                        url = playable.url,
+                        quality = "${playable.quality} · BT 邊下邊播",
+                        headers = mapOf("resolver" to "torrent-stream", "X-TVShell-Torrent-ID" to playable.taskID),
+                    )
+                    animeState = animeState.torrentReady(generation, resolved)
+                    animeStatus = "BT 已緩衝完成：${playable.selectedPath}"
+                }
+            }
+            delay(250)
+        }
+    }
+    LaunchedEffect(screen, animeState.downloadManager.isVisible, animeState.pendingAction) {
+        if (screen != ShellRoute.Anime || !animeState.downloadManager.isVisible) return@LaunchedEffect
+        val action = animeState.pendingAction ?: return@LaunchedEffect
+        when {
+            action == "downloads:refresh" -> withContext(Dispatchers.Default) { adapter.animeTorrentDownloads() }.fold(
+                onSuccess = { animeState = animeState.downloadsLoaded(it) },
+                onFailure = {
+                    animeStatus = "下載管理載入失敗：${it.message ?: "未知原因"}"
+                    animeState = animeState.clearAction()
+                },
+            )
+            action.startsWith("delete:") -> {
+                val id = action.substringAfter(':')
+                withContext(Dispatchers.Default) { adapter.deleteAnimeTorrentDownload(id) }.fold(
+                    onSuccess = {
+                        animeStatus = "已刪除 BT 快取。"
+                        animeState = animeState.torrentDownloadDeleted(id)
+                    },
+                    onFailure = {
+                        animeStatus = "刪除失敗：${it.message ?: "未知原因"}"
+                        animeState = animeState.clearAction()
+                    },
+                )
+            }
+        }
+    }
+    LaunchedEffect(screen, animeState.phase, animeState.pendingAction, animeState.selectedStreamIndex) {
         if (screen != ShellRoute.Anime || animeState.phase != CrossPlatformAnimePhase.Playing) return@LaunchedEffect
         val action = animeState.pendingAction ?: return@LaunchedEffect
         if (!action.startsWith("load:")) return@LaunchedEffect
-        val candidate = animeState.streamCandidates.getOrNull(animeState.selectedStreamIndex) ?: return@LaunchedEffect
+        val candidate = animeState.activePlayerCandidate ?: return@LaunchedEffect
         animeWebState = WebRuntimeState(candidate.url)
-        adapter.loadAnimeStream(candidate).fold(
+        withContext(Dispatchers.Default) { adapter.loadAnimeStream(candidate) }.fold(
             onSuccess = {
                 val cards = if (animeState.focusedTopTab == AnimeTopTab.History) watchHistory.entries else animeCards
-                cards.getOrNull(animeState.selectedCardIndex)?.let(::recordWatch)
+                cards.getOrNull(animeState.selectedCardIndex)?.let { card ->
+                    val episode = animeEpisodes.getOrNull(animeState.focusedEpisode)
+                    val torrentCandidate = animeState.streamCandidates.getOrNull(animeState.selectedStreamIndex)
+                        ?.takeIf { it.url.startsWith("magnet:?", ignoreCase = true) || it.headers["resolver"] == "torrent" }
+                    val historyCard = if (episode != null && torrentCandidate != null) {
+                        runCatching { dev.tvshell.shared.anime.MagnetHistoryReplay.card(card, episode, torrentCandidate) }
+                            .getOrDefault(card)
+                    } else {
+                        card
+                    }
+                    recordWatch(historyCard)
+                }
                 animeStatus = "播放源：${candidate.quality}"
                 animePlaybackSeconds = 0.0
+                animePlaybackDurationSeconds = 0.0
                 animeState = animeState.clearAction()
             },
             onFailure = {
+                val failedTorrentGeneration = animeState.activeTorrentGeneration
+                adapter.stopAnime()
+                failedTorrentGeneration?.let(adapter::cancelAnimeTorrentAutoplay)
                 animeStatus = "播放失敗：${it.message ?: "未知原因"}"
-                animeState = animeState.copy(phase = CrossPlatformAnimePhase.Episodes, isPlaying = false, pendingAction = null)
+                animeState = animeState.copy(
+                    phase = CrossPlatformAnimePhase.Episodes,
+                    resolvedPlaybackCandidate = null,
+                    activeTorrentGeneration = null,
+                    isPlaying = false,
+                    pendingAction = null,
+                )
             },
         )
     }
@@ -534,10 +758,30 @@ fun TVShellApp(
             },
         )
     }
-    LaunchedEffect(animeState.phase, animeState.isPlaying) {
-        while (animeState.phase == CrossPlatformAnimePhase.Playing && animeState.isPlaying) {
-            delay(50)
-            animePlaybackSeconds += .05
+    LaunchedEffect(screen, animeState.phase, animeState.activePlayerCandidate?.url) {
+        while (screen == ShellRoute.Anime && animeState.phase == CrossPlatformAnimePhase.Playing) {
+            val playback = withContext(Dispatchers.Default) { adapter.animePlaybackSnapshot() }
+            if (!playback.error.isNullOrBlank()) {
+                val failedGeneration = animeState.activeTorrentGeneration
+                adapter.stopAnime()
+                failedGeneration?.let(adapter::cancelAnimeTorrentAutoplay)
+                animeStatus = "播放失敗：${playback.error}"
+                animeState = animeState.copy(
+                    phase = CrossPlatformAnimePhase.Episodes,
+                    resolvedPlaybackCandidate = null,
+                    activeTorrentGeneration = null,
+                    isPlaying = false,
+                    pendingAction = null,
+                )
+                break
+            }
+            if (playback.positionSeconds > 0.0 || playback.durationSeconds > 0.0 || playback.isPlaying) {
+                animePlaybackSeconds = playback.positionSeconds.coerceAtLeast(0.0)
+                animePlaybackDurationSeconds = playback.durationSeconds.coerceAtLeast(0.0)
+            } else if (animeState.activePlayerCandidate?.headers?.get("resolver") == "official" && animeState.isPlaying) {
+                animePlaybackSeconds += .25
+            }
+            delay(250)
         }
     }
     LaunchedEffect(animeState.phase, animeState.isPlayerHUDVisible, animeState.pendingAction) {
@@ -596,8 +840,10 @@ fun TVShellApp(
                         animeDanmaku,
                         animeDanmakuStatus,
                         animePlaybackSeconds,
+                        animePlaybackDurationSeconds,
                         controlCenterState.danmaku,
                         animeWebState,
+                        animeTorrentSnapshot,
                     )
                 }
                 ShellRoute.YouTube -> NativeMediaRoute("YouTube", listOf("推薦", "熱門", "訂閱", "搜尋"), mediaState, mediaCards, mediaStatus, mediaWebState) {
@@ -618,7 +864,10 @@ fun TVShellApp(
                 }
             }
         }
-        if (screen == ShellRoute.Launcher || (animeOnly && screen == ShellRoute.Anime && animeState.phase != CrossPlatformAnimePhase.Playing)) {
+        if (screen == ShellRoute.Launcher || (animeOnly && screen == ShellRoute.Anime && animeState.phase !in setOf(
+                CrossPlatformAnimePhase.Playing,
+                CrossPlatformAnimePhase.Buffering,
+            ))) {
             Text(
                 clockLabel,
                 color = Color.White,
@@ -636,6 +885,36 @@ fun TVShellApp(
     }
 }
 
+private data class ExternalMagnetPlayback(
+    val candidate: AnimeStreamCandidate,
+    val card: NativeMediaCard,
+    val episode: AnimeEpisode,
+)
+
+private fun externalMagnetPlayback(rawMagnet: String): ExternalMagnetPlayback {
+    val magnet = MagnetLink.normalize(rawMagnet)
+    val title = MagnetLink.displayName(magnet)
+    val id = TorrentIdentity.stableID(magnet)
+    val candidate = AnimeStreamCandidate(
+        url = magnet,
+        quality = "Magnet · BT",
+        headers = mapOf("resolver" to "torrent", "source" to "外部 Magnet"),
+    )
+    return ExternalMagnetPlayback(
+        candidate = candidate,
+        card = NativeMediaCard(
+            id = "magnet-$id",
+            title = title,
+            subtitle = "外部 Magnet · BT 邊下邊播",
+            thumbnailURL = "",
+            playbackURL = magnet,
+            animeSource = AnimeSourceKind.AniSubsBT,
+            animeEpisodeNumber = 0,
+        ),
+        episode = AnimeEpisode("magnet:$id", title, 0, magnet),
+    )
+}
+
 private fun playerWebCommand(command: RemoteCommand): RemoteCommand = when (command) {
     RemoteCommand.Select -> RemoteCommand.PlayPause
     RemoteCommand.Left -> RemoteCommand.Rewind
@@ -643,6 +922,17 @@ private fun playerWebCommand(command: RemoteCommand): RemoteCommand = when (comm
     RemoteCommand.Up -> RemoteCommand.VolumeUp
     RemoteCommand.Down -> RemoteCommand.VolumeDown
     else -> command
+}
+
+internal fun animePlaybackTimeLabel(seconds: Double): String {
+    if (!seconds.isFinite()) return "0:00"
+    val total = seconds.coerceAtLeast(0.0).toInt()
+    return "${total / 60}:${(total % 60).toString().padStart(2, '0')}"
+}
+
+internal fun animePlayerProgress(currentSeconds: Double, durationSeconds: Double): Float {
+    if (!currentSeconds.isFinite() || !durationSeconds.isFinite() || durationSeconds <= 0.0) return 0f
+    return (currentSeconds / durationSeconds).toFloat().coerceIn(0f, 1f)
 }
 
 internal fun shouldHandleRootKeyEvent(hasExternalDispatcher: Boolean): Boolean = !hasExternalDispatcher
@@ -691,7 +981,7 @@ private fun NativeMediaBrowser(
 ) {
     val listState = rememberLazyGridState()
     LaunchedEffect(state.focusedCard) {
-        if (!state.isTopNavigationFocused && cards.isNotEmpty()) listState.animateScrollToItem(state.focusedCard)
+        if (!state.isTopNavigationFocused && cards.isNotEmpty()) listState.animateScrollToItemCentered(state.focusedCard)
     }
     Column(
         Modifier.fillMaxSize().padding(horizontal = 86.dp, vertical = 48.dp),
@@ -734,8 +1024,8 @@ private fun NativeMediaBrowser(
             LazyVerticalGrid(
                 columns = GridCells.Fixed(state.gridColumns),
                 state = listState,
-                horizontalArrangement = Arrangement.spacedBy(28.dp),
-                verticalArrangement = Arrangement.spacedBy(32.dp),
+                horizontalArrangement = Arrangement.spacedBy(18.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
                 modifier = Modifier.fillMaxWidth().weight(1f),
             ) {
                 gridItemsIndexed(cards, key = { _, card -> card.id }) { index, card ->
@@ -808,10 +1098,10 @@ private fun Launcher(state: LauncherState, history: List<NativeMediaCard>) {
     val listState = rememberLazyListState()
     val historyListState = rememberLazyListState()
     LaunchedEffect(state.focusedIndex) {
-        if (state.focus == LauncherFocus.Apps && state.apps.isNotEmpty()) listState.animateScrollToItem(state.focusedIndex)
+        if (state.focus == LauncherFocus.Apps && state.apps.isNotEmpty()) listState.animateScrollToItemCentered(state.focusedIndex)
     }
     LaunchedEffect(state.focusedHistoryIndex, state.focus) {
-        if (state.focus == LauncherFocus.History && history.isNotEmpty()) historyListState.animateScrollToItem(state.focusedHistoryIndex)
+        if (state.focus == LauncherFocus.History && history.isNotEmpty()) historyListState.animateScrollToItemCentered(state.focusedHistoryIndex)
     }
     Column(
         Modifier.fillMaxSize().padding(horizontal = 86.dp, vertical = 48.dp),
@@ -1035,7 +1325,7 @@ private fun ReferenceSplitPage(
 ) {
     val listState = rememberLazyListState()
     LaunchedEffect(focusedIndex, rows.size) {
-        if (rows.isNotEmpty()) listState.animateScrollToItem(focusedIndex.coerceIn(rows.indices))
+        if (rows.isNotEmpty()) listState.animateScrollToItemCentered(focusedIndex.coerceIn(rows.indices))
     }
     Row(
         Modifier.fillMaxSize().padding(horizontal = 86.dp, vertical = 60.dp),
@@ -1076,7 +1366,7 @@ private fun ReferenceSplitPage(
 private fun SettingsScreen(state: SettingsState) {
     val listState = rememberLazyListState()
     LaunchedEffect(state.focusedItem) {
-        listState.animateScrollToItem(state.focusedItem.ordinal)
+        listState.animateScrollToItemCentered(state.focusedItem.ordinal)
     }
     Row(
         Modifier.fillMaxSize().padding(horizontal = 86.dp, vertical = 60.dp),
@@ -1211,8 +1501,10 @@ private fun AnimeBrowser(
     danmaku: List<DanmakuComment>,
     danmakuStatus: String,
     playbackSeconds: Double,
+    playbackDurationSeconds: Double,
     danmakuSettings: DanmakuSettings,
     webState: WebRuntimeState,
+    torrentSnapshot: TorrentTransferSnapshot,
 ) {
     val sources = animeSourcesFor(state.focusedTopTab)
     val visibleCards = if (state.focusedTopTab == AnimeTopTab.History) history else cards
@@ -1232,6 +1524,19 @@ private fun AnimeBrowser(
                 AnimeProgressOverlay("正在解析播放源", status)
             }
             if (state.isStreamPickerVisible) AnimeStreamPicker(state, episodes.getOrNull(state.focusedEpisode))
+            if (state.downloadManager.isVisible) TorrentDownloadManagerOverlay(state)
+        }
+        return
+    }
+    if (state.phase == CrossPlatformAnimePhase.Buffering) {
+        Box(Modifier.fillMaxSize()) {
+            AnimeTorrentBufferingScreen(
+                selectedCard,
+                episodes.getOrNull(state.focusedEpisode),
+                torrentSnapshot,
+                status,
+            )
+            if (state.isStreamPickerVisible) AnimeStreamPicker(state, episodes.getOrNull(state.focusedEpisode))
         }
         return
     }
@@ -1245,8 +1550,10 @@ private fun AnimeBrowser(
                 danmaku,
                 danmakuStatus,
                 playbackSeconds,
+                playbackDurationSeconds,
                 danmakuSettings,
                 webState,
+                torrentSnapshot,
             )
             if (state.isStreamPickerVisible) AnimeStreamPicker(state, episodes.getOrNull(state.focusedEpisode))
         }
@@ -1256,9 +1563,9 @@ private fun AnimeBrowser(
     val titleGridState = rememberLazyGridState()
     LaunchedEffect(state.focusedSource, state.focusedCard, state.phase) {
         if (state.phase == CrossPlatformAnimePhase.Titles && visibleCards.isNotEmpty()) {
-            titleGridState.animateScrollToItem(state.focusedCard)
+            titleGridState.animateScrollToItemCentered(state.focusedCard)
         } else if (sources.isNotEmpty()) {
-            sourceListState.animateScrollToItem(state.focusedSource)
+            sourceListState.animateScrollToItemCentered(state.focusedSource)
         }
     }
     Column(
@@ -1292,14 +1599,14 @@ private fun AnimeBrowser(
         }
         if (state.phase == CrossPlatformAnimePhase.Titles && visibleCards.isNotEmpty()) {
             LazyVerticalGrid(
-                columns = GridCells.Fixed(state.gridColumns),
+                columns = GridCells.Fixed(state.activeTitleGridColumns),
                 state = titleGridState,
                 horizontalArrangement = Arrangement.spacedBy(28.dp),
                 verticalArrangement = Arrangement.spacedBy(32.dp),
                 modifier = Modifier.fillMaxWidth().weight(1f),
             ) {
                 gridItemsIndexed(visibleCards, key = { _, card -> card.id }) { index, card ->
-                    MediaTile(card, !state.isTopNavigationFocused && index == state.focusedCard)
+                    AnimeTitleTile(card, !state.isTopNavigationFocused && index == state.focusedCard)
                 }
             }
         } else if (state.phase == CrossPlatformAnimePhase.Titles) {
@@ -1338,27 +1645,27 @@ private fun AnimeBrowser(
 private fun AnimeDetailScreen(card: NativeMediaCard?, status: String) {
     Row(
         Modifier.fillMaxSize().padding(horizontal = 86.dp, vertical = 68.dp),
-        horizontalArrangement = Arrangement.spacedBy(56.dp),
+        horizontalArrangement = Arrangement.spacedBy(48.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.width(500.dp).aspectRatio(16f / 9f)
-                .tvShellSurface(TVSurfaceRole.Content, cornerRadius = 20f),
+            Modifier.width(280.dp).aspectRatio(2f / 3f)
+                .tvShellSurface(TVSurfaceRole.Content, cornerRadius = 12f),
             contentAlignment = Alignment.Center,
         ) {
             card?.let { NetworkThumbnail(NetworkThumbnailRequest(it.thumbnailURL), it.title, Modifier.fillMaxSize()) }
             if (card?.thumbnailURL.isNullOrBlank()) Text("動畫", color = Color.White.copy(alpha = .7f), fontSize = 48.sp, fontWeight = FontWeight.Bold)
         }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-            Text(card?.subtitle ?: "動畫", color = Color.White.copy(alpha = .62f), fontSize = 25.sp, fontWeight = FontWeight.SemiBold)
-            Text(card?.title ?: "動漫詳情", color = Color.White, fontSize = 58.sp, fontWeight = FontWeight.Bold, maxLines = 3)
-            Text(status, color = Color.White.copy(alpha = .62f), fontSize = 23.sp, maxLines = 3)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(22.dp)) {
+            Text(card?.subtitle ?: "動畫", color = Color.White.copy(alpha = .62f), fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+            Text(card?.title ?: "動漫詳情", color = Color.White, fontSize = 56.sp, fontWeight = FontWeight.Bold, maxLines = 3)
+            Text(status, color = Color.White.copy(alpha = .62f), fontSize = 22.sp, maxLines = 4)
             Text(
                 "開始觀看",
                 color = Color.Black,
                 fontSize = 31.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.tvShellSurface(TVSurfaceRole.Content, isFocused = true, cornerRadius = 12f)
+                modifier = Modifier.tvShellSurface(TVSurfaceRole.Content, isFocused = true, cornerRadius = 10f)
                     .padding(horizontal = 34.dp, vertical = 20.dp),
             )
             Text("OK 載入選集，Back 回封面牆。", color = Color.White.copy(alpha = .58f), fontSize = 21.sp)
@@ -1385,16 +1692,16 @@ private fun AnimeEpisodeScreen(
 ) {
     val listState = rememberLazyGridState()
     LaunchedEffect(state.focusedEpisode) {
-        if (episodes.isNotEmpty()) listState.animateScrollToItem(state.focusedEpisode)
+        if (episodes.isNotEmpty()) listState.animateScrollToItemCentered(state.focusedEpisode)
     }
     Column(
         Modifier.fillMaxSize().padding(horizontal = 86.dp, vertical = 54.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp),
+        verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
-        Text(card?.title ?: "選集", color = Color.White, fontSize = 52.sp, fontWeight = FontWeight.Bold, maxLines = 2)
-        Text(status, color = Color.White.copy(alpha = .62f), fontSize = 22.sp, maxLines = 2)
+        Text(card?.title ?: "選集", color = Color.White, fontSize = 64.sp, fontWeight = FontWeight.Bold, maxLines = 2)
+        Text(status, color = Color.White.copy(alpha = .62f), fontSize = 24.sp, maxLines = 2)
         LazyVerticalGrid(
-            columns = GridCells.Fixed(state.gridColumns),
+            columns = GridCells.Fixed(state.episodeGridColumns),
             state = listState,
             horizontalArrangement = Arrangement.spacedBy(22.dp),
             verticalArrangement = Arrangement.spacedBy(22.dp),
@@ -1403,13 +1710,13 @@ private fun AnimeEpisodeScreen(
             gridItemsIndexed(episodes, key = { _, episode -> episode.id }) { index, episode ->
                 val focused = index == state.focusedEpisode && state.phase == CrossPlatformAnimePhase.Episodes
                 Column(
-                    Modifier.height(132.dp).tvShellFocus(focused)
-                        .tvShellSurface(TVSurfaceRole.Content, isFocused = focused, cornerRadius = 14f)
-                        .padding(22.dp),
+                    Modifier.height(158.dp).tvShellFocus(focused)
+                        .tvShellSurface(TVSurfaceRole.Content, isFocused = focused, cornerRadius = 10f)
+                        .padding(26.dp),
                     verticalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text("${episode.number.toString().padStart(2, '0')}", color = if (focused) Color.Black.copy(alpha = .62f) else Color.White.copy(alpha = .62f), fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                    Text(episode.title, color = if (focused) Color.Black else Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 2)
+                    Text(if (episode.number > 0) episode.number.toString().padStart(2, '0') else "BT", color = if (focused) Color.Black.copy(alpha = .62f) else Color.White.copy(alpha = .62f), fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    Text(episode.title, color = if (focused) Color.Black else Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 2)
                 }
             }
         }
@@ -1426,11 +1733,13 @@ private fun AnimePlayerScreen(
     danmaku: List<DanmakuComment>,
     danmakuStatus: String,
     playbackSeconds: Double,
+    playbackDurationSeconds: Double,
     danmakuSettings: DanmakuSettings,
     webState: WebRuntimeState,
+    torrentSnapshot: TorrentTransferSnapshot,
 ) {
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        val candidate = state.streamCandidates.getOrNull(state.selectedStreamIndex)
+        val candidate = state.activePlayerCandidate
         if (candidate?.headers?.get("resolver") == "official") {
             PlatformWebSurface(
                 url = candidate.url,
@@ -1452,30 +1761,138 @@ private fun AnimePlayerScreen(
         if (state.isPlayerHUDVisible) {
             Column(
                 Modifier.align(Alignment.BottomStart).fillMaxWidth()
-                    .background(Color.Black.copy(alpha = .72f))
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color.Black.copy(alpha = .92f)),
+                        ),
+                    )
                     .padding(horizontal = 62.dp, vertical = 36.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Text(episode?.title ?: "正在播放", color = Color.White.copy(alpha = .72f), fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (state.activeTorrentGeneration != null && torrentSnapshot.selectedBytes > 0) {
+                        "BT：已下載 ${TorrentTransferSnapshot.formatBytes(torrentSnapshot.selectedBytes)} · ${episode?.title ?: "正在播放"}"
+                    } else {
+                        episode?.title ?: "正在播放"
+                    },
+                    color = Color.White.copy(alpha = .72f),
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
                 Text(card?.title ?: "動畫", color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.Bold, maxLines = 2)
                 Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(Color.White.copy(alpha = .28f))) {
-                    Box(Modifier.fillMaxWidth(.18f).fillMaxHeight().background(Color.White))
+                    Box(
+                        Modifier.fillMaxWidth(animePlayerProgress(playbackSeconds, playbackDurationSeconds))
+                            .fillMaxHeight().background(Color.White),
+                    )
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(animePlaybackTimeLabel(playbackSeconds), color = Color.White.copy(alpha = .64f), fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (playbackDurationSeconds > 0.0) "-${animePlaybackTimeLabel((playbackDurationSeconds - playbackSeconds).coerceAtLeast(0.0))}" else "--:--",
+                        color = Color.White.copy(alpha = .64f),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(if (state.isPlaying) "▶ 播放中" else "Ⅱ 已暫停", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Text(status, color = Color.White.copy(alpha = .68f), fontSize = 19.sp, maxLines = 1)
+                    Text(
+                        if (state.activeTorrentGeneration != null && torrentSnapshot.detailText.isNotBlank()) torrentSnapshot.detailText else status,
+                        color = Color.White.copy(alpha = .68f),
+                        fontSize = 19.sp,
+                        maxLines = 1,
+                    )
+                }
+            }
+            Text(
+                "${if (danmakuSettings.isVisible) "彈幕 ON" else "彈幕 OFF"}  ·  $danmakuStatus",
+                color = Color.White,
+                fontSize = 19.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.TopEnd).padding(34.dp)
+                    .tvShellSurface(TVSurfaceRole.Panel, cornerRadius = 10f)
+                    .padding(horizontal = 18.dp, vertical = 10.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AnimeTorrentBufferingScreen(
+    card: NativeMediaCard?,
+    episode: AnimeEpisode?,
+    snapshot: TorrentTransferSnapshot,
+    status: String,
+) {
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        Column(
+            Modifier.align(Alignment.BottomStart).fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .94f))))
+                .padding(horizontal = 72.dp, vertical = 54.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text("BT 邊下邊播 · ${episode?.title ?: "正在準備"}", color = Color.White.copy(alpha = .68f), fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            Text(card?.title ?: "動畫", color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold, maxLines = 2)
+            Text(snapshot.statusText.takeUnless { snapshot.phase == TorrentTransferPhase.Idle } ?: status, color = Color.White.copy(alpha = .82f), fontSize = 23.sp)
+            Box(Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = .24f))) {
+                Box(Modifier.fillMaxWidth(snapshot.progressFraction).fillMaxHeight().background(Color.White))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(snapshot.selectedPath ?: "正在取得種子資訊", color = Color.White.copy(alpha = .64f), fontSize = 19.sp, maxLines = 1)
+                Text(snapshot.detailText, color = Color.White.copy(alpha = .64f), fontSize = 19.sp, maxLines = 1)
+            }
+            Text("Back 返回選集並保留背景下載", color = Color.White.copy(alpha = .5f), fontSize = 18.sp)
+        }
+    }
+}
+
+@Composable
+private fun TorrentDownloadManagerOverlay(state: CrossPlatformAnimeBrowserState) {
+    val manager = state.downloadManager
+    val listState = rememberLazyListState()
+    LaunchedEffect(manager.focusedIndex, manager.items.size) {
+        if (manager.items.isNotEmpty()) listState.animateScrollToItemCentered(manager.focusedIndex)
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .45f)), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier.width(980.dp).height(760.dp)
+                .tvShellSurface(TVSurfaceRole.Panel, cornerRadius = 20f)
+                .padding(38.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            Text("BT 下載管理", color = Color.White, fontSize = 42.sp, fontWeight = FontWeight.Bold)
+            Text("方向鍵選擇，OK 或 Menu 刪除，Back 關閉。", color = Color.White.copy(alpha = .58f), fontSize = 20.sp)
+            if (manager.items.isEmpty()) {
+                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                    Text("目前沒有 BT 快取", color = Color.White.copy(alpha = .56f), fontSize = 26.sp)
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                ) {
+                    itemsIndexed(manager.items, key = { _, item -> item.id }) { index, item ->
+                        val focused = index == manager.focusedIndex
+                        Row(
+                            Modifier.fillMaxWidth().tvShellFocus(focused)
+                                .tvShellSurface(TVSurfaceRole.Content, isFocused = focused, cornerRadius = 12f)
+                                .padding(horizontal = 24.dp, vertical = 20.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                                Text(item.title, color = if (focused) Color.Black else Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                Text(item.subtitle, color = if (focused) Color.Black.copy(alpha = .6f) else Color.White.copy(alpha = .58f), fontSize = 19.sp, maxLines = 1)
+                            }
+                            Text(TorrentTransferSnapshot.formatBytes(item.bytes), color = if (focused) Color.Black.copy(alpha = .68f) else Color.White.copy(alpha = .64f), fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }
-        Text(
-            "${if (danmakuSettings.isVisible) "彈幕 ON" else "彈幕 OFF"}  ·  $danmakuStatus",
-            color = Color.White,
-            fontSize = 19.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.align(Alignment.TopEnd).padding(34.dp)
-                .tvShellSurface(TVSurfaceRole.Panel, cornerRadius = 10f)
-                .padding(horizontal = 18.dp, vertical = 10.dp),
-        )
     }
 }
 
@@ -1509,6 +1926,22 @@ private fun DanmakuOverlay(
     }
 }
 
+private suspend fun LazyListState.animateScrollToItemCentered(index: Int) {
+    animateScrollToItem(index)
+    val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return
+    val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2
+    val itemCenter = item.offset + item.size / 2
+    animateScrollBy((itemCenter - viewportCenter).toFloat())
+}
+
+private suspend fun LazyGridState.animateScrollToItemCentered(index: Int) {
+    animateScrollToItem(index)
+    val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return
+    val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2
+    val itemCenter = item.offset.y + item.size.height / 2
+    animateScrollBy((itemCenter - viewportCenter).toFloat())
+}
+
 private fun danmakuColor(value: String): Color {
     val number = value.removePrefix("#").toIntOrNull(16) ?: 0xFFFFFF
     return Color(
@@ -1535,27 +1968,62 @@ private fun AnimeProgressOverlay(title: String, status: String) {
 
 @Composable
 private fun AnimeStreamPicker(state: CrossPlatformAnimeBrowserState, episode: AnimeEpisode?) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(state.focusedStreamIndex, state.streamCandidates.size) {
+        if (state.streamCandidates.isNotEmpty()) listState.animateScrollToItemCentered(state.focusedStreamIndex)
+    }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .58f)), contentAlignment = Alignment.Center) {
         Column(
-            Modifier.width(760.dp).tvShellSurface(TVSurfaceRole.Panel, cornerRadius = 22f).padding(34.dp),
+            Modifier.width(1120.dp).height(760.dp).tvShellSurface(TVSurfaceRole.Panel, cornerRadius = 20f).padding(34.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text("選擇播放源", color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Bold)
             Text(episode?.title ?: "目前集數", color = Color.White.copy(alpha = .62f), fontSize = 21.sp)
-            state.streamCandidates.forEachIndexed { index, candidate ->
-                val focused = index == state.focusedStreamIndex
-                Row(
-                    Modifier.fillMaxWidth().tvShellFocus(focused)
-                        .tvShellSurface(TVSurfaceRole.Content, isFocused = focused, cornerRadius = 12f)
-                        .padding(horizontal = 22.dp, vertical = 18.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text("播放線 ${index + 1}", color = if (focused) Color.Black else Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
-                    Text(candidate.quality, color = if (focused) Color.Black.copy(alpha = .64f) else Color.White.copy(alpha = .62f), fontSize = 20.sp)
+            LazyColumn(
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.fillMaxWidth().weight(1f),
+            ) {
+                itemsIndexed(state.streamCandidates, key = { _, candidate -> candidate.url }) { index, candidate ->
+                    val focused = index == state.focusedStreamIndex
+                    Row(
+                        Modifier.fillMaxWidth().tvShellFocus(focused)
+                            .tvShellSurface(TVSurfaceRole.Content, isFocused = focused, cornerRadius = 10f)
+                            .padding(horizontal = 24.dp, vertical = 20.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text(candidate.headers["title"] ?: "播放線 ${index + 1}", color = if (focused) Color.Black else Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 2)
+                            Text(candidate.headers["channel"] ?: candidate.headers["source"] ?: candidate.url.substringAfter("//").substringBefore('/'), color = if (focused) Color.Black.copy(alpha = .56f) else Color.White.copy(alpha = .52f), fontSize = 17.sp, maxLines = 1)
+                        }
+                        Text(candidate.quality, color = if (focused) Color.Black.copy(alpha = .64f) else Color.White.copy(alpha = .62f), fontSize = 21.sp)
+                    }
                 }
             }
             Text("方向鍵選擇，OK 播放，Back 取消。", color = Color.White.copy(alpha = .56f), fontSize = 19.sp)
         }
+    }
+}
+
+@Composable
+private fun AnimeTitleTile(card: NativeMediaCard, focused: Boolean) {
+    Column(
+        Modifier.tvShellFocus(focused),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(2f / 3f)
+                .tvShellSurface(TVSurfaceRole.Content, isFocused = focused, cornerRadius = 12f),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (card.thumbnailURL.isNotBlank()) {
+                NetworkThumbnail(NetworkThumbnailRequest(card.thumbnailURL), card.title, Modifier.fillMaxSize())
+            } else {
+                Text("動畫", color = if (focused) Color.Black.copy(alpha = .62f) else Color.White.copy(alpha = .62f), fontSize = 32.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        Text(card.title, color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold, maxLines = 2)
+        Text(card.subtitle, color = Color.White.copy(alpha = .56f), fontSize = 17.sp, maxLines = 1)
     }
 }
 
@@ -1608,7 +2076,7 @@ private fun animeSourceGlyph(kind: AnimeSourceKind): String = when (kind) {
 private fun ControlCenter(state: ControlCenterState) {
     val gridState = rememberLazyGridState()
     LaunchedEffect(state.focusedItem) {
-        gridState.animateScrollToItem(state.focusedItem.ordinal)
+        gridState.animateScrollToItemCentered(state.focusedItem.ordinal)
     }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .18f)), contentAlignment = Alignment.TopEnd) {
         Column(

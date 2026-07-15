@@ -69,6 +69,8 @@ class NativeMediaTest {
         assertEquals(WebRuntimeCommand.Select, state.signal.command)
         state = state.reduce(RemoteCommand.PlayPause)
         assertEquals(WebRuntimeCommand.PlayPause, state.signal.command)
+        state = state.reduce(RemoteCommand.Mute)
+        assertEquals(WebRuntimeCommand.Mute, state.signal.command)
         state = state.reduce(RemoteCommand.Back)
         assertEquals(WebRuntimeCommand.Back, state.signal.command)
         assertEquals(null, state.pendingAction)

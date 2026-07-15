@@ -211,7 +211,17 @@ class LauncherStateTest {
         val original = ShellPreferences(
             animeSources = AnimeSourceSettings(css1SubscriptionURL = "https://example.com/css1.json"),
             history = WatchHistoryState(
-                listOf(NativeMediaCard("id", "作品", "第 3 集", "https://example.com/a.jpg", "https://example.com/play")),
+                listOf(
+                    NativeMediaCard(
+                        "id",
+                        "作品",
+                        "第 3 集",
+                        "https://example.com/a.jpg",
+                        "magnet:?xt=urn:btih:3333333333333333333333333333333333333333",
+                        animeSource = AnimeSourceKind.Mikan,
+                        animeEpisodeNumber = 3,
+                    ),
+                ),
             ),
             controlCenter = ControlCenterState(displayScaleIndex = 2, wallpaperIndex = 3),
         )

@@ -96,6 +96,7 @@ private fun scriptFor(command: WebRuntimeCommand): String = when (command) {
     WebRuntimeCommand.FastForward -> videoScript("v.currentTime=Math.min(v.duration||Infinity,v.currentTime+15)")
     WebRuntimeCommand.VolumeUp -> videoScript("v.volume=Math.min(1,v.volume+.1)")
     WebRuntimeCommand.VolumeDown -> videoScript("v.volume=Math.max(0,v.volume-.1)")
+    WebRuntimeCommand.Mute -> videoScript("v.muted=!v.muted")
     else -> "void 0"
 }
 

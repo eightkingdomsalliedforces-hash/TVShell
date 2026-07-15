@@ -30,15 +30,49 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
       - name: Test shared UI and build Android TV APKs
-        run: ./gradlew :shared-ui:desktopTest :android-app:assemblePlayDebug :android-app:assembleLauncherDebug :anime-android-app:assembleDebug
+        run: ./gradlew :torrent-runtime:test :shared-ui:desktopTest :android-app:assemblePlayDebug :android-app:assembleLauncherDebug :anime-android-app:assembleDebug
+      - name: Verify embedded Android torrent engine ABIs
+        run: |
+          set -euo pipefail
+          COUNT=0
+          while IFS= read -r -d '' APK; do
+            COUNT=$((COUNT + 1))
+            LISTING="$RUNNER_TEMP/$(basename "$APK").listing"
+            unzip -l "$APK" > "$LISTING"
+            for ABI in armeabi-v7a arm64-v8a x86 x86_64; do
+              grep -q "lib/$ABI/libjlibtorrent-2.0.12.9.so" "$LISTING"
+            done
+            for NOTICE in \
+              ThirdPartyNotices.txt \
+              licenses/Apache-2.0.txt \
+              licenses/GPL-2.0.txt \
+              licenses/LGPL-2.1.txt \
+              licenses/libtorrent-cb6fe6b9c28735b42edd77740a554d1709acad02-LICENSE.txt; do
+              grep -q "assets/$NOTICE" "$LISTING"
+              unzip -p "$APK" "assets/$NOTICE" | cmp - "package-resources/common/$NOTICE"
+            done
+          done < <(find android-app/build/outputs/apk anime-android-app/build/outputs/apk -name '*.apk' -print0)
+          test "$COUNT" -ge 3
       - name: Verify launcher intent separation
         run: |
           PLAY="android-app/build/intermediates/merged_manifests/playDebug/processPlayDebugManifest/AndroidManifest.xml"
           LAUNCHER="android-app/build/intermediates/merged_manifests/launcherDebug/processLauncherDebugManifest/AndroidManifest.xml"
+          ANIME="anime-android-app/build/intermediates/merged_manifests/debug/processDebugManifest/AndroidManifest.xml"
           grep -q "android.intent.category.LEANBACK_LAUNCHER" "$PLAY"
           ! grep -q "android.intent.category.HOME" "$PLAY"
           grep -q "android.intent.category.LEANBACK_LAUNCHER" "$LAUNCHER"
           grep -q "android.intent.category.HOME" "$LAUNCHER"
+          grep -q 'android:usesCleartextTraffic="true"' "$PLAY"
+          grep -q 'android:usesCleartextTraffic="true"' "$ANIME"
+          for MANIFEST in "$PLAY" "$LAUNCHER" "$ANIME"; do
+            grep -q 'android:minSdkVersion="26"' "$MANIFEST"
+            grep -q "android:versionCode=\"${GITHUB_RUN_NUMBER}\"" "$MANIFEST"
+            grep -q 'android:exported="true"' "$MANIFEST"
+            grep -q 'android.intent.action.VIEW' "$MANIFEST"
+            grep -q 'android.intent.category.DEFAULT' "$MANIFEST"
+            grep -q 'android.intent.category.BROWSABLE' "$MANIFEST"
+            grep -q 'android:scheme="magnet"' "$MANIFEST"
+          done
       - name: Upload Android TV APKs
         uses: actions/upload-artifact@v4
         with:
@@ -64,8 +98,127 @@ jobs:
           java-version: "21"
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+      - name: Download embedded LibVLC runtime
+        shell: pwsh
+        run: |
+          $version = "3.0.23.1"
+          $archive = Join-Path $env:RUNNER_TEMP "videolan-libvlc-windows-$version.zip"
+          $extract = Join-Path $env:RUNNER_TEMP "tvshell-vlc"
+          $destination = "package-resources/windows/vlc"
+          $allowList = "package-resources/windows/libvlc-plugins-x64.txt"
+          $package = "https://api.nuget.org/v3-flatcontainer/videolan.libvlc.windows/$version/videolan.libvlc.windows.$version.nupkg"
+          curl.exe -fL --retry 5 --retry-all-errors --output $archive $package
+          $expected = "70927afa9ad34b77e7d9a5e6d02cae099771f6eb3114da18111a4b76f65b836f"
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "LibVLC checksum mismatch: $actual" }
+          Remove-Item -Recurse -Force $extract -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force $destination -ErrorAction SilentlyContinue
+          Expand-Archive -Path $archive -DestinationPath $extract -Force
+          $source = Join-Path $extract "build/x64"
+          if (-not (Test-Path (Join-Path $source 'libvlc.dll')) -or
+              -not (Test-Path (Join-Path $source 'libvlccore.dll')) -or
+              -not (Test-Path (Join-Path $source 'plugins'))) {
+            throw "VideoLAN.LibVLC.Windows package layout is invalid"
+          }
+          New-Item -ItemType Directory -Force -Path $destination | Out-Null
+          Copy-Item -Force (Join-Path $source 'libvlc.dll') $destination
+          Copy-Item -Force (Join-Path $source 'libvlccore.dll') $destination
+          $pluginsDestination = Join-Path $destination 'plugins'
+          New-Item -ItemType Directory -Force -Path $pluginsDestination | Out-Null
+          $plugins = @(Get-Content $allowList | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+          if ($plugins.Count -ne 176 -or $plugins.Count -ne ($plugins | Sort-Object -Unique).Count) {
+            throw "The pinned libVLC plugin allowlist must contain 176 unique entries"
+          }
+          foreach ($relative in $plugins) {
+            $nativeRelative = $relative.Replace([char]'/', [IO.Path]::DirectorySeparatorChar)
+            $sourcePlugin = Join-Path (Join-Path $source 'plugins') $nativeRelative
+            if (-not (Test-Path $sourcePlugin -PathType Leaf)) {
+              throw "Pinned libVLC plugin is missing from NuGet: $relative"
+            }
+            $targetPlugin = Join-Path $pluginsDestination $nativeRelative
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $targetPlugin) | Out-Null
+            Copy-Item -Force $sourcePlugin $targetPlugin
+          }
+          $copiedPlugins = @(Get-ChildItem $pluginsDestination -Recurse -Filter '*.dll')
+          if ($copiedPlugins.Count -ne $plugins.Count) {
+            throw "Embedded libVLC plugin count mismatch: $($copiedPlugins.Count)"
+          }
+          Copy-Item -Force $allowList (Join-Path $destination 'PLUGIN-ALLOWLIST.txt')
+          @"
+          VideoLAN.LibVLC.Windows $version
+          Package: $package
+          libVLC: LGPL-2.1-or-later
+          Retained libavcodec/swscale modules use the package's GPL-enabled FFmpeg build:
+          GPL-2.0-or-later.
+          Optional x264 encoder, Lua, Dolby-surround and headphone-mixer plugins are excluded.
+          Corresponding source is published with every TVShell Windows release
+          as TVShell-Windows-Corresponding-Sources.zip.
+          "@ | Set-Content -Path (Join-Path $destination 'SOURCE-AND-LICENSE.txt') -Encoding utf8
+          "TVSHELL_VLC_DIR=$((Resolve-Path $destination).Path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Prepare Windows corresponding sources
+        shell: pwsh
+        run: |
+          $staging = "third-party-sources/staging"
+          $destination = "third-party-sources/TVShell-Windows-Corresponding-Sources.zip"
+          Remove-Item -Recurse -Force "third-party-sources" -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          $downloads = @(
+            @{
+              Name = "vlc-3.0.23.tar.xz"
+              Url = "https://download.videolan.org/pub/videolan/vlc/3.0.23/vlc-3.0.23.tar.xz"
+              Sha256 = "e891cae6aa3ccda69bf94173d5105cbc55c7a7d9b1d21b9b21666e69eff3e7e0"
+            },
+            @{
+              Name = "ffmpeg-4.4.5.tar.xz"
+              Url = "https://ffmpeg.org/releases/ffmpeg-4.4.5.tar.xz"
+              Sha256 = "f9514e0d3515aee5a271283df71636e1d1ff7274b15853bcd84e144be416ab07"
+            },
+            @{
+              Name = "zlib-1.3.1.tar.xz"
+              Url = "https://download.videolan.org/pub/contrib/zlib/zlib-1.3.1.tar.xz"
+              Sha256 = "38ef96b8dfe510d42707d9c781877914792541133e1870841463bfa73f883e32"
+            },
+            @{
+              Name = "libgsm_1.0.13.tar.gz"
+              Url = "https://download.videolan.org/pub/contrib/gsm/libgsm_1.0.13.tar.gz"
+              Sha256 = "52c518244d428c2e56c543b98c9135f4a76ff780c32455580b793f60a0a092ad"
+            },
+            @{
+              Name = "openjpeg-2.5.0.tar.gz"
+              Url = "https://download.videolan.org/pub/contrib/openjpeg/openjpeg-2.5.0.tar.gz"
+              Sha256 = "0333806d6adecc6f7a91243b2b839ff4d2053823634d4f6ed7a59bc87409122a"
+            },
+            @{
+              Name = "lame-3.100.tar.gz"
+              Url = "https://download.videolan.org/pub/contrib/lame/lame-3.100.tar.gz"
+              Sha256 = "ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e"
+            },
+            @{
+              Name = "mingw-w64-v10.0.0.tar.bz2"
+              Url = "https://downloads.sourceforge.net/project/mingw-w64/mingw-w64/mingw-w64-release/mingw-w64-v10.0.0.tar.bz2"
+              Sha256 = "ba6b430aed72c63a3768531f6a3ffc2b0fde2c57a3b251450dcf489a894f0894"
+            }
+          )
+          foreach ($item in $downloads) {
+            $path = Join-Path $staging $item.Name
+            curl.exe -fL --retry 5 --retry-all-errors --output $path $item.Url
+            $actual = (Get-FileHash -Algorithm SHA256 $path).Hash.ToLowerInvariant()
+            if ($actual -ne $item.Sha256) { throw "Source checksum mismatch for $($item.Name): $actual" }
+          }
+          Copy-Item "../../THIRD_PARTY_NOTICES.md" (Join-Path $staging "THIRD_PARTY_NOTICES.md")
+          @"
+          These are the corresponding upstream sources for the retained GPL/LGPL
+          libVLC and FFmpeg modules redistributed in TVShell's Windows runtime.
+          VLC's contrib rules and patches in vlc-3.0.23.tar.xz record the exact
+          FFmpeg configuration and the zlib, GSM, OpenJPEG, LAME and winpthreads
+          dependencies statically used by that build.
+
+          Binary package: VideoLAN.LibVLC.Windows 3.0.23.1
+          Source is provided without charge under each component's own license.
+          "@ | Set-Content -Path (Join-Path $staging "README.txt") -Encoding utf8
+          Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $destination -Force
       - name: Test Windows shared UI
-        run: ./gradlew.bat :shared-ui:desktopTest --stacktrace
+        run: ./gradlew.bat :torrent-runtime:test :shared-ui:desktopTest --stacktrace
       - name: Package TVShell Windows MSI
         shell: pwsh
         run: |
@@ -99,6 +252,51 @@ jobs:
           $destination = "anime-desktop/build/compose/binaries/main/portable/TVShell-Anime-Windows-Portable.zip"
           New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
           Compress-Archive -Path (Join-Path $source '*') -DestinationPath $destination -Force
+      - name: Verify embedded Windows torrent engine
+        shell: pwsh
+        run: |
+          $roots = @(
+            "shared-ui/build/compose/binaries/main/app",
+            "anime-desktop/build/compose/binaries/main/app"
+          )
+          foreach ($root in $roots) {
+            $jar = Get-ChildItem -Path $root -Recurse -Filter "jlibtorrent-windows-2.0.12.9*.jar" | Select-Object -First 1
+            if (-not $jar) { throw "Missing jlibtorrent Windows native jar in $root" }
+            $listing = & jar tf $jar.FullName
+            if (-not ($listing -match "lib/x86_64/jlibtorrent-2.0.12.9.dll")) {
+              throw "Missing jlibtorrent DLL inside $($jar.FullName)"
+            }
+            $libvlc = Get-ChildItem -Path $root -Recurse -Filter "libvlc.dll" | Select-Object -First 1
+            if (-not $libvlc) { throw "Missing embedded LibVLC runtime in $root" }
+            if (-not (Test-Path (Join-Path $libvlc.Directory.FullName "libvlccore.dll"))) {
+              throw "Missing embedded libvlccore.dll in $root"
+            }
+            if (-not (Test-Path (Join-Path $libvlc.Directory.FullName "plugins"))) {
+              throw "Missing embedded LibVLC plugins beside $($libvlc.FullName)"
+            }
+            $embeddedPlugins = @(Get-ChildItem (Join-Path $libvlc.Directory.FullName "plugins") -Recurse -Filter '*.dll')
+            if ($embeddedPlugins.Count -ne 176) { throw "Unexpected embedded libVLC plugin count in $root" }
+            foreach ($excluded in @(
+              'audio_filter/libdolby_surround_decoder_plugin.dll',
+              'audio_filter/libheadphone_channel_mixer_plugin.dll',
+              'codec/libx26410b_plugin.dll',
+              'lua/liblua_plugin.dll'
+            )) {
+              if (Test-Path (Join-Path (Join-Path $libvlc.Directory.FullName 'plugins') $excluded)) {
+                throw "Excluded libVLC plugin was packaged: $excluded"
+              }
+            }
+            $license = Join-Path $libvlc.Directory.FullName "SOURCE-AND-LICENSE.txt"
+            if (-not (Test-Path $license) -or
+                -not (Select-String -Quiet -Path $license -Pattern 'LGPL-2.1-or-later') -or
+                -not (Select-String -Quiet -Path $license -Pattern 'GPL-2.0-or-later')) {
+              throw "Missing embedded libVLC license/source notice in $root"
+            }
+            $notices = Get-ChildItem -Path $root -Recurse -Filter "ThirdPartyNotices.txt" | Select-Object -First 1
+            if (-not $notices -or -not (Select-String -Quiet -Path $notices.FullName -Pattern 'OpenSSL 3.6.0')) {
+              throw "Missing packaged native dependency notices in $root"
+            }
+          }
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
         with:
@@ -108,6 +306,7 @@ jobs:
             platforms/compose/anime-desktop/build/compose/binaries/main/msi/*.msi
             platforms/compose/shared-ui/build/compose/binaries/main/portable/*.zip
             platforms/compose/anime-desktop/build/compose/binaries/main/portable/*.zip
+            platforms/compose/third-party-sources/TVShell-Windows-Corresponding-Sources.zip
 
   build:
     name: Build TVShell
@@ -182,7 +381,7 @@ jobs:
           fi
           tar -xJf "$ARCHIVE" -C "$RUNNER_TEMP/vlckit"
 
-          VLCKIT_FRAMEWORK="$(find "$RUNNER_TEMP/vlckit" -name VLCKit.framework -type d | head -n 1)"
+          VLCKIT_FRAMEWORK="$(find "$RUNNER_TEMP/vlckit" -name VLCKit.framework -type d -print -quit)"
           if [ -z "$VLCKIT_FRAMEWORK" ] || [ ! -d "$VLCKIT_FRAMEWORK" ]; then
             echo "VLCKit.framework was not found after extracting $VLCKIT_URL" >&2
             find "$RUNNER_TEMP/vlckit" -maxdepth 4 -print
@@ -253,7 +452,7 @@ jobs:
 
   publish-release:
     name: Publish macOS, Windows, and Android TV
-    if: github.event_name != 'pull_request'
+    if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     needs:
       - compose-platforms
       - windows-compose
@@ -289,6 +488,7 @@ jobs:
           test -n "$ANIME_PORTABLE"
           cp "$TVSHELL_PORTABLE" release-assets/TVShell-Windows-Portable.zip
           cp "$ANIME_PORTABLE" release-assets/TVShell-Anime-Windows-Portable.zip
+          cp "$(find artifacts/windows -name 'TVShell-Windows-Corresponding-Sources.zip' -print -quit)" release-assets/TVShell-Windows-Corresponding-Sources.zip
           cp "$(find artifacts/android -path '*/android-app/build/outputs/apk/play/debug/*.apk' -print -quit)" release-assets/TVShell-Android-TV.apk
           cp "$(find artifacts/android -path '*/android-app/build/outputs/apk/launcher/debug/*.apk' -print -quit)" release-assets/TVShell-Android-TV-Launcher.apk
           cp "$(find artifacts/android -path '*/anime-android-app/build/outputs/apk/debug/*.apk' -print -quit)" release-assets/TVShell-Anime-Android-TV.apk

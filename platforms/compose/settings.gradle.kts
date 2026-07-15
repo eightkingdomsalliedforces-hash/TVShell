@@ -11,8 +11,12 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven {
+            setUrl("https://dl.frostwire.com/maven")
+            content { includeGroup("com.frostwire") }
+        }
     }
 }
 
 rootProject.name = "TVShellPlatforms"
-include(":shared-ui", ":android-app", ":anime-android-app", ":anime-desktop")
+include(":shared-ui", ":torrent-runtime", ":android-app", ":anime-android-app", ":anime-desktop")

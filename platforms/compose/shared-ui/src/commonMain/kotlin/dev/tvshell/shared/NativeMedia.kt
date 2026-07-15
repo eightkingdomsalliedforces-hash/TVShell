@@ -20,6 +20,7 @@ data class NativeMediaCard(
     val animeSource: AnimeSourceKind? = null,
     val alternateTitles: List<String> = emptyList(),
     val episodeCount: Int? = null,
+    val animeEpisodeNumber: Int? = null,
 )
 
 data class WatchHistoryState(

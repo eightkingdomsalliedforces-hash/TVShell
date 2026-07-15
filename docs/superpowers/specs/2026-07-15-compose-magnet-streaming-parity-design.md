@@ -14,7 +14,7 @@ Use FrostWire jlibtorrent 2.0.12.9 in the Compose products.
 
 - The Java wrapper and platform JNI libraries are embedded in the Windows portable/installable distributions and Android APKs.
 - Windows uses the x86-64 native artifact. Android packages arm, arm64, x86 and x86-64 artifacts. Local Compose macOS development selects the matching macOS artifact so tests and screenshots can run without an external daemon.
-- Android minimum SDK becomes 24, which is the supported floor of the current jlibtorrent Android package.
+- Android minimum SDK becomes 26, which matches the native API level embedded in the current jlibtorrent Android package.
 - Users do not install aria2, VLC or another torrent application. No magnet is sent through `ACTION_VIEW`, Desktop browsing, or an OS file association.
 - Swift macOS continues to use aria2 because replacing a working native implementation would create an unrelated migration and violate the product constraint.
 
@@ -52,10 +52,10 @@ Every start owns a monotonically increasing generation. UI callbacks and ready f
 
 - Windows: `%LOCALAPPDATA%/TVShell/Cache/Torrents` (with a user-home fallback).
 - Android: `context.cacheDir/TVShell/Torrents`.
-- Each task directory contains data, torrent/resume metadata and `.tvshell-download.json` with id, title, subtitle, magnet, selected path and last access.
+- Each task directory contains downloaded data, cached torrent metadata and `.tvshell-download.json` with id, title, subtitle, magnet, selected path and last access.
 - Cache cleanup runs at engine startup and after recording a task. It removes expired entries first, then least-recently-used entries until usage is at most 20 GiB. Active and current ids are protected.
 - Existing manifests are restored on startup. Partial data is verified by libtorrent before resuming.
-- Metadata timeout, zero peers, invalid magnet, disk errors and native-load failures produce explicit Traditional Chinese reasons and never leave an endless loading state. A timed-out task may remain marked as a background download and can be retried.
+- Metadata timeout, zero peers, invalid magnet, disk errors and native-load failures produce explicit Traditional Chinese reasons and never leave an endless loading state. A timed-out task stops cleanly and can be retried from the same cached metadata/data.
 
 ## Platform bridge
 

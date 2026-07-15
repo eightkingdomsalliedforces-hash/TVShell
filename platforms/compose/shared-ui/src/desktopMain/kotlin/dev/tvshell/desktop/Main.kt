@@ -30,13 +30,18 @@ import dev.tvshell.shared.anime.DanmakuComment
 import dev.tvshell.shared.anime.DesktopAnimeService
 import dev.tvshell.shared.RemoteCommandDispatcher
 import dev.tvshell.shared.desktopKeyToRemoteCommand
+import dev.tvshell.shared.ExternalMagnetRequest
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
 
-fun main() = application {
-    val remoteDispatcher = remember { RemoteCommandDispatcher() }
-    Window(
+fun main(args: Array<String>) {
+    System.setProperty("compose.interop.blending", "true")
+    val magnetRequest = args.firstOrNull { it.trim().startsWith("magnet:?", ignoreCase = true) }
+        ?.let { ExternalMagnetRequest(1L, it) }
+    application {
+        val remoteDispatcher = remember { RemoteCommandDispatcher() }
+        Window(
         onCloseRequest = ::exitApplication,
         title = "TVShell",
         undecorated = true,
@@ -48,9 +53,10 @@ fun main() = application {
                 true
             } ?: false
         },
-    ) {
-        val platformAdapter = remember { WindowsPlatformAdapter() }
-        TVShellApp(platformAdapter, dispatcher = remoteDispatcher)
+        ) {
+            val platformAdapter = remember { WindowsPlatformAdapter() }
+            TVShellApp(platformAdapter, dispatcher = remoteDispatcher, externalMagnetRequest = magnetRequest)
+        }
     }
 }
 
@@ -129,16 +135,25 @@ private class WindowsPlatformAdapter : PlatformAdapter {
     override fun fetchAnimeEpisodes(source: AnimeSourceKind, card: NativeMediaCard): Result<List<AnimeEpisode>> = animeServices.episodes(source, card)
     override fun resolveAnimeStreams(source: AnimeSourceKind, episode: AnimeEpisode): Result<List<AnimeStreamCandidate>> = animeServices.streams(source, episode)
     override fun loadAnimeStream(candidate: AnimeStreamCandidate): Result<Unit> = animeServices.load(candidate)
+    override fun startAnimeTorrent(request: dev.tvshell.shared.anime.TorrentStartRequest): Result<Long> = animeServices.startTorrent(request)
+    override fun animeTorrentSnapshot(): dev.tvshell.shared.anime.TorrentTransferSnapshot = animeServices.torrentSnapshot()
+    override fun consumeAnimeTorrentPlayableStream(generation: Long): dev.tvshell.shared.anime.TorrentPlayableStream? = animeServices.consumeTorrentPlayableStream(generation)
+    override fun cancelAnimeTorrentAutoplay(generation: Long) = animeServices.cancelTorrentAutoplay(generation)
+    override fun animeTorrentDownloads(): Result<List<dev.tvshell.shared.anime.TorrentCachedDownload>> = animeServices.torrentDownloads()
+    override fun deleteAnimeTorrentDownload(id: String): Result<Unit> = animeServices.deleteTorrentDownload(id)
     override fun playAnime(): Result<Unit> = animeServices.play()
     override fun pauseAnime(): Result<Unit> = animeServices.pause()
     override fun seekAnimeBy(seconds: Int): Result<Unit> = animeServices.seekBy(seconds)
     override fun adjustAnimeVolume(direction: Int): Result<Unit> = animeServices.volume(direction)
+    override fun muteAnime(): Result<Unit> = animeServices.mute()
     override fun stopAnime(): Result<Unit> = animeServices.stop()
+    override fun animePlaybackSnapshot(): dev.tvshell.shared.anime.AnimePlaybackSnapshot = animeServices.playbackSnapshot()
     override fun fetchAnimeDanmaku(
         source: AnimeSourceKind,
         card: NativeMediaCard,
         episode: AnimeEpisode,
     ): Result<List<DanmakuComment>> = animeServices.danmaku(source, card, episode)
+    override fun close() = animeServices.close()
 
     override fun playMedia(card: NativeMediaCard): Result<Unit> = runCatching {
         ProcessBuilder("cmd", "/c", "start", "", card.playbackURL).start()

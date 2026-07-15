@@ -7,8 +7,12 @@
         android:banner="@drawable/anime_banner"
         android:icon="@mipmap/ic_launcher"
         android:label="TVShell 動畫"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.TVShellAnime">
-        <activity android:name=".AnimeActivity" android:exported="true">
+        <activity
+            android:name=".AnimeActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
@@ -16,6 +20,12 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="magnet" />
             </intent-filter>
         </activity>
     </application>
