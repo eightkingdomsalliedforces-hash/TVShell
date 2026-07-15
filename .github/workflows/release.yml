@@ -30,7 +30,10 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
       - name: Test shared UI and build Android TV APKs
-        run: ./gradlew :torrent-runtime:test :shared-ui:desktopTest :android-app:assemblePlayDebug :android-app:assembleLauncherDebug :anime-android-app:assembleDebug
+        # DesktopWebRemoteIntegrationTest boots a real JavaFX WebView. Ubuntu
+        # runners are headless, so provide the display that the integration
+        # test needs while Gradle also builds the Android variants.
+        run: xvfb-run -a ./gradlew :torrent-runtime:test :shared-ui:desktopTest :android-app:assemblePlayDebug :android-app:assembleLauncherDebug :anime-android-app:assembleDebug
       - name: Verify embedded Android torrent engine ABIs
         run: |
           set -euo pipefail
